@@ -81,7 +81,7 @@ def widget_resource_uri(route_path: str) -> str:
         raise ValueError("widget route must not be empty")
     if route.startswith("ui://"):
         return route
-    name = route.removeprefix("widget/").removesuffix(".html").strip("/")
+    name = route.strip("/").removeprefix("widget/").removesuffix(".html").strip("/")
     if not name:
         raise ValueError("widget route must not be empty")
     return f"ui://widget/{name}.html"

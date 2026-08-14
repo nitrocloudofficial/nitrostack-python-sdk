@@ -15,7 +15,6 @@ from nitrostack.cli.main import (
     OFFICIAL_TEMPLATES,
     _add_port_flags,
     _find_npm,
-    _mcp_port_for_process,
     _normalize_port,
     _popen_npm,
     _prompt,
@@ -26,7 +25,6 @@ from nitrostack.cli.main import (
     _resolve_template,
     _run_npm,
     _upsert_env_var,
-    _widgets_port,
     generate_module,
     generate_tool,
     get_claude_config_paths,
@@ -161,18 +159,14 @@ def test_init_python_oauth_template():
 
 
 def test_port_reservation_helpers():
-    assert _widgets_port("3000") == DEFAULT_WIDGETS_PORT
-    assert _widgets_port("3001") == DEFAULT_WIDGETS_PORT
-    assert _widgets_port("3002") == "3002"
-
     old_port = os.environ.pop("PORT", None)
     old_mcp = os.environ.pop("MCP_SERVER_PORT", None)
     try:
-        assert _mcp_port_for_process("3001") == DEFAULT_MCP_PORT
-        os.environ["PORT"] = "3001"
-        assert _mcp_port_for_process("3001") == DEFAULT_MCP_PORT
+        # `_resolve_runtime_ports` is the single authority on port precedence.
+        assert _resolve_runtime_ports(None, None) == (DEFAULT_MCP_PORT, DEFAULT_WIDGETS_PORT)
         os.environ["PORT"] = "8080"
-        assert _mcp_port_for_process("3001") == "8080"
+        assert _resolve_runtime_ports(None, None)[0] == "8080"
+        assert _resolve_runtime_ports("9090", "9091") == ("9090", "9091")
         print("Success! 3000 is MCP, 3001 is reserved for widgets.")
     finally:
         if old_port is not None:
@@ -241,9 +235,11 @@ def test_init_port_and_widget_flags_override_defaults():
         env_text = open(os.path.join(tmp, "ports-demo", ".env"), encoding="utf-8").read()
         assert "PORT=4000" in env_text
         assert "WIDGETS_DEV_PORT=4001" in env_text
+        # The port is supplied once by the CLI at run time, not baked into the
+        # npm scripts, so the scripts stay port-free.
         pkg = json.load(open(os.path.join(tmp, "ports-demo", "src", "widgets", "package.json"), encoding="utf-8"))
-        assert "4001" in pkg["scripts"]["dev"]
-        assert "4001" in pkg["scripts"]["start"]
+        assert pkg["scripts"]["dev"] == "next dev"
+        assert pkg["scripts"]["start"] == "next start"
         print("Success! --port and --widget override generated project ports.")
     finally:
         sys.stdin = original_stdin
@@ -604,6 +600,9 @@ def test_run_start_passes_port_overrides():
         widgets = os.path.join("src", "widgets")
         os.makedirs(widgets)
         open(os.path.join(widgets, "package.json"), "w", encoding="utf-8").write("{}")
+        # `next start` needs a production build; run_start skips the widget
+        # server without one, so create it for this pass-through check.
+        os.makedirs(os.path.join(widgets, ".next"))
         with patch("nitrostack.cli.main.subprocess.run") as run, patch("nitrostack.cli.main._popen_npm") as npm:
             run_start(port="4000", widget="4001")
             npm.assert_called_once()
@@ -612,6 +611,8 @@ def test_run_start_passes_port_overrides():
             assert env["PORT"] == "4000"
             assert env["WIDGETS_DEV_PORT"] == "4001"
             assert env["NODE_ENV"] == "production"
+            # `start` must pick HTTP explicitly: dual tears HTTP down on STDIO EOF.
+            assert env["MCP_TRANSPORT_TYPE"] == "http"
         print("Success! run_start applies --port/--widget and production env.")
     finally:
         os.chdir(original_cwd)

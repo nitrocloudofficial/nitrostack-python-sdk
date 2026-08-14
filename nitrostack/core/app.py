@@ -33,7 +33,6 @@ from nitrostack.events.event_emitter import EventEmitter
 
 
 DEFAULT_HTTP_PORT = 3000
-DEFAULT_WIDGETS_PORT = 3001
 
 
 def resolve_http_port() -> int:

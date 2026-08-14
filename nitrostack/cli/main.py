@@ -926,28 +926,6 @@ def _read_project_env():
     return values
 
 
-def _mcp_port_for_process(widgets_port=None):
-    """MCP HTTP port is 3000; 3001 is reserved for widgets when they are running."""
-    project_env = _read_project_env()
-    mcp_port = (
-        os.environ.get("PORT")
-        or os.environ.get("MCP_SERVER_PORT")
-        or project_env.get("PORT")
-        or project_env.get("MCP_SERVER_PORT")
-        or DEFAULT_MCP_PORT
-    )
-    if widgets_port and str(mcp_port) in (str(widgets_port), DEFAULT_WIDGETS_PORT):
-        mcp_port = DEFAULT_MCP_PORT
-    return str(mcp_port)
-
-
-def _widgets_port(requested):
-    """Keep 3000 reserved for the MCP project server."""
-    if str(requested) == DEFAULT_MCP_PORT:
-        return DEFAULT_WIDGETS_PORT
-    return str(requested)
-
-
 def _resolve_runtime_ports(port=None, widget=None):
     """Resolve MCP and widget ports. Explicit --port/--widget flags override defaults."""
     project_env = _read_project_env()
@@ -1125,9 +1103,11 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
             with open(widgets_package_path, "r", encoding="utf-8") as f:
                 pkg = json.load(f)
             pkg["name"] = f"{name}-widgets"
+            # The port is passed once by the CLI (`npm run dev -- --port N`), so it
+            # is deliberately not baked into the script.
             scripts = pkg.setdefault("scripts", {})
-            scripts["dev"] = f"next dev -p {widgets_port} --port {widgets_port}"
-            scripts["start"] = f"next start -p {widgets_port}"
+            scripts["dev"] = "next dev"
+            scripts["start"] = "next start"
             with open(widgets_package_path, "w", encoding="utf-8") as f:
                 json.dump(pkg, f, indent=2)
         except Exception:
@@ -1309,24 +1289,35 @@ def run_start(port=None, widget=None):
     mcp_port, widgets_port = _resolve_runtime_ports(port, widget)
 
     print(f"Starting production server for {target}...")
-    print(f"MCP HTTP (dual): http://localhost:{mcp_port}/mcp")
+    print(f"MCP HTTP: http://localhost:{mcp_port}/mcp")
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.abspath(".")
     env["PORT"] = mcp_port
     env["WIDGETS_DEV_PORT"] = widgets_port
     env["NODE_ENV"] = "production"
+    # Select HTTP explicitly rather than letting NODE_ENV=production fall through
+    # to dual. Dual shuts HTTP down when STDIO reaches EOF, so `start` would exit
+    # immediately wherever stdin is not held open (Docker without -i, systemd, CI).
+    # `setdefault` keeps an explicit MCP_TRANSPORT_TYPE from the caller.
+    env.setdefault("MCP_TRANSPORT_TYPE", "http")
 
     widgets_dir = os.path.join(os.getcwd(), "src", "widgets")
     widgets_process = None
     if os.path.exists(widgets_dir) and os.path.exists(os.path.join(widgets_dir, "package.json")):
-        print(f"Starting widget server on port {widgets_port}...")
-        try:
-            widgets_process = _popen_npm(
-                ["run", "start", "--", "--port", str(widgets_port)],
-                cwd=widgets_dir,
-            )
-        except Exception as e:
-            print(f"Warning: Could not start widget server: {e}")
+        # `next start` needs a production build; Popen would succeed and the child
+        # would fail with a bare "Could not find a production build", so check here.
+        if not os.path.exists(os.path.join(widgets_dir, ".next")):
+            print("Widgets are not built yet — skipping the widget server.")
+            print("Run 'npm run build' inside 'src/widgets', then retry.\n")
+        else:
+            print(f"Starting widget server on port {widgets_port}...")
+            try:
+                widgets_process = _popen_npm(
+                    ["run", "start", "--", "--port", str(widgets_port)],
+                    cwd=widgets_dir,
+                )
+            except Exception as e:
+                print(f"Warning: Could not start widget server: {e}")
 
     try:
         subprocess.run([sys.executable, target], env=env)
