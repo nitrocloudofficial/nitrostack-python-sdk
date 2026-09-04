@@ -45,6 +45,7 @@ from nitrostack.protocol.tasks import (
     task_support_forbidden_message,
     task_support_required_message,
 )
+from nitrostack.tasks.authorization import extract_task_access_context
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
@@ -897,7 +898,14 @@ class McpApplication:
                 if task_metadata and task_metadata.ttl is not None
                 else DEFAULT_TASK_TTL_MS
             )
-            task = await self.task_manager.create_task(ttl_ms=ttl_ms)
+            task_access = extract_task_access_context(rc)
+            task = await self.task_manager.create_task(
+                ttl_ms=ttl_ms,
+                tool_name=cfg.name,
+                owner_id=task_access.user_id if task_access else None,
+                tenant_id=task_access.tenant_id if task_access else None,
+                session_id=task_access.session_id if task_access else None,
+            )
             task_id = task.id
 
             async def background_execution():
@@ -1130,16 +1138,23 @@ class McpApplication:
                     types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
                 )
             tasks_list = []
-            for t in await self.task_manager.list_tasks():
+            access = extract_task_access_context(request_ctx.get(None))
+            cursor = getattr(req.params, "cursor", None)
+            tasks_page, next_cursor = await self.task_manager.list_tasks_page(
+                access_context=access,
+                cursor=cursor,
+            )
+            for t in tasks_page:
                 if t.status == TaskStatus.EXPIRED:
                     continue
                 tasks_list.append(self._task_data_to_mcp_task(t))
-            return types.ListTasksResult(tasks=tasks_list, nextCursor=None)
+            return types.ListTasksResult(tasks=tasks_list, nextCursor=next_cursor)
 
         async def handle_get_task(req):
             task_id = req.params.taskId
+            access = extract_task_access_context(request_ctx.get(None))
             try:
-                t = await self.task_manager.get_task(task_id)
+                t = await self.task_manager.get_task(task_id, access_context=access)
             except TaskNotFoundError:
                 raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
@@ -1148,9 +1163,10 @@ class McpApplication:
 
         async def handle_cancel_task(req):
             task_id = req.params.taskId
+            access = extract_task_access_context(request_ctx.get(None))
             try:
-                await self.task_manager.cancel_task(task_id)
-                t = await self.task_manager.get_task(task_id)
+                await self.task_manager.cancel_task(task_id, access_context=access)
+                t = await self.task_manager.get_task(task_id, access_context=access)
             except TaskNotFoundError:
                 raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
@@ -1181,8 +1197,9 @@ class McpApplication:
                     types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
                 )
             task_id = req.params.taskId
+            access = extract_task_access_context(request_ctx.get(None))
             try:
-                t = await self.task_manager.wait_until_done(task_id)
+                t = await self.task_manager.wait_until_done(task_id, access_context=access)
             except TaskNotFoundError:
                 raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")

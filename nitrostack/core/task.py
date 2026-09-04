@@ -29,6 +29,8 @@ from nitrostack.protocol.tasks import DEFAULT_POLL_INTERVAL_MS, ttl_seconds_to_m
 from nitrostack.tasks.memory import InMemoryTaskStore
 from nitrostack.tasks.store import TaskStore
 from nitrostack.tasks.types import TaskEntry, TaskWireData, datetime_to_ms, utc_now
+from nitrostack.tasks.types import TaskAccessContext
+from nitrostack.tasks.authorization import check_task_access, list_task_wire_data_for_context
 
 
 class TaskStatus(Enum):
@@ -175,9 +177,14 @@ class TaskManager:
         self._runtime[resolved_id] = _RuntimeTaskHandle()
         return self._snapshot_from_entry(entry)
 
-    async def get_task(self, task_id: str) -> TaskData:
+    async def get_task(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskData:
         """Return a snapshot of the task or raise ``TaskNotFoundError``."""
-        entry = await self._require_entry(task_id)
+        entry = await self._require_entry(task_id, access_context=access_context)
         return self._snapshot_from_entry(entry)
 
     async def update_progress(self, task_id: str, progress: Any) -> None:
@@ -256,9 +263,14 @@ class TaskManager:
         await self._store.set(task_id, entry)
         self._signal_done(task_id)
 
-    async def cancel_task(self, task_id: str) -> None:
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> None:
         """Transition an active task to ``cancelled``."""
-        entry = await self._require_entry(task_id)
+        entry = await self._require_entry(task_id, access_context=access_context)
         status = _status_from_wire(entry.status)
         if is_terminal_status(status):
             if status == TaskStatus.EXPIRED:
@@ -273,10 +285,43 @@ class TaskManager:
         handle.cancelled = True
         self._signal_done(task_id)
 
-    async def list_tasks(self) -> List[TaskData]:
-        """Return snapshots for all known tasks."""
+    async def list_tasks(
+        self,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[TaskData]:
+        """Return task snapshots filtered by caller access context."""
+        snapshots, _ = await self.list_tasks_page(
+            access_context=access_context,
+            cursor=cursor,
+            limit=limit,
+        )
+        return snapshots
+
+    async def list_tasks_page(
+        self,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> tuple[List[TaskData], Optional[str]]:
+        """Return a filtered, paginated task page and optional next cursor."""
         entries = await self._store.list()
-        return [self._snapshot_from_entry(entry) for entry in entries]
+        page, next_cursor = list_task_wire_data_for_context(
+            entries,
+            access_context,
+            cursor=cursor,
+            limit=limit,
+        )
+        by_id = {entry.task_id: entry for entry in entries}
+        snapshots = [
+            self._snapshot_from_entry(by_id[wire.task_id])
+            for wire in page
+            if wire.task_id in by_id
+        ]
+        return snapshots, next_cursor
 
     async def has_task(self, task_id: str) -> bool:
         return await self._store.has(task_id)
@@ -297,19 +342,29 @@ class TaskManager:
             return True
         return False
 
-    async def wait_until_done(self, task_id: str) -> TaskData:
+    async def wait_until_done(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskData:
         """Block until the task reaches a terminal state."""
-        entry = await self._require_entry(task_id)
+        entry = await self._require_entry(task_id, access_context=access_context)
         status = _status_from_wire(entry.status)
         if not is_terminal_status(status):
             handle = self._runtime.setdefault(task_id, _RuntimeTaskHandle())
             await handle.done_event.wait()
-            entry = await self._require_entry(task_id)
+            entry = await self._require_entry(task_id, access_context=access_context)
         return self._snapshot_from_entry(entry)
 
-    async def get_result(self, task_id: str) -> Any:
+    async def get_result(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> Any:
         """Return the stored result for a completed task."""
-        data = await self.get_task(task_id)
+        data = await self.get_task(task_id, access_context=access_context)
         if data.status == TaskStatus.EXPIRED:
             raise TaskExpiredError(task_id)
         if data.status != TaskStatus.COMPLETED:
@@ -333,10 +388,16 @@ class TaskManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _require_entry(self, task_id: str) -> TaskEntry:
+    async def _require_entry(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskEntry:
         entry = await self._store.get(task_id)
         if entry is None:
             raise TaskNotFoundError(task_id)
+        check_task_access(entry, access_context)
         return entry
 
     def _require_active_for_transition(self, entry: TaskEntry, to_status: TaskStatus) -> None:
