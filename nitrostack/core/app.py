@@ -34,6 +34,7 @@ from nitrostack.core.pipeline import run_pipeline
 from nitrostack.core.additional_decorators import HealthCheckRegistry
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
+from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
@@ -53,11 +54,12 @@ class ServerConfig:
     name: str
     version: str = "1.0.0"
     transport_type: Optional[Literal["stdio", "http", "dual"]] = None
+    protocol_version: str = MODERN_PROTOCOL_VERSION
     # Streamable HTTP options (Phase 3). Each can also be set via env var at
     # `start()` time (`MCP_STATELESS`, `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`);
     # the env var wins if both are set, matching the existing `transport_type`/
     # `MCP_TRANSPORT_TYPE` precedence below.
-    stateless: bool = False
+    stateless: bool = True
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
     json_response: bool = False

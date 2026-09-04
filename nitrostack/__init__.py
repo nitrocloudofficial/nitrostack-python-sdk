@@ -121,6 +121,9 @@ from nitrostack.testing import (
 from nitrostack.testing import (
     NitroTestingModule,
 )
+from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.tasks import TaskAccessContext, TaskStore
+from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
 
 
 __all__ = [
@@ -207,4 +210,9 @@ __all__ = [
     "RESOURCE_MIME_TYPE_MCP_APP",
     "RESOURCE_MIME_TYPE_OPENAI",
     "NitroTestingModule",
+    "MODERN_PROTOCOL_VERSION",
+    "TaskAccessContext",
+    "TaskStore",
+    "StatelessInvariants",
+    "assert_stateless_headers",
 ]
