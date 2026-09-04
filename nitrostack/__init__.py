@@ -124,6 +124,7 @@ from nitrostack.testing import (
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.tasks import TaskAccessContext, TaskStore
 from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
+from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipeline
 
 
 __all__ = [
@@ -215,4 +216,6 @@ __all__ = [
     "TaskStore",
     "StatelessInvariants",
     "assert_stateless_headers",
+    "wrap_stateless_transport",
+    "StatelessIngressPipeline",
 ]

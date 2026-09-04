@@ -1185,14 +1185,34 @@ class McpApplication:
         """
         from nitrostack.transports.http import build_http_app
 
-        return build_http_app(
+        effective_stateless = (
+            self.server_config.stateless if stateless is None else stateless
+        )
+        http_app = build_http_app(
             self,
             max_sessions=max_sessions if max_sessions is not None else self.server_config.max_sessions,
             session_idle_timeout=session_idle_timeout,
             enable_cors=enable_cors,
-            stateless=self.server_config.stateless if stateless is None else stateless,
+            stateless=effective_stateless,
             json_response=self.server_config.json_response if json_response is None else json_response,
         )
+
+        if effective_stateless:
+            from nitrostack.transports.middleware import wrap_stateless_transport
+
+            has_widgets = any(
+                getattr(entry, "component", None) is not None
+                for entry in getattr(self, "_tools", {}).values()
+            )
+            http_app = wrap_stateless_transport(
+                http_app,
+                server_name=self.server_config.name,
+                server_version=self.server_config.version,
+                protocol_version=self.server_config.protocol_version,
+                advertise_app=has_widgets,
+            )
+
+        return http_app
 
     async def _run_stdio(self) -> None:
         async with stdio_server() as (read_stream, write_stream):
