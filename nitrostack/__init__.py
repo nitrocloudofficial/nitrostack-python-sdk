@@ -129,9 +129,6 @@ from nitrostack.widgets import (
 from nitrostack.testing import (
     NitroTestingModule,
 )
-from nitrostack.testing import (
-    NitroTestingModule,
-)
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.mrtr import InputRequest, InputRequiredResult, accepted_content, input_required
