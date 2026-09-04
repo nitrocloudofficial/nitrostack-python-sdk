@@ -16,6 +16,7 @@ def cache(ttl: int = 60):
     """
     def decorator(func: Callable):
         cache_store: Dict[Tuple[Any, ...], Tuple[Any, float]] = {}
+        setattr(func, "_mcp_cache_ttl", ttl)
 
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -47,6 +48,7 @@ def cache(ttl: int = 60):
             return result
 
         copy_mcp_attributes(func, wrapper)
+        setattr(wrapper, "_mcp_cache_ttl", ttl)
         return wrapper
     return decorator
 

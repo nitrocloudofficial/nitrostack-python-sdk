@@ -2,9 +2,12 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Protocol, List, Dict, Optional
+from typing import TYPE_CHECKING, Any, Protocol, List, Dict, Optional
 
 from nitrostack.core.errors import TaskCancelledError
+
+if TYPE_CHECKING:
+    from nitrostack.protocol.observability import TraceContext
 
 # Logger protocol used by ExecutionContext (Section 13)
 class Logger(Protocol):
@@ -183,3 +186,4 @@ class ExecutionContext:
     task: TaskContext | None = None
     input_responses: Dict[str, Any] = field(default_factory=dict)
     request_state: Optional[Dict[str, Any]] = None
+    trace: "TraceContext | None" = None

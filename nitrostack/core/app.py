@@ -39,6 +39,12 @@ from nitrostack.protocol.schema import normalize_input_schema, normalize_output_
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
+from nitrostack.protocol.cache_hints import (
+    build_list_endpoint_cache_hint_meta,
+    resolve_resource_cache_hint_meta,
+    resolve_tool_cache_hint_meta,
+)
+from nitrostack.protocol.observability import TraceContext, extract_trace_context
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.tasks import (
     DEFAULT_TASK_TTL_MS,
@@ -74,6 +80,7 @@ class ServerConfig:
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
     json_response: bool = False
+    extensions: Optional[Dict[str, str]] = None
 
 
 def mcp_app(module: Type, server: ServerConfig):
@@ -255,6 +262,40 @@ class _PromptEntry:
 _AUTH_META_KEYS = ("authorization", "x-api-key", "token", "_oauth", "headers")
 
 
+def _request_meta_from_ctx(rc: Any) -> Dict[str, Any]:
+    """Flatten MCP request ``_meta`` from the low-level request context."""
+    if rc is None:
+        return {}
+
+    raw_meta = getattr(rc, "meta", None)
+    data: Dict[str, Any] = {}
+    if raw_meta is None:
+        return data
+
+    extra_fields = getattr(raw_meta, "model_extra", None) or getattr(raw_meta, "__pydantic_extra__", None)
+    if isinstance(extra_fields, dict):
+        data.update(extra_fields)
+    if hasattr(raw_meta, "model_dump"):
+        try:
+            dumped = raw_meta.model_dump(exclude_none=True)
+            if isinstance(dumped, dict):
+                data.update(dumped)
+        except Exception:
+            pass
+    elif isinstance(raw_meta, dict):
+        data.update(raw_meta)
+    else:
+        for key in _AUTH_META_KEYS:
+            value = getattr(raw_meta, key, None)
+            if value is not None:
+                data[key] = value
+    return data
+
+
+def _trace_context_from_request_ctx(rc: Any) -> TraceContext | None:
+    return extract_trace_context(_request_meta_from_ctx(rc))
+
+
 def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
     """Copy host-sent auth slots from MCP request ``_meta`` into ExecutionContext.
 
@@ -268,26 +309,7 @@ def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
     if rc is None:
         return extra
 
-    raw_meta = getattr(rc, "meta", None)
-    data: Dict[str, Any] = {}
-    if raw_meta is not None:
-        extra_fields = getattr(raw_meta, "model_extra", None) or getattr(raw_meta, "__pydantic_extra__", None)
-        if isinstance(extra_fields, dict):
-            data.update(extra_fields)
-        if hasattr(raw_meta, "model_dump"):
-            try:
-                dumped = raw_meta.model_dump(exclude_none=True)
-                if isinstance(dumped, dict):
-                    data.update(dumped)
-            except Exception:
-                pass
-        elif isinstance(raw_meta, dict):
-            data.update(raw_meta)
-        else:
-            for key in _AUTH_META_KEYS:
-                value = getattr(raw_meta, key, None)
-                if value is not None:
-                    data[key] = value
+    data = _request_meta_from_ctx(rc)
 
     auth = data.get("authorization") or data.get("Authorization")
     if isinstance(auth, str) and auth.strip():
@@ -369,6 +391,7 @@ class McpApplication:
         self._assert_declared_dependencies(resolved_modules, container)
 
         # Instantiate all providers and controllers to populate container
+        module_instances: List[Any] = []
         for mod in resolved_modules:
             mod_config = getattr(mod, "_mcp_module_config", None)
             if mod_config:
@@ -377,10 +400,10 @@ class McpApplication:
                     container.resolve(provider)
                 # Register & Resolve all controllers
                 for controller in mod_config.controllers:
-                    container.resolve(controller)
+                    module_instances.append(container.resolve(controller))
 
-        # 3. Discover decorated methods on all instances in the container
-        for token, instance in list(container._instances.items()):
+        # 3. Discover decorated methods on resolved module instances only
+        for instance in module_instances:
             # Scan members of this instance
             for name, member in inspect.getmembers(instance):
                 # Discover Tools
@@ -551,18 +574,39 @@ class McpApplication:
     # Protocol handler wiring (owned low-level `mcp.server.lowlevel.Server`)
     # ------------------------------------------------------------------
 
+    def _advertise_tasks_extension(self) -> bool:
+        return any(
+            entry.config.task_support in ("optional", "required")
+            for entry in self._tools.values()
+        )
+
+    def _custom_extensions(self) -> Optional[Dict[str, str]]:
+        extensions = getattr(self.server_config, "extensions", None)
+        if not extensions:
+            return None
+        return dict(extensions)
+
+    def _list_endpoint_cache_meta(self) -> Dict[str, Any]:
+        return build_list_endpoint_cache_hint_meta()
+
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
         @server.list_tools()
-        async def _list_tools() -> List[types.Tool]:
-            return [self._build_tool_definition(entry) for entry in self._tools.values()]
+        async def _list_tools() -> types.ListToolsResult:
+            return types.ListToolsResult(
+                tools=[self._build_tool_definition(entry) for entry in self._tools.values()],
+                _meta=self._list_endpoint_cache_meta(),
+            )
 
         @server.call_tool(validate_input=False)
         async def _call_tool(name: str, arguments: Optional[Dict[str, Any]]):
             return await self._call_tool(name, arguments or {})
 
         @server.list_resources()
-        async def _list_resources() -> List[types.Resource]:
-            return [self._build_resource_definition(entry) for entry in self._resources.values()]
+        async def _list_resources() -> types.ListResourcesResult:
+            return types.ListResourcesResult(
+                resources=[self._build_resource_definition(entry) for entry in self._resources.values()],
+                _meta=self._list_endpoint_cache_meta(),
+            )
 
         @server.list_resource_templates()
         async def _list_resource_templates() -> List[types.ResourceTemplate]:
@@ -582,8 +626,11 @@ class McpApplication:
             return None
 
         @server.list_prompts()
-        async def _list_prompts() -> List[types.Prompt]:
-            return [self._build_prompt_definition(entry) for entry in self._prompts.values()]
+        async def _list_prompts() -> types.ListPromptsResult:
+            return types.ListPromptsResult(
+                prompts=[self._build_prompt_definition(entry) for entry in self._prompts.values()],
+                _meta=self._list_endpoint_cache_meta(),
+            )
 
         @server.get_prompt()
         async def _get_prompt(name: str, arguments: Optional[Dict[str, str]]) -> types.GetPromptResult:
@@ -651,6 +698,10 @@ class McpApplication:
                 "description": cfg.examples.description,
             }
 
+        cache_meta = resolve_tool_cache_hint_meta(cfg, entry.method)
+        if cache_meta:
+            meta.update(cache_meta)
+
         if is_openai_mode():
             meta["openai/type"] = "function"
             meta["openai/function"] = {
@@ -690,14 +741,21 @@ class McpApplication:
 
     def _build_resource_definition(self, entry: _ResourceEntry) -> types.Resource:
         cfg = entry.config
-        return types.Resource(
-            uri=cfg.uri,
-            name=cfg.name,
-            title=cfg.title,
-            description=cfg.description,
-            mimeType=cfg.mime_type,
-            size=cfg.size,
-        )
+        meta = dict(cfg.metadata or {})
+        cache_meta = resolve_resource_cache_hint_meta(cfg)
+        if cache_meta:
+            meta.update(cache_meta)
+        resource_kwargs: Dict[str, Any] = {
+            "uri": cfg.uri,
+            "name": cfg.name,
+            "title": cfg.title,
+            "description": cfg.description,
+            "mimeType": cfg.mime_type,
+            "size": cfg.size,
+        }
+        if meta:
+            resource_kwargs["_meta"] = meta
+        return types.Resource(**resource_kwargs)
 
     def _build_resource_template_definition(self, entry: _ResourceEntry) -> types.ResourceTemplate:
         cfg = entry.config
@@ -872,9 +930,10 @@ class McpApplication:
             if getattr(rc, "experimental", None) is not None:
                 task_metadata = rc.experimental.task_metadata
             if getattr(rc, "meta", None) is not None:
-                progress_token = rc.meta.progressToken
+                progress_token = getattr(rc.meta, "progressToken", None)
             session = getattr(rc, "session", None)
         auth_meta = _auth_metadata_from_request_ctx(rc)
+        trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
         if cfg.task_support == "forbidden" and task_metadata is not None:
@@ -915,6 +974,7 @@ class McpApplication:
                     metadata={"input": input_instance, **auth_meta},
                     input_responses=input_responses,
                     request_state=request_state,
+                    trace=trace,
                 )
                 task_ctx.task = TaskContext(
                     task_id,
@@ -963,6 +1023,7 @@ class McpApplication:
             metadata={"input": input_instance, **auth_meta},
             input_responses=input_responses,
             request_state=request_state,
+            trace=trace,
         )
         try:
             result = await run_pipeline(
@@ -1311,7 +1372,9 @@ class McpApplication:
                 server_name=self.server_config.name,
                 server_version=self.server_config.version,
                 protocol_version=self.server_config.protocol_version,
+                advertise_tasks=self._advertise_tasks_extension(),
                 advertise_app=has_widgets,
+                custom_extensions=self._custom_extensions(),
             )
 
         return http_app

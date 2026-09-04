@@ -180,6 +180,7 @@ def wrap_stateless_transport(
     protocol_version: str,
     advertise_tasks: bool = True,
     advertise_app: bool = False,
+    custom_extensions: Optional[dict[str, str]] = None,
 ) -> ASGIApp:
     """Wrap an ASGI app with Doc 01 stateless HTTP middleware."""
     pipeline = StatelessIngressPipeline(
@@ -189,6 +190,7 @@ def wrap_stateless_transport(
             protocol_version=protocol_version,
             advertise_tasks=advertise_tasks,
             advertise_app=advertise_app,
+            custom_extensions=custom_extensions,
         )
     )
     return StatelessTransportMiddleware(app, pipeline=pipeline)

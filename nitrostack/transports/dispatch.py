@@ -49,6 +49,7 @@ class IngressContext:
     protocol_version: str
     advertise_tasks: bool = True
     advertise_app: bool = False
+    custom_extensions: Optional[dict[str, str]] = None
 
 
 def is_task_wire_interception(method: str, params: dict[str, Any]) -> bool:
@@ -125,6 +126,7 @@ class StatelessIngressPipeline:
                 protocol_version=self._context.protocol_version,
                 advertise_tasks=self._context.advertise_tasks,
                 advertise_app=self._context.advertise_app,
+                custom_extensions=self._context.custom_extensions,
             )
             return 200, jsonrpc_success(request.id, result)
 

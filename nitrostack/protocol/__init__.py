@@ -25,6 +25,12 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
 )
 from nitrostack.protocol.layers import RuntimeLayer
+from nitrostack.protocol.cache_hints import (
+    build_list_endpoint_cache_hint_meta,
+    resolve_resource_cache_hint_meta,
+    resolve_tool_cache_hint_meta,
+)
+from nitrostack.protocol.observability import TraceContext, extract_trace_context, trace_context_from_request_meta
 from nitrostack.protocol.meta import RequestMeta, extract_request_meta, split_params_and_meta
 from nitrostack.protocol.mrtr import (
     InputRequest,
@@ -104,4 +110,10 @@ __all__ = [
     "ttl_seconds_to_ms",
     "task_support_forbidden_message",
     "task_support_required_message",
+    "TraceContext",
+    "extract_trace_context",
+    "trace_context_from_request_meta",
+    "build_list_endpoint_cache_hint_meta",
+    "resolve_tool_cache_hint_meta",
+    "resolve_resource_cache_hint_meta",
 ]
