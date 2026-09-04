@@ -334,6 +334,7 @@ def test_protected_resource_metadata_shape():
         "resource": "https://api.example.com",
         "authorization_servers": ["https://idp.example.com"],
         "scopes_supported": ["read", "write"],
+        "bearer_methods_supported": ["header"],
     }
     print("Success! RFC 9728 document matches expected shape.")
 

@@ -84,6 +84,17 @@ from nitrostack.auth.oauth import (
     OAuthService,
     generate_www_authenticate_header,
 )
+from nitrostack.auth.cimd import (
+    CimdFetchError,
+    CimdValidationError,
+    is_blocked_ip,
+    resolve_cimd,
+    validate_client_identifier_url,
+)
+from nitrostack.auth.oauth_security import (
+    AuthorizationIssuerMismatchError,
+    validate_authorization_iss,
+)
 from nitrostack.auth.pkce import (
     generate_code_challenge,
     generate_code_verifier,
@@ -172,6 +183,13 @@ __all__ = [
     "OAuthModule",
     "OAuthService",
     "generate_www_authenticate_header",
+    "validate_client_identifier_url",
+    "resolve_cimd",
+    "is_blocked_ip",
+    "CimdValidationError",
+    "CimdFetchError",
+    "validate_authorization_iss",
+    "AuthorizationIssuerMismatchError",
     "generate_code_challenge",
     "generate_code_verifier",
     "generate_pkce_params",

@@ -62,6 +62,7 @@ def build_protected_resource_metadata(service: "OAuthService") -> Dict[str, Any]
         "resource": service.resource_uri,
         "authorization_servers": service.authorization_servers,
         "scopes_supported": service.scopes_supported,
+        "bearer_methods_supported": ["header"],
     }
 
 
@@ -72,6 +73,8 @@ def is_client_registration_enabled(service: "OAuthService") -> bool:
     Requires BOTH an explicit opt-in (`enable_client_registration`, from config or
     `OAUTH_ENABLE_CLIENT_REGISTRATION=true`) AND a configured client id — never a
     literal default. Without a configured client id there is nothing to hand back.
+
+    Deprecated on MCP 2026-07-28 in favor of Client ID Metadata Documents (CIMD).
     """
     return bool(service.enable_client_registration and service.static_client_id)
 

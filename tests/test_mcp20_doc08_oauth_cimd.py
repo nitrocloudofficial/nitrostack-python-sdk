@@ -1,0 +1,170 @@
+"""Tests for MCP 2.0 OAuth 2.1, CIMD, and SSRF security (Doc 08)."""
+
+import asyncio
+import json
+import socket
+from unittest.mock import patch
+
+import pytest
+
+from nitrostack.auth.cimd import (
+    CimdFetchError,
+    CimdValidationError,
+    assert_safe_fetch_target,
+    is_blocked_ip,
+    resolve_cimd,
+    validate_client_identifier_url,
+)
+from nitrostack.auth.oauth_module import build_protected_resource_metadata
+from nitrostack.auth.oauth_security import (
+    AuthorizationIssuerMismatchError,
+    validate_authorization_iss,
+)
+from nitrostack.protocol.constants import MAX_CIMD_BYTES
+
+
+class _StubOAuthService:
+    resource_uri = "https://mcp.nitrostack.io/mcp"
+    authorization_servers = ["https://auth.nitrostack.io"]
+    scopes_supported = ["mcp:tools", "mcp:resources", "mcp:prompts"]
+
+
+class TestClientIdentifierUrlValidation:
+    def test_accepts_https_with_path(self):
+        url = "https://app.nitrostack.io/oauth/client-metadata.json"
+        assert validate_client_identifier_url(url) == url
+
+    def test_rejects_bare_domain(self):
+        with pytest.raises(CimdValidationError, match="non-root path"):
+            validate_client_identifier_url("https://example.com/")
+
+    def test_rejects_userinfo(self):
+        with pytest.raises(CimdValidationError, match="userinfo"):
+            validate_client_identifier_url("https://user:pass@example.com/oauth/client.json")
+
+    def test_rejects_fragment(self):
+        with pytest.raises(CimdValidationError, match="fragment"):
+            validate_client_identifier_url("https://example.com/oauth/client.json#x")
+
+    def test_rejects_path_traversal(self):
+        with pytest.raises(CimdValidationError, match="\\.\\."):
+            validate_client_identifier_url("https://example.com/oauth/../client.json")
+
+    def test_allows_loopback_http_when_enabled(self):
+        url = "http://127.0.0.1/oauth/client-metadata.json"
+        assert validate_client_identifier_url(url, allow_loopback=True) == url
+
+
+class TestBlockedIpRanges:
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "127.0.0.1",
+            "10.0.0.1",
+            "169.254.169.254",
+            "192.168.1.10",
+            "::1",
+            "fc00::1",
+        ],
+    )
+    def test_blocks_special_use_addresses(self, ip):
+        assert is_blocked_ip(ip) is True
+
+    def test_allows_public_ipv4(self):
+        assert is_blocked_ip("8.8.8.8") is False
+
+
+class TestCimdResolver:
+    def test_blocks_private_dns_resolution(self):
+        async def _run():
+            url = "https://metadata.example.com/oauth/client.json"
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0))],
+            ):
+                with pytest.raises(CimdFetchError, match="blocked IP"):
+                    await assert_safe_fetch_target(url)
+
+        asyncio.run(_run())
+
+    def test_rejects_redirects(self):
+        async def _run():
+            url = "https://app.nitrostack.io/oauth/client-metadata.json"
+
+            def fake_fetch(_url, *, timeout_sec):
+                raise CimdFetchError("HTTP redirects are not allowed for CIMD fetch")
+
+            with patch("nitrostack.auth.cimd.assert_safe_fetch_target", return_value=None):
+                with patch("nitrostack.auth.cimd._fetch_cimd_bytes", side_effect=fake_fetch):
+                    with pytest.raises(CimdFetchError, match="redirect"):
+                        await resolve_cimd(url)
+
+        asyncio.run(_run())
+
+    def test_rejects_oversized_payload(self):
+        async def _run():
+            url = "https://app.nitrostack.io/oauth/client-metadata.json"
+            oversized = b"x" * (MAX_CIMD_BYTES + 1)
+
+            with patch("nitrostack.auth.cimd.assert_safe_fetch_target", return_value=None):
+                with patch("nitrostack.auth.cimd._fetch_cimd_bytes", return_value=oversized):
+                    with pytest.raises(CimdFetchError, match="maximum size"):
+                        await resolve_cimd(url)
+
+        asyncio.run(_run())
+
+    def test_rejects_client_id_mismatch(self):
+        async def _run():
+            url = "https://app.nitrostack.io/oauth/client-metadata.json"
+            body = json.dumps(
+                {
+                    "client_id": "https://evil.example/oauth/client-metadata.json",
+                    "redirect_uris": ["https://app.nitrostack.io/cb"],
+                }
+            ).encode()
+
+            with patch("nitrostack.auth.cimd.assert_safe_fetch_target", return_value=None):
+                with patch("nitrostack.auth.cimd._fetch_cimd_bytes", return_value=body):
+                    with pytest.raises(CimdValidationError, match="does not match"):
+                        await resolve_cimd(url)
+
+        asyncio.run(_run())
+
+    def test_returns_document_when_valid(self):
+        async def _run():
+            url = "https://app.nitrostack.io/oauth/client-metadata.json"
+            body = json.dumps(
+                {
+                    "client_id": url,
+                    "client_name": "NitroStudio",
+                    "redirect_uris": ["https://app.nitrostack.io/auth/callback"],
+                }
+            ).encode()
+
+            with patch("nitrostack.auth.cimd.assert_safe_fetch_target", return_value=None):
+                with patch("nitrostack.auth.cimd._fetch_cimd_bytes", return_value=body):
+                    doc = await resolve_cimd(url)
+                    assert doc["client_name"] == "NitroStudio"
+
+        asyncio.run(_run())
+
+
+class TestProtectedResourceMetadata:
+    def test_includes_bearer_methods_supported(self):
+        metadata = build_protected_resource_metadata(_StubOAuthService())
+        assert metadata["resource"] == "https://mcp.nitrostack.io/mcp"
+        assert metadata["authorization_servers"] == ["https://auth.nitrostack.io"]
+        assert metadata["bearer_methods_supported"] == ["header"]
+
+
+class TestRfc9207IssValidation:
+    def test_accepts_matching_issuer(self):
+        validate_authorization_iss("https://auth.nitrostack.io/", "https://auth.nitrostack.io")
+
+    def test_rejects_missing_iss(self):
+        with pytest.raises(AuthorizationIssuerMismatchError, match="missing"):
+            validate_authorization_iss(None, "https://auth.nitrostack.io")
+
+    def test_rejects_mismatched_iss(self):
+        with pytest.raises(AuthorizationIssuerMismatchError, match="mismatch"):
+            validate_authorization_iss("https://evil.example", "https://auth.nitrostack.io")
