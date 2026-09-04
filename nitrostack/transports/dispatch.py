@@ -7,18 +7,22 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
 
+from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.discovery import build_discover_result
+from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import (
     HeaderBodyMismatchError,
     JsonRpcParseError,
     JsonRpcRequest,
+    JsonRpcWireError,
     build_ping_response,
     jsonrpc_error,
     jsonrpc_success,
     parse_jsonrpc_request,
     validate_header_body_method,
+    validate_header_body_name,
 )
-from nitrostack.transports.headers import HEADER_MCP_METHOD, get_header
+from nitrostack.transports.headers import HEADER_MCP_METHOD, HEADER_MCP_NAME, get_header
 
 TaskDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
 RegistryDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
@@ -85,13 +89,31 @@ class StatelessIngressPipeline:
         try:
             request = parse_jsonrpc_request(raw_body)
         except JsonRpcParseError as exc:
-            return 400, jsonrpc_error(None, exc.code, str(exc))
+            return 400, exc.to_response(None)
+        except JsonRpcWireError as exc:
+            return 400, exc.to_response(None)
 
         header_method = get_header(request_headers, HEADER_MCP_METHOD)
         try:
             validate_header_body_method(header_method, request.method)
         except HeaderBodyMismatchError as exc:
-            return 400, jsonrpc_error(request.id, exc.code, str(exc))
+            return 400, exc.to_response(request.id)
+
+        header_name = get_header(request_headers, HEADER_MCP_NAME)
+        body_name = request.params.get("name") or request.params.get("uri")
+        if isinstance(body_name, str):
+            try:
+                validate_header_body_name(header_name, body_name)
+            except HeaderBodyMismatchError as exc:
+                return 400, exc.to_response(request.id)
+
+        deprecated_msg = deprecated_method_message(request.method)
+        if deprecated_msg is not None:
+            return 200, jsonrpc_error(
+                request.id,
+                int(JsonRpcErrorCode.METHOD_NOT_FOUND),
+                deprecated_msg,
+            )
 
         if request.method == "ping":
             return 200, build_ping_response(request.id)

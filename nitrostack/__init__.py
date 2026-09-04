@@ -122,6 +122,7 @@ from nitrostack.testing import (
     NitroTestingModule,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.tasks import TaskAccessContext, TaskStore
 from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
 from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipeline
@@ -212,6 +213,7 @@ __all__ = [
     "RESOURCE_MIME_TYPE_OPENAI",
     "NitroTestingModule",
     "MODERN_PROTOCOL_VERSION",
+    "JsonRpcErrorCode",
     "TaskAccessContext",
     "TaskStore",
     "StatelessInvariants",
