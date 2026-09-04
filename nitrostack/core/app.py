@@ -34,6 +34,8 @@ from nitrostack.core.pipeline import run_pipeline
 from nitrostack.core.additional_decorators import HealthCheckRegistry
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
+from nitrostack.protocol.schema import normalize_input_schema, normalize_output_schema
+from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
@@ -161,14 +163,14 @@ def inspector_friendly_schema(node: Any) -> Any:
 
 
 def tool_json_schema(schema_spec: Any) -> Optional[Dict[str, Any]]:
-    """Convert a Pydantic model class or JSON-schema dict to Inspector-friendly schema."""
+    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema."""
     if schema_spec is None:
         return None
     if isinstance(schema_spec, dict):
-        return inspector_friendly_schema(schema_spec)
+        return normalize_output_schema(inspector_friendly_schema(schema_spec))
     model = get_pydantic_model(schema_spec)
     if model is not None:
-        return inspector_friendly_schema(model.model_json_schema())
+        return normalize_output_schema(inspector_friendly_schema(model.model_json_schema()))
     return None
 
 
@@ -511,16 +513,11 @@ class McpApplication:
         )
 
     def _register_resource(self, instance: Any, method: Callable, resource_config: ResourceConfig) -> None:
-        param_names = re.findall(r"\{([^}]+)\}", resource_config.uri)
+        param_names = extract_template_param_names(resource_config.uri)
         entry = _ResourceEntry(config=resource_config, instance=instance, method=method, param_names=param_names)
 
         if param_names:
-            # Build a matching regex from the URI template, e.g. "a://b/{id}" ->
-            # "^a://b/(?P<id>[^/]+)$", preserving the existing template-matching semantics.
-            regex_str = re.escape(resource_config.uri)
-            for pname in param_names:
-                regex_str = regex_str.replace(re.escape("{" + pname + "}"), f"(?P<{pname}>[^/]+)")
-            entry.pattern = re.compile(f"^{regex_str}$")
+            entry.pattern = uri_template_to_pattern(resource_config.uri)
             self._resource_templates.append(entry)
         else:
             self._resources[resource_config.uri] = entry
@@ -614,7 +611,7 @@ class McpApplication:
             schema = {}
         schema.setdefault("type", "object")
         schema.setdefault("properties", {})
-        return schema
+        return normalize_input_schema(schema)
 
     def _build_tool_definition(self, entry: _ToolEntry) -> types.Tool:
         cfg = entry.config
