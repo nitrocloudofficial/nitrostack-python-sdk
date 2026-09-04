@@ -123,6 +123,7 @@ from nitrostack.testing import (
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.mrtr import InputRequest, InputRequiredResult, accepted_content, input_required
 from nitrostack.tasks import TaskAccessContext, TaskStore
 from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
 from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipeline
@@ -214,6 +215,10 @@ __all__ = [
     "NitroTestingModule",
     "MODERN_PROTOCOL_VERSION",
     "JsonRpcErrorCode",
+    "InputRequest",
+    "InputRequiredResult",
+    "accepted_content",
+    "input_required",
     "TaskAccessContext",
     "TaskStore",
     "StatelessInvariants",

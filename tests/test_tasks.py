@@ -84,7 +84,7 @@ class TestCreateTask:
         assert task.status == TaskStatus.WORKING
         assert task.id
         assert task.created_at is not None
-        assert task.progress == "Task started"
+        assert task.progress == "Task created"
 
     def test_default_ttl_is_none_never_expires(self):
         task = _manager().create_task()
@@ -434,7 +434,7 @@ async def _mcp_task_flow():
         params=types.CallToolRequestParams(
             name="delayed_tool",
             arguments={"input": {"duration": 0.2}},
-            task=types.TaskMetadata(ttl=60),
+            task=types.TaskMetadata(ttl=60_000),
         ),
     )
 
@@ -457,14 +457,6 @@ async def _mcp_task_flow():
     assert isinstance(response.root, types.CreateTaskResult)
     task_id = response.root.task.taskId
 
-    list_req = types.ListTasksRequest(
-        method="tasks/list",
-        params=types.PaginatedRequestParams(),
-    )
-    list_handler = harness.app.mcp_server.request_handlers[types.ListTasksRequest]
-    list_res = await list_handler(list_req)
-    assert any(t.taskId == task_id for t in list_res.tasks)
-
     get_req = types.GetTaskRequest(
         method="tasks/get",
         params=types.GetTaskRequestParams(taskId=task_id),
@@ -473,17 +465,15 @@ async def _mcp_task_flow():
     get_res = await get_handler(get_req)
     assert get_res.status == "working"
 
-    result_req = types.GetTaskPayloadRequest(
-        method="tasks/result",
-        params=types.GetTaskPayloadRequestParams(taskId=task_id),
-    )
-    result_handler = harness.app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-    result_res = await result_handler(result_req)
-    assert result_res.isError is False
-    assert "Success payload!" in result_res.content[0].text
+    deadline = time.time() + 5
+    get_res2 = get_res
+    while get_res2.status not in ("completed", "failed", "cancelled") and time.time() < deadline:
+        await asyncio.sleep(0.05)
+        get_res2 = await get_handler(get_req)
 
-    get_res2 = await get_handler(get_req)
     assert get_res2.status == "completed"
+    assert get_res2.result is not None
+    assert "Success payload!" in get_res2.result["content"][0]["text"]
 
     # Cancellation path
     req_cancel = types.CallToolRequest(
@@ -491,7 +481,7 @@ async def _mcp_task_flow():
         params=types.CallToolRequestParams(
             name="delayed_tool",
             arguments={"input": {"duration": 1.0}},
-            task=types.TaskMetadata(ttl=60),
+            task=types.TaskMetadata(ttl=60_000),
         ),
     )
     token = request_ctx.set(
@@ -518,13 +508,13 @@ async def _mcp_task_flow():
     cancel_res = await cancel_handler(cancel_req)
     assert cancel_res.status == "cancelled"
 
-    result_req_c = types.GetTaskPayloadRequest(
-        method="tasks/result",
-        params=types.GetTaskPayloadRequestParams(taskId=task_id_cancel),
+    get_res_cancel = await get_handler(
+        types.GetTaskRequest(
+            method="tasks/get",
+            params=types.GetTaskRequestParams(taskId=task_id_cancel),
+        )
     )
-    payload_c = await result_handler(result_req_c)
-    assert payload_c.isError is True
-    assert "cancelled" in payload_c.content[0].text.lower()
+    assert get_res_cancel.status == "cancelled"
 
 
 def test_mcp_task_integration():

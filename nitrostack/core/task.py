@@ -32,16 +32,21 @@ from nitrostack.core.errors import (
     TaskExpiredError,
     TaskNotFoundError,
 )
+from nitrostack.protocol.tasks import DEFAULT_POLL_INTERVAL_MS, ttl_seconds_to_ms
 
 
 class TaskStatus(Enum):
-    """Task lifecycle statuses required by Phase 1."""
+    """Task lifecycle statuses required by Phase 1 / Doc 05."""
 
     WORKING = "working"
+    INPUT_REQUIRED = "input_required"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
+
+
+ACTIVE_STATUSES = frozenset({TaskStatus.WORKING, TaskStatus.INPUT_REQUIRED})
 
 
 TERMINAL_STATUSES = frozenset(
@@ -83,7 +88,8 @@ class TaskData:
     expires_at: Optional[datetime.datetime] = None
     last_updated_at: Optional[datetime.datetime] = None
     ttl_seconds: Optional[int] = None
-    poll_interval: int = 5
+    ttl_ms: Optional[int] = None
+    poll_interval: int = 2000
 
     def __post_init__(self) -> None:
         if self.last_updated_at is None:
@@ -99,7 +105,7 @@ class TaskData:
 
     @property
     def ttl(self) -> Optional[int]:
-        return self.ttl_seconds
+        return self.ttl_ms if self.ttl_ms is not None else ttl_seconds_to_ms(self.ttl_seconds)
 
 
 @dataclass
@@ -130,31 +136,42 @@ class TaskManager:
         self,
         ttl_seconds: Optional[int] = None,
         *,
+        ttl_ms: Optional[int] = None,
         task_id: Optional[str] = None,
+        poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
     ) -> TaskData:
         """
         Create a new task in ``WORKING`` status.
 
-        ``ttl_seconds=None`` means the task never expires. ``task_id`` is optional
-        and intended for compatibility callers that supply their own ID.
+        ``ttl_seconds`` / ``ttl_ms`` control expiration (wire TTL is milliseconds).
+        ``task_id`` is optional for callers that supply their own ID.
         """
         now = datetime.datetime.now(datetime.timezone.utc)
         resolved_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
         if resolved_id in self._tasks:
             raise ValueError(f"Task {resolved_id} already exists")
+
+        resolved_ttl_seconds = ttl_seconds
+        resolved_ttl_ms = ttl_ms
+        if resolved_ttl_ms is not None and resolved_ttl_seconds is None:
+            resolved_ttl_seconds = max(1, int(resolved_ttl_ms / 1000))
+        elif resolved_ttl_seconds is not None and resolved_ttl_ms is None:
+            resolved_ttl_ms = ttl_seconds_to_ms(resolved_ttl_seconds)
+
         expires_at = None
-        if ttl_seconds is not None:
-            expires_at = now + datetime.timedelta(seconds=ttl_seconds)
+        if resolved_ttl_seconds is not None:
+            expires_at = now + datetime.timedelta(seconds=resolved_ttl_seconds)
 
         data = TaskData(
             id=resolved_id,
             status=TaskStatus.WORKING,
-            progress="Task started",
+            progress="Task created",
             created_at=now,
             last_updated_at=now,
             expires_at=expires_at,
-            ttl_seconds=ttl_seconds,
-            poll_interval=5,
+            ttl_seconds=resolved_ttl_seconds,
+            ttl_ms=resolved_ttl_ms,
+            poll_interval=poll_interval_ms,
         )
         self._tasks[resolved_id] = _TaskEntry(data=data)
         return self._snapshot(data)
@@ -186,21 +203,46 @@ class TaskManager:
         entry.data.progress = progress
         entry.data.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
 
-    def complete_task(self, task_id: str, result: Any) -> None:
-        """Transition ``WORKING`` → ``COMPLETED`` and store ``result``."""
+    def require_input(self, task_id: str, pause_payload: Any, *, progress: str = "Additional input required") -> None:
+        """Transition ``WORKING`` → ``INPUT_REQUIRED`` and store the pause payload."""
         entry = self._get_entry(task_id)
         self._maybe_expire(entry)
-        self._require_working_for_transition(entry, TaskStatus.COMPLETED)
+        if is_terminal_status(entry.data.status):
+            if entry.data.status == TaskStatus.EXPIRED:
+                raise TaskExpiredError(task_id)
+            raise TaskAlreadyTerminalError(task_id, entry.data.status)
+        if entry.data.status not in ACTIVE_STATUSES:
+            raise InvalidTaskTransitionError(entry.data.status, TaskStatus.INPUT_REQUIRED)
+        entry.data.result = pause_payload
+        entry.data.status = TaskStatus.INPUT_REQUIRED
+        entry.data.progress = progress
+        entry.data.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+    def resume_task(self, task_id: str, *, progress: str = "Resuming task") -> None:
+        """Transition ``INPUT_REQUIRED`` → ``WORKING`` when client supplies input."""
+        entry = self._get_entry(task_id)
+        self._maybe_expire(entry)
+        if entry.data.status != TaskStatus.INPUT_REQUIRED:
+            raise InvalidTaskTransitionError(entry.data.status, TaskStatus.WORKING)
+        entry.data.status = TaskStatus.WORKING
+        entry.data.progress = progress
+        entry.data.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+    def complete_task(self, task_id: str, result: Any) -> None:
+        """Transition an active task → ``COMPLETED`` and store ``result``."""
+        entry = self._get_entry(task_id)
+        self._maybe_expire(entry)
+        self._require_active_for_transition(entry, TaskStatus.COMPLETED)
         entry.data.result = result
         entry.data.error = None
         entry.data.progress = "Task completed successfully"
         self._set_status(entry, TaskStatus.COMPLETED)
 
     def fail_task(self, task_id: str, error: Any) -> None:
-        """Transition ``WORKING`` → ``FAILED`` and store ``error``."""
+        """Transition an active task → ``FAILED`` and store ``error``."""
         entry = self._get_entry(task_id)
         self._maybe_expire(entry)
-        self._require_working_for_transition(entry, TaskStatus.FAILED)
+        self._require_active_for_transition(entry, TaskStatus.FAILED)
         entry.data.error = error
         entry.data.progress = f"Task failed: {error}"
         self._set_status(entry, TaskStatus.FAILED)
@@ -286,7 +328,7 @@ class TaskManager:
             entry.data.last_updated_at = now
             entry.done_event.set()
 
-    def _require_working_for_transition(
+    def _require_active_for_transition(
         self, entry: _TaskEntry, to_status: TaskStatus
     ) -> None:
         current = entry.data.status
@@ -294,7 +336,7 @@ class TaskManager:
             raise TaskExpiredError(entry.data.id)
         if is_terminal_status(current):
             raise TaskAlreadyTerminalError(entry.data.id, current)
-        if current != TaskStatus.WORKING:
+        if current not in ACTIVE_STATUSES:
             raise InvalidTaskTransitionError(current, to_status)
 
     def _set_status(self, entry: _TaskEntry, status: TaskStatus) -> None:

@@ -357,7 +357,7 @@ async def _test_progress_notifications_pushed():
         params=types.CallToolRequestParams(
             name="progress_task",
             arguments={"input": {"value": ""}},
-            task=types.TaskMetadata(ttl=60),
+            task=types.TaskMetadata(ttl=60_000),
             _meta={"progressToken": "tok-abc"},
         ),
     )
@@ -380,11 +380,15 @@ async def _test_progress_notifications_pushed():
     task_id = response.root.task.taskId
 
     # Wait for the background task to finish (it does 3 quick progress updates).
-    result_handler = app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-    result_req = types.GetTaskPayloadRequest(
-        method="tasks/result", params=types.GetTaskPayloadRequestParams(taskId=task_id)
+    get_handler = app.mcp_server.request_handlers[types.GetTaskRequest]
+    get_req = types.GetTaskRequest(
+        method="tasks/get", params=types.GetTaskRequestParams(taskId=task_id)
     )
-    await result_handler(result_req)
+    for _ in range(40):
+        get_res = await get_handler(get_req)
+        if get_res.status in ("completed", "failed", "cancelled"):
+            break
+        await asyncio.sleep(0.05)
 
     # Give the fire-and-forget notification tasks a moment to actually run.
     for _ in range(20):

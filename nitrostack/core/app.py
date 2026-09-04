@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Pattern, Set, Tuple, Type
 
 import mcp.types as types
+from mcp.shared.exceptions import McpError
 from mcp.server.lowlevel.server import request_ctx
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
@@ -37,6 +38,13 @@ from nitrostack.events.event_emitter import EventEmitter
 from nitrostack.protocol.schema import normalize_input_schema, normalize_output_schema
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
+from nitrostack.protocol.deprecated import deprecated_method_message
+from nitrostack.protocol.tasks import (
+    DEFAULT_TASK_TTL_MS,
+    task_support_forbidden_message,
+    task_support_required_message,
+)
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
@@ -727,6 +735,25 @@ class McpApplication:
         component: Optional[Component] = None,
         context: Optional[ExecutionContext] = None,
     ) -> types.CallToolResult:
+        if isinstance(result, InputRequiredResult):
+            wire = result.to_wire_dict()
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=wire.get("message", "Input required"))],
+                structuredContent=wire,
+                isError=False,
+            )
+        mrtr_result = None
+        if isinstance(result, dict) and result.get("resultType") == "input_required":
+            from nitrostack.protocol.mrtr import coerce_input_required_result
+
+            mrtr_result = coerce_input_required_result(result)
+        if mrtr_result is not None:
+            wire = mrtr_result.to_wire_dict()
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=wire.get("message", "Input required"))],
+                structuredContent=wire,
+                isError=False,
+            )
         if isinstance(result, types.CallToolResult):
             if component is not None:
                 result = result.model_copy(
@@ -825,11 +852,12 @@ class McpApplication:
             )
 
         cfg = entry.config
+        tool_arguments, input_responses, request_state = split_mrtr_from_arguments(arguments or {})
         # Pydantic validates after accepting either Inspector top-level fields
         # or the older `{input: {...}}` wrap. Low-level jsonschema is off
         # (`validate_input=False`) so the wrap is not rejected against the
         # published top-level inputSchema.
-        input_instance = parse_tool_input(entry.input_model, arguments)
+        input_instance = parse_tool_input(entry.input_model, tool_arguments)
         guards, middleware, interceptors, pipes, filters = self._pipeline_stages(entry.method)
 
         # Detect task-augmented invocation via the request context's public
@@ -847,13 +875,29 @@ class McpApplication:
             session = getattr(rc, "session", None)
         auth_meta = _auth_metadata_from_request_ctx(rc)
 
-        is_task = (task_metadata is not None) or (cfg.task_support == "required")
-        if cfg.task_support == "forbidden":
-            is_task = False
+        is_task = task_metadata is not None
+        if cfg.task_support == "forbidden" and task_metadata is not None:
+            raise McpError(
+                types.ErrorData(
+                    code=types.METHOD_NOT_FOUND,
+                    message=task_support_forbidden_message(cfg.name),
+                )
+            )
+        if cfg.task_support == "required" and task_metadata is None:
+            raise McpError(
+                types.ErrorData(
+                    code=types.INVALID_REQUEST,
+                    message=task_support_required_message(cfg.name),
+                )
+            )
 
         if is_task:
-            ttl = task_metadata.ttl if task_metadata and task_metadata.ttl is not None else 300
-            task = self.task_manager.create_task(ttl_seconds=ttl)
+            ttl_ms = (
+                task_metadata.ttl
+                if task_metadata and task_metadata.ttl is not None
+                else DEFAULT_TASK_TTL_MS
+            )
+            task = self.task_manager.create_task(ttl_ms=ttl_ms)
             task_id = task.id
 
             async def background_execution():
@@ -861,6 +905,8 @@ class McpApplication:
                     request_id=str(uuid.uuid4()),
                     tool_name=cfg.name,
                     metadata={"input": input_instance, **auth_meta},
+                    input_responses=input_responses,
+                    request_state=request_state,
                 )
                 task_ctx.task = TaskContext(
                     task_id,
@@ -883,9 +929,16 @@ class McpApplication:
                         param_name="input",
                         param_type=entry.input_model,
                     )
-                    self.task_manager.complete_task(
-                        task_id, self._to_call_tool_result(result, entry.component, task_ctx)
-                    )
+                    if isinstance(result, InputRequiredResult):
+                        self.task_manager.require_input(
+                            task_id,
+                            result.to_wire_dict(),
+                            progress=result.message or "Additional input required",
+                        )
+                    else:
+                        self.task_manager.complete_task(
+                            task_id, self._to_call_tool_result(result, entry.component, task_ctx)
+                        )
                 except Exception as e:
                     try:
                         self.task_manager.fail_task(task_id, e)
@@ -896,7 +949,13 @@ class McpApplication:
             asyncio.create_task(background_execution())
             return types.CreateTaskResult(task=self._task_data_to_mcp_task(task))
 
-        ctx = ExecutionContext(request_id=str(uuid.uuid4()), tool_name=cfg.name, metadata={"input": input_instance, **auth_meta})
+        ctx = ExecutionContext(
+            request_id=str(uuid.uuid4()),
+            tool_name=cfg.name,
+            metadata={"input": input_instance, **auth_meta},
+            input_responses=input_responses,
+            request_state=request_state,
+        )
         try:
             result = await run_pipeline(
                 handler=entry.method,
@@ -1019,7 +1078,7 @@ class McpApplication:
     def _task_data_to_mcp_task(self, task) -> types.Task:
         """Map TaskData to MCP Task. EXPIRED is not an MCP wire status — surface as error."""
         if task.status == TaskStatus.EXPIRED:
-            raise types.McpError(
+            raise McpError(
                 types.ErrorData(
                     code=types.INVALID_PARAMS,
                     message=f"Task {task.id} has expired",
@@ -1031,12 +1090,45 @@ class McpApplication:
             statusMessage=task.progress or "",
             createdAt=task.created_at,
             lastUpdatedAt=task.last_updated_at or task.created_at,
-            ttl=task.ttl_seconds if task.ttl_seconds is not None else 0,
+            ttl=task.ttl if task.ttl is not None else 0,
             pollInterval=task.poll_interval,
         )
 
+    def _serialize_task_result_payload(self, result: Any) -> Any:
+        if isinstance(result, types.CallToolResult):
+            return result.model_dump(by_alias=True, exclude_none=True)
+        if isinstance(result, BaseModel):
+            return result.model_dump()
+        return result
+
+    def _build_get_task_result(self, task) -> types.GetTaskResult:
+        mcp_task = self._task_data_to_mcp_task(task)
+        payload: Dict[str, Any] = {
+            "taskId": mcp_task.taskId,
+            "status": mcp_task.status,
+            "statusMessage": mcp_task.statusMessage,
+            "createdAt": mcp_task.createdAt,
+            "lastUpdatedAt": mcp_task.lastUpdatedAt,
+            "ttl": mcp_task.ttl,
+            "pollInterval": mcp_task.pollInterval,
+        }
+        if task.status == TaskStatus.COMPLETED and task.result is not None:
+            payload["result"] = self._serialize_task_result_payload(task.result)
+        elif task.status == TaskStatus.FAILED and task.error is not None:
+            payload["error"] = {"message": str(task.error)}
+        elif task.status == TaskStatus.INPUT_REQUIRED and task.result is not None:
+            payload["result"] = task.result
+        return types.GetTaskResult(**payload)
+
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
+        modern_protocol = self.server_config.protocol_version == MODERN_PROTOCOL_VERSION
+
         async def handle_list_tasks(req):
+            if modern_protocol:
+                message = deprecated_method_message("tasks/list")
+                raise McpError(
+                    types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
+                )
             tasks_list = []
             for t in self.task_manager.list_tasks():
                 if t.status == TaskStatus.EXPIRED:
@@ -1049,19 +1141,10 @@ class McpApplication:
             try:
                 t = self.task_manager.get_task(task_id)
             except TaskNotFoundError:
-                raise types.McpError(
+                raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
                 )
-            mcp_task = self._task_data_to_mcp_task(t)
-            return types.GetTaskResult(
-                taskId=mcp_task.taskId,
-                status=mcp_task.status,
-                statusMessage=mcp_task.statusMessage,
-                createdAt=mcp_task.createdAt,
-                lastUpdatedAt=mcp_task.lastUpdatedAt,
-                ttl=mcp_task.ttl,
-                pollInterval=mcp_task.pollInterval,
-            )
+            return self._build_get_task_result(t)
 
         async def handle_cancel_task(req):
             task_id = req.params.taskId
@@ -1069,15 +1152,15 @@ class McpApplication:
                 self.task_manager.cancel_task(task_id)
                 t = self.task_manager.get_task(task_id)
             except TaskNotFoundError:
-                raise types.McpError(
+                raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
                 )
             except TaskExpiredError:
-                raise types.McpError(
+                raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} has expired")
                 )
             except TaskAlreadyTerminalError as e:
-                raise types.McpError(
+                raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=str(e))
                 )
             mcp_task = self._task_data_to_mcp_task(t)
@@ -1092,11 +1175,16 @@ class McpApplication:
             )
 
         async def handle_get_task_payload(req):
+            if modern_protocol:
+                message = deprecated_method_message("tasks/result")
+                raise McpError(
+                    types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
+                )
             task_id = req.params.taskId
             try:
                 t = await self.task_manager.wait_until_done(task_id)
             except TaskNotFoundError:
-                raise types.McpError(
+                raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
                 )
             if t.status == TaskStatus.COMPLETED:

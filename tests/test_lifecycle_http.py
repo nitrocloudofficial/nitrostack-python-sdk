@@ -143,26 +143,17 @@ def test_http_guard_pipe_task_progress_and_completion():
                 break
             asyncio.run(asyncio.sleep(0.05))
 
-        result = client.post(
-            "/mcp",
-            headers=JSON_HEADERS,
-            json={
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tasks/result",
-                "params": {"taskId": task_id},
-            },
-        )
-    assert result.status_code == 200, result.text
-    payload = result.json()["result"]
-    assert payload.get("isError") is False
-    hello = (payload.get("structuredContent") or {}).get("hello")
-    if hello is None:
-        hello = payload["content"][0]["text"]
-        assert "ADA" in hello
-    else:
-        assert hello == "ADA"
-    assert status == "completed"
+        assert status == "completed"
+        payload = polled.json()["result"]
+        assert payload.get("result") is not None
+        result_payload = payload["result"]
+        assert result_payload.get("isError") is False
+        hello = (result_payload.get("structuredContent") or {}).get("hello")
+        if hello is None:
+            hello = result_payload["content"][0]["text"]
+            assert "ADA" in hello
+        else:
+            assert hello == "ADA"
 
 
 

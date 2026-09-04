@@ -26,12 +26,30 @@ from nitrostack.protocol.jsonrpc import (
 )
 from nitrostack.protocol.layers import RuntimeLayer
 from nitrostack.protocol.meta import RequestMeta, extract_request_meta, split_params_and_meta
+from nitrostack.protocol.mrtr import (
+    InputRequest,
+    InputRequiredResult,
+    accepted_content,
+    build_input_required_jsonrpc_result,
+    input_required,
+    split_mrtr_tool_params,
+)
 from nitrostack.protocol.resources import resolve_resource_uri, uri_template_to_pattern
 from nitrostack.protocol.schema import (
     JSON_SCHEMA_2020_12_URI,
     bound_schema_depth,
     normalize_input_schema,
     normalize_output_schema,
+)
+from nitrostack.protocol.tasks import (
+    DEFAULT_POLL_INTERVAL_MS,
+    DEFAULT_TASK_TTL_MS,
+    RESULT_TYPE_TASK,
+    build_task_create_jsonrpc_result,
+    task_support_forbidden_message,
+    task_support_required_message,
+    ttl_ms_to_seconds,
+    ttl_seconds_to_ms,
 )
 from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
@@ -72,4 +90,18 @@ __all__ = [
     "build_resource_text_content",
     "build_resource_blob_content",
     "build_prompt_get_result",
+    "InputRequest",
+    "InputRequiredResult",
+    "accepted_content",
+    "input_required",
+    "split_mrtr_tool_params",
+    "build_input_required_jsonrpc_result",
+    "RESULT_TYPE_TASK",
+    "DEFAULT_TASK_TTL_MS",
+    "DEFAULT_POLL_INTERVAL_MS",
+    "build_task_create_jsonrpc_result",
+    "ttl_ms_to_seconds",
+    "ttl_seconds_to_ms",
+    "task_support_forbidden_message",
+    "task_support_required_message",
 ]

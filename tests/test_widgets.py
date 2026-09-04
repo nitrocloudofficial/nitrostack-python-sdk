@@ -522,18 +522,18 @@ def test_widget_task_result_matches_direct_call():
             assert isinstance(task_resp.root, types.CreateTaskResult)
             task_id = task_resp.root.task.taskId
 
-            payload_handler = harness.app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
+            get_handler = harness.app.mcp_server.request_handlers[types.GetTaskRequest]
             task_payload = None
             for _ in range(50):
                 await asyncio.sleep(0.02)
-                raw = await payload_handler(
-                    types.GetTaskPayloadRequest(
-                        method="tasks/result",
-                        params=types.GetTaskPayloadRequestParams(taskId=task_id),
+                raw = await get_handler(
+                    types.GetTaskRequest(
+                        method="tasks/get",
+                        params=types.GetTaskRequestParams(taskId=task_id),
                     )
                 )
-                task_payload = getattr(raw, "root", raw)
-                if hasattr(task_payload, "structuredContent"):
+                if raw.status == "completed" and raw.result is not None:
+                    task_payload = types.CallToolResult(**raw.result)
                     break
             else:
                 raise AssertionError("task did not complete in time")

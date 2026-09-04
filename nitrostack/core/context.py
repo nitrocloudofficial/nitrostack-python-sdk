@@ -178,3 +178,5 @@ class ExecutionContext:
     metadata: dict = field(default_factory=dict)
     auth: AuthContext | None = None
     task: TaskContext | None = None
+    input_responses: Dict[str, Any] = field(default_factory=dict)
+    request_state: Optional[Dict[str, Any]] = None
