@@ -124,9 +124,10 @@ class TaskContext:
         manager = self._task_manager
         if manager is not None:
             try:
-                manager.update_progress(self.task_id, message)
+                import asyncio
+
+                asyncio.create_task(manager.update_progress(self.task_id, message))
             except Exception:
-                # Task may already be terminal/expired — ignore for handler ergonomics.
                 pass
         self._push_progress_notification(message)
 
@@ -155,7 +156,9 @@ class TaskContext:
         if manager is None:
             return
         try:
-            manager.cancel_task(self.task_id)
+            import asyncio
+
+            asyncio.create_task(manager.cancel_task(self.task_id))
         except Exception:
             pass
 
@@ -163,7 +166,7 @@ class TaskContext:
         manager = self._task_manager
         if manager is not None:
             try:
-                if manager.is_task_cancelled(self.task_id):
+                if manager.is_task_cancelled_sync(self.task_id):
                     self.is_cancelled = True
             except Exception:
                 pass

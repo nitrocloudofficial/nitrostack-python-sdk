@@ -124,7 +124,7 @@ from nitrostack.testing import (
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.mrtr import InputRequest, InputRequiredResult, accepted_content, input_required
-from nitrostack.tasks import TaskAccessContext, TaskStore
+from nitrostack.tasks import InMemoryTaskStore, TaskAccessContext, TaskStore
 from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
 from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipeline
 
@@ -221,6 +221,7 @@ __all__ = [
     "input_required",
     "TaskAccessContext",
     "TaskStore",
+    "InMemoryTaskStore",
     "StatelessInvariants",
     "assert_stateless_headers",
     "wrap_stateless_transport",

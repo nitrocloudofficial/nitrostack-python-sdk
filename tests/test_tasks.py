@@ -32,6 +32,7 @@ from nitrostack.core.task import (
     TaskStatus,
     is_terminal_status,
 )
+from nitrostack.tasks.types import utc_now
 import mcp.types as types
 from mcp.server.lowlevel.server import request_ctx, RequestContext
 from mcp.server.experimental.request_context import Experimental
@@ -41,16 +42,66 @@ from mcp.server.experimental.request_context import Experimental
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _manager() -> TaskManager:
-    return TaskManager()
+def run(coro):
+    return asyncio.run(coro)
 
 
-def _force_expire(manager: TaskManager, task_id: str) -> None:
-    """Set expires_at in the past so the next access lazily expires the task."""
-    entry = manager._tasks[task_id]
-    entry.data.expires_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-        seconds=1
-    )
+class SyncManager:
+    """Sync facade over async ``TaskManager`` for unit tests."""
+
+    def __init__(self, manager: TaskManager | None = None) -> None:
+        self.m = manager or TaskManager()
+
+    def create_task(self, *args, **kwargs):
+        return run(self.m.create_task(*args, **kwargs))
+
+    def get_task(self, task_id: str):
+        return run(self.m.get_task(task_id))
+
+    def update_progress(self, task_id: str, progress):
+        return run(self.m.update_progress(task_id, progress))
+
+    def complete_task(self, task_id: str, result):
+        return run(self.m.complete_task(task_id, result))
+
+    def fail_task(self, task_id: str, error):
+        return run(self.m.fail_task(task_id, error))
+
+    def cancel_task(self, task_id: str):
+        return run(self.m.cancel_task(task_id))
+
+    def list_tasks(self):
+        return run(self.m.list_tasks())
+
+    def has_task(self, task_id: str):
+        return run(self.m.has_task(task_id))
+
+    def get_result(self, task_id: str):
+        return run(self.m.get_result(task_id))
+
+    def cleanup_expired(self, now_ms: int | None = None):
+        return run(self.m.cleanup_expired(now_ms))
+
+    @property
+    def raw(self) -> TaskManager:
+        return self.m
+
+
+def _manager() -> SyncManager:
+    return SyncManager()
+
+
+async def _backdate_task(manager: TaskManager, task_id: str, *, age_ms: int) -> None:
+    entry = await manager._require_entry(task_id)
+    entry.data.last_updated_at = utc_now() - datetime.timedelta(milliseconds=age_ms)
+    await manager._store.set(task_id, entry)
+
+
+async def _age_terminal_task(manager: TaskManager, task_id: str, *, age_ms: int) -> None:
+    """Backdate a terminal task so ``cleanup_expired`` can evict it."""
+    entry = await manager._require_entry(task_id)
+    entry.data.last_updated_at = utc_now() - datetime.timedelta(milliseconds=age_ms)
+    await manager._store.set(task_id, entry)
 
 
 # ===========================================================================
@@ -89,15 +140,14 @@ class TestCreateTask:
     def test_default_ttl_is_none_never_expires(self):
         task = _manager().create_task()
         assert task.ttl_seconds is None
+        assert task.ttl_ms is None
         assert task.expires_at is None
 
-    def test_custom_ttl_sets_expires_at(self):
-        before = datetime.datetime.now(datetime.timezone.utc)
+    def test_custom_ttl_records_ttl_ms(self):
         task = _manager().create_task(ttl_seconds=60)
-        after = datetime.datetime.now(datetime.timezone.utc)
         assert task.ttl_seconds == 60
-        assert task.expires_at is not None
-        assert before <= task.expires_at - datetime.timedelta(seconds=60) <= after
+        assert task.ttl_ms == 60_000
+        assert task.expires_at is None
 
     def test_generates_unique_task_ids(self):
         manager = _manager()
@@ -239,12 +289,12 @@ class TestResultAndList:
 
     def test_wait_until_done_returns_completed(self):
         async def _run():
-            manager = _manager()
-            task = manager.create_task()
+            manager = TaskManager()
+            task = await manager.create_task()
 
             async def finish():
                 await asyncio.sleep(0.05)
-                manager.complete_task(task.id, "async-ok")
+                await manager.complete_task(task.id, "async-ok")
 
             asyncio.create_task(finish())
             done = await manager.wait_until_done(task.id)
@@ -259,50 +309,36 @@ class TestResultAndList:
 # ===========================================================================
 
 class TestTTLExpiration:
-    def test_task_without_ttl_never_expires(self):
+    def test_active_task_is_never_evicted_during_execution(self):
         manager = _manager()
-        task = manager.create_task()
-        # Even if we wait a bit, no expires_at means still WORKING
-        time.sleep(0.01)
+        task = manager.create_task(ttl_ms=1)
+        time.sleep(0.02)
         data = manager.get_task(task.id)
         assert data.status == TaskStatus.WORKING
-        assert data.expires_at is None
 
-    def test_expired_task_transitions_to_expired_on_read(self):
-        manager = _manager()
-        task = manager.create_task(ttl_seconds=1)
-        _force_expire(manager, task.id)
-        data = manager.get_task(task.id)
-        assert data.status == TaskStatus.EXPIRED
-        assert is_terminal_status(data.status)
+    def test_terminal_task_evicted_after_post_completion_ttl(self):
+        async def _run_flow():
+            manager = TaskManager()
+            task = await manager.create_task(ttl_ms=100)
+            await manager.complete_task(task.id, {"ok": True})
+            await _age_terminal_task(manager, task.id, age_ms=200)
+            evicted = await manager.cleanup_expired()
+            assert evicted == 1
+            with pytest.raises(TaskNotFoundError):
+                await manager.get_task(task.id)
 
-    def test_update_progress_on_expired_raises_task_expired(self):
-        manager = _manager()
-        task = manager.create_task(ttl_seconds=1)
-        _force_expire(manager, task.id)
-        with pytest.raises(TaskExpiredError):
-            manager.update_progress(task.id, "nope")
+        run(_run_flow())
 
-    def test_complete_on_expired_raises_task_expired(self):
-        manager = _manager()
-        task = manager.create_task(ttl_seconds=1)
-        _force_expire(manager, task.id)
-        with pytest.raises(TaskExpiredError):
-            manager.complete_task(task.id, "late")
+    def test_cleanup_skips_active_tasks(self):
+        async def _run_flow():
+            manager = TaskManager()
+            task = await manager.create_task(ttl_ms=50)
+            await _backdate_task(manager, task.id, age_ms=200)
+            evicted = await manager.cleanup_expired()
+            assert evicted == 0
+            assert (await manager.get_task(task.id)).status == TaskStatus.WORKING
 
-    def test_cancel_on_expired_raises_task_expired(self):
-        manager = _manager()
-        task = manager.create_task(ttl_seconds=1)
-        _force_expire(manager, task.id)
-        with pytest.raises(TaskExpiredError):
-            manager.cancel_task(task.id)
-
-    def test_get_result_on_expired_raises(self):
-        manager = _manager()
-        task = manager.create_task(ttl_seconds=1)
-        _force_expire(manager, task.id)
-        with pytest.raises(TaskExpiredError):
-            manager.get_result(task.id)
+        run(_run_flow())
 
 
 # ===========================================================================
@@ -311,25 +347,33 @@ class TestTTLExpiration:
 
 class TestTaskContext:
     def test_update_progress_delegates_to_manager(self):
-        manager = _manager()
-        task = manager.create_task()
-        ctx = TaskContext(task.id, manager)
-        ctx.update_progress("via context")
-        assert ctx.progress_message == "via context"
-        assert manager.get_task(task.id).progress == "via context"
+        async def _run_flow():
+            manager = TaskManager()
+            task = await manager.create_task()
+            ctx = TaskContext(task.id, manager)
+            ctx.update_progress("via context")
+            await asyncio.sleep(0.01)
+            assert ctx.progress_message == "via context"
+            assert (await manager.get_task(task.id)).progress == "via context"
+
+        run(_run_flow())
 
     def test_cancel_sets_cancelled(self):
-        manager = _manager()
-        task = manager.create_task()
-        ctx = TaskContext(task.id, manager)
-        ctx.cancel()
-        assert ctx.is_cancelled is True
-        assert manager.get_task(task.id).status == TaskStatus.CANCELLED
+        async def _run_flow():
+            manager = TaskManager()
+            task = await manager.create_task()
+            ctx = TaskContext(task.id, manager)
+            ctx.cancel()
+            await asyncio.sleep(0.01)
+            assert ctx.is_cancelled is True
+            assert (await manager.get_task(task.id)).status == TaskStatus.CANCELLED
+
+        run(_run_flow())
 
     def test_throw_if_cancelled_raises(self):
         manager = _manager()
         task = manager.create_task()
-        ctx = TaskContext(task.id, manager)
+        ctx = TaskContext(task.id, manager.raw)
         manager.cancel_task(task.id)
         with pytest.raises(TaskCancelledError):
             ctx.throw_if_cancelled()
@@ -337,13 +381,13 @@ class TestTaskContext:
     def test_throw_if_cancelled_noop_when_working(self):
         manager = _manager()
         task = manager.create_task()
-        ctx = TaskContext(task.id, manager)
+        ctx = TaskContext(task.id, manager.raw)
         ctx.throw_if_cancelled()  # should not raise
 
     def test_update_progress_after_cancel_does_not_raise(self):
         manager = _manager()
         task = manager.create_task()
-        ctx = TaskContext(task.id, manager)
+        ctx = TaskContext(task.id, manager.raw)
         manager.cancel_task(task.id)
         ctx.update_progress("ignored")  # swallowed
 

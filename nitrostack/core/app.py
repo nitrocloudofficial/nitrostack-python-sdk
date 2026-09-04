@@ -897,7 +897,7 @@ class McpApplication:
                 if task_metadata and task_metadata.ttl is not None
                 else DEFAULT_TASK_TTL_MS
             )
-            task = self.task_manager.create_task(ttl_ms=ttl_ms)
+            task = await self.task_manager.create_task(ttl_ms=ttl_ms)
             task_id = task.id
 
             async def background_execution():
@@ -930,18 +930,18 @@ class McpApplication:
                         param_type=entry.input_model,
                     )
                     if isinstance(result, InputRequiredResult):
-                        self.task_manager.require_input(
+                        await self.task_manager.require_input(
                             task_id,
                             result.to_wire_dict(),
                             progress=result.message or "Additional input required",
                         )
                     else:
-                        self.task_manager.complete_task(
+                        await self.task_manager.complete_task(
                             task_id, self._to_call_tool_result(result, entry.component, task_ctx)
                         )
                 except Exception as e:
                     try:
-                        self.task_manager.fail_task(task_id, e)
+                        await self.task_manager.fail_task(task_id, e)
                     except (TaskAlreadyTerminalError, TaskExpiredError):
                         # Cancelled/expired while running — leave terminal state as-is.
                         pass
@@ -1130,7 +1130,7 @@ class McpApplication:
                     types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
                 )
             tasks_list = []
-            for t in self.task_manager.list_tasks():
+            for t in await self.task_manager.list_tasks():
                 if t.status == TaskStatus.EXPIRED:
                     continue
                 tasks_list.append(self._task_data_to_mcp_task(t))
@@ -1139,7 +1139,7 @@ class McpApplication:
         async def handle_get_task(req):
             task_id = req.params.taskId
             try:
-                t = self.task_manager.get_task(task_id)
+                t = await self.task_manager.get_task(task_id)
             except TaskNotFoundError:
                 raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
@@ -1149,8 +1149,8 @@ class McpApplication:
         async def handle_cancel_task(req):
             task_id = req.params.taskId
             try:
-                self.task_manager.cancel_task(task_id)
-                t = self.task_manager.get_task(task_id)
+                await self.task_manager.cancel_task(task_id)
+                t = await self.task_manager.get_task(task_id)
             except TaskNotFoundError:
                 raise McpError(
                     types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")

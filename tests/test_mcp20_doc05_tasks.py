@@ -55,25 +55,34 @@ class TestTaskProtocolHelpers:
 
 class TestTaskManagerLifecycle:
     def test_input_required_transition(self):
-        manager = TaskManager()
-        task = manager.create_task()
-        manager.require_input(task.id, {"resultType": "input_required", "inputRequests": []})
-        snapshot = manager.get_task(task.id)
-        assert snapshot.status == TaskStatus.INPUT_REQUIRED
-        assert snapshot.result["resultType"] == "input_required"
+        async def _run():
+            manager = TaskManager()
+            task = await manager.create_task()
+            await manager.require_input(task.id, {"resultType": "input_required", "inputRequests": []})
+            snapshot = await manager.get_task(task.id)
+            assert snapshot.status == TaskStatus.INPUT_REQUIRED
+            assert snapshot.result["resultType"] == "input_required"
+
+        asyncio.run(_run())
 
     def test_resume_from_input_required(self):
-        manager = TaskManager()
-        task = manager.create_task()
-        manager.require_input(task.id, {"pause": True})
-        manager.resume_task(task.id)
-        assert manager.get_task(task.id).status == TaskStatus.WORKING
+        async def _run():
+            manager = TaskManager()
+            task = await manager.create_task()
+            await manager.require_input(task.id, {"pause": True})
+            await manager.resume_task(task.id)
+            assert (await manager.get_task(task.id)).status == TaskStatus.WORKING
+
+        asyncio.run(_run())
 
     def test_create_task_stores_ttl_ms(self):
-        task = TaskManager().create_task(ttl_ms=600_000)
-        assert task.ttl_ms == 600_000
-        assert task.ttl == 600_000
-        assert task.poll_interval == DEFAULT_POLL_INTERVAL_MS
+        async def _run():
+            task = await TaskManager().create_task(ttl_ms=600_000)
+            assert task.ttl_ms == 600_000
+            assert task.ttl == 600_000
+            assert task.poll_interval == DEFAULT_POLL_INTERVAL_MS
+
+        asyncio.run(_run())
 
 
 class TestTaskSupportNegotiation:
@@ -138,25 +147,28 @@ class TestTaskSupportNegotiation:
 
 class TestTaskWireHandlers:
     def test_tasks_get_embeds_completed_result(self):
-        manager = TaskManager()
-        task = manager.create_task(ttl_ms=DEFAULT_TASK_TTL_MS)
-        manager.complete_task(task.id, types.CallToolResult(content=[types.TextContent(type="text", text="done")]))
-
-        @injectable()
-        class DummyController:
-            @tool(name="noop", description="noop", input_schema=EchoInput)
-            async def noop(self, input: EchoInput, context: ExecutionContext) -> str:
-                return "ok"
-
-        @module(name="TasksDoc05Get", controllers=[DummyController])
-        class GetModule:
-            pass
-
-        @mcp_app(module=GetModule, server=ServerConfig(name="tasks-get"))
-        class GetApp:
-            pass
-
         async def _run():
+            manager = TaskManager()
+            task = await manager.create_task(ttl_ms=DEFAULT_TASK_TTL_MS)
+            await manager.complete_task(
+                task.id,
+                types.CallToolResult(content=[types.TextContent(type="text", text="done")]),
+            )
+
+            @injectable()
+            class DummyController:
+                @tool(name="noop", description="noop", input_schema=EchoInput)
+                async def noop(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return "ok"
+
+            @module(name="TasksDoc05Get", controllers=[DummyController])
+            class GetModule:
+                pass
+
+            @mcp_app(module=GetModule, server=ServerConfig(name="tasks-get"))
+            class GetApp:
+                pass
+
             app = await McpApplicationFactory.create(GetApp)
             app.task_manager = manager
             handler = app.mcp_server.request_handlers[types.GetTaskRequest]
@@ -197,25 +209,25 @@ class TestTaskWireHandlers:
         asyncio.run(_run())
 
     def test_cancel_terminal_task_raises_invalid_params(self):
-        manager = TaskManager()
-        task = manager.create_task()
-        manager.complete_task(task.id, {"ok": True})
-
-        @injectable()
-        class DummyController:
-            @tool(name="noop3", description="noop", input_schema=EchoInput)
-            async def noop3(self, input: EchoInput, context: ExecutionContext) -> str:
-                return "ok"
-
-        @module(name="TasksDoc05Cancel", controllers=[DummyController])
-        class CancelModule:
-            pass
-
-        @mcp_app(module=CancelModule, server=ServerConfig(name="tasks-cancel"))
-        class CancelApp:
-            pass
-
         async def _run():
+            manager = TaskManager()
+            task = await manager.create_task()
+            await manager.complete_task(task.id, {"ok": True})
+
+            @injectable()
+            class DummyController:
+                @tool(name="noop3", description="noop", input_schema=EchoInput)
+                async def noop3(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return "ok"
+
+            @module(name="TasksDoc05Cancel", controllers=[DummyController])
+            class CancelModule:
+                pass
+
+            @mcp_app(module=CancelModule, server=ServerConfig(name="tasks-cancel"))
+            class CancelApp:
+                pass
+
             app = await McpApplicationFactory.create(CancelApp)
             app.task_manager = manager
             handler = app.mcp_server.request_handlers[types.CancelTaskRequest]
