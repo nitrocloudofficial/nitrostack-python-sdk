@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
+from nitrostack.protocol.cache_hints import DEFAULT_LIST_CACHE_TTL_MS, build_list_endpoint_cache_hint_meta
 from nitrostack.protocol.extensions import MCPExtensionId
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+
+DISCOVER_RESULT_TYPE = "complete"
 
 
 def build_discover_result(
@@ -20,6 +23,8 @@ def build_discover_result(
     tools_list_changed: bool = True,
     resources_list_changed: bool = True,
     prompts_list_changed: bool = True,
+    ttl_ms: int = DEFAULT_LIST_CACHE_TTL_MS,
+    cache_scope: Literal["public", "private"] = "private",
 ) -> dict[str, Any]:
     """Build the server/discover result payload (Doc 01 §4 / Doc 09 §1)."""
     versions = list(supported_versions or SUPPORTED_PROTOCOL_VERSIONS)
@@ -41,8 +46,12 @@ def build_discover_result(
         capabilities["extensions"] = extensions
 
     return {
+        "resultType": DISCOVER_RESULT_TYPE,
         "protocolVersion": protocol_version,
         "supportedVersions": versions,
         "serverInfo": {"name": server_name, "version": server_version},
         "capabilities": capabilities,
+        "ttlMs": ttl_ms,
+        "cacheScope": cache_scope,
+        "_meta": build_list_endpoint_cache_hint_meta(ttl_ms=ttl_ms, cache_scope=cache_scope),
     }

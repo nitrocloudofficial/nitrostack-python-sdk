@@ -124,6 +124,9 @@ class TestDiscoveryExtensions:
             advertise_tasks=True,
         )
         assert MCPExtensionId.TASKS.value in result["capabilities"]["extensions"]
+        assert result["resultType"] == "complete"
+        assert result["ttlMs"] == 60_000
+        assert result["cacheScope"] == "private"
 
 
 class TestAppIntegration:

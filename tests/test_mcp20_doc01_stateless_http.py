@@ -6,7 +6,8 @@ import json
 import pytest
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
-from nitrostack.protocol.discovery import build_discover_result
+from nitrostack.protocol.contracts import MCP_CACHE_HINT_KEY
+from nitrostack.protocol.discovery import DISCOVER_RESULT_TYPE, build_discover_result
 from nitrostack.protocol.jsonrpc import (
     HEADER_BODY_MISMATCH,
     PARSE_ERROR,
@@ -92,6 +93,11 @@ class TestDiscovery:
         assert result["serverInfo"]["name"] == "my-stateless-mcp-server"
         assert result["capabilities"]["resources"]["subscribe"] is False
         assert "io.modelcontextprotocol/tasks" in result["capabilities"]["extensions"]
+        assert result["resultType"] == DISCOVER_RESULT_TYPE
+        assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
+        assert result["cacheScope"] in ("public", "private")
+        assert result["_meta"][MCP_CACHE_HINT_KEY]["ttlMs"] == result["ttlMs"]
+        assert result["_meta"][MCP_CACHE_HINT_KEY]["cacheScope"] == result["cacheScope"]
 
 
 class TestDispatchPipeline:
@@ -117,7 +123,12 @@ class TestDispatchPipeline:
             ).encode()
             status, resp = await pipeline.handle_post(body, {})
             assert status == 200
-            assert resp["result"]["protocolVersion"] == "2026-07-28"
+            result = resp["result"]
+            assert result["protocolVersion"] == "2026-07-28"
+            assert result["resultType"] == DISCOVER_RESULT_TYPE
+            assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
+            assert result["cacheScope"] in ("public", "private")
+            assert MODERN_PROTOCOL_VERSION in result["supportedVersions"]
 
         asyncio.run(_run())
 

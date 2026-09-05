@@ -91,6 +91,9 @@ class TestStatelessHttpConformance:
         assert result["protocolVersion"] == MODERN_PROTOCOL_VERSION
         extensions = result["capabilities"]["extensions"]
         assert MCPExtensionId.TASKS.value in extensions
+        assert result["resultType"] == "complete"
+        assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
+        assert result["cacheScope"] in ("public", "private")
 
     def test_stateless_pipeline_handles_discover_without_session(self):
         async def _run():
