@@ -1,4 +1,4 @@
-"""Multi Round-Trip Request (MRTR) helpers — SEP-2322 (Doc 04)."""
+"""Multi Round-Trip Request (MRTR) helpers (SEP-2322)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ DEFAULT_INPUT_REQUIRED_MESSAGE = "Additional input needed to complete this opera
 
 @dataclass
 class InputRequest:
-    """One elicitation prompt in an MRTR exchange (Doc 04 §3.1)."""
+    """One elicitation prompt in an MRTR exchange."""
 
     id: str
     message: Optional[str] = None
@@ -34,7 +34,7 @@ class InputRequest:
 
 @dataclass
 class InputRequiredResult:
-    """Wire result pausing tool execution until the client supplies input (Doc 04 §3.2)."""
+    """Wire result pausing tool execution until the client supplies input."""
 
     input_requests: list[InputRequest]
     request_state: dict[str, Any]
@@ -54,7 +54,7 @@ def accepted_content(input_responses: Optional[dict[str, Any]], request_id: str)
     """
     Return the client's answer for ``request_id``, or ``None`` if not yet supplied.
 
-    Handler primitive from Doc 04 §4.
+    Handler primitive for MRTR elicitation.
     """
     if not input_responses or request_id not in input_responses:
         return None
@@ -66,7 +66,7 @@ def input_required(
     request_state: dict[str, Any],
     message: Optional[str] = None,
 ) -> InputRequiredResult:
-    """Halt tool execution and request additional client input (Doc 04 §4)."""
+    """Halt tool execution and request additional client input."""
     if not requests:
         raise ValueError("input_required requires at least one InputRequest")
     return InputRequiredResult(

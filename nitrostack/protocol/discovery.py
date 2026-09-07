@@ -1,4 +1,4 @@
-"""server/discover capability negotiation (Doc 01 §4)."""
+"""server/discover capability negotiation."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def build_discover_result(
     ttl_ms: int = DEFAULT_LIST_CACHE_TTL_MS,
     cache_scope: Literal["public", "private"] = "private",
 ) -> dict[str, Any]:
-    """Build the server/discover result payload (Doc 01 §4 / Doc 09 §1)."""
+    """Build the server/discover result payload."""
     versions = list(supported_versions or SUPPORTED_PROTOCOL_VERSIONS)
     extensions: dict[str, dict[str, str]] = {}
     if advertise_app:

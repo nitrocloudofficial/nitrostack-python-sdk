@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 extensions, cache hints, and observability (Doc 09)."""
+"""Tests for MCP 2.0 extensions, cache hints, and observability."""
 
 import asyncio
 import os
@@ -138,7 +138,7 @@ class TestAppIntegration:
             async def cached_echo(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="Doc09Cache", controllers=[CacheController])
+        @module(name="CacheHints", controllers=[CacheController])
         class CacheModule:
             pass
 
@@ -159,7 +159,7 @@ class TestAppIntegration:
         @injectable()
         class ResourceController:
             @resource(
-                uri="mcp://doc09/metrics",
+                uri="mcp://cache/metrics",
                 name="metrics",
                 description="metrics",
                 metadata={"cacheMaxAge": 10},
@@ -167,7 +167,7 @@ class TestAppIntegration:
             async def metrics(self, context: ExecutionContext) -> str:
                 return "{}"
 
-        @module(name="Doc09Resource", controllers=[ResourceController])
+        @module(name="CacheResource", controllers=[ResourceController])
         class ResourceModule:
             pass
 
@@ -189,7 +189,7 @@ class TestAppIntegration:
             async def sync_only(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="Doc09NoTasks", controllers=[SyncController])
+        @module(name="NoTasksExt", controllers=[SyncController])
         class NoTasksModule:
             pass
 
@@ -213,7 +213,7 @@ class TestAppIntegration:
                 captured["ctx"] = context
                 return input.value
 
-        @module(name="Doc09Trace", controllers=[TraceController])
+        @module(name="TraceExt", controllers=[TraceController])
         class TraceModule:
             pass
 

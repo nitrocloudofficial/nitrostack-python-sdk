@@ -1,4 +1,4 @@
-"""Terminal-only TTL eviction rules (Doc 06 §4)."""
+"""Terminal-only TTL eviction rules."""
 
 from __future__ import annotations
 

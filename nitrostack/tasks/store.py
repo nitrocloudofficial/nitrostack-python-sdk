@@ -1,4 +1,4 @@
-"""Pluggable task persistence interface (Doc 00 principle 3; Doc 06 contract)."""
+"""Pluggable task persistence interface."""
 
 from abc import ABC, abstractmethod
 from typing import List, Optional

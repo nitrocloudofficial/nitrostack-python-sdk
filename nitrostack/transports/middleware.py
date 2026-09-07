@@ -1,4 +1,4 @@
-"""Stateless HTTP ASGI middleware (Doc 01)."""
+"""Stateless HTTP ASGI middleware."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ MCP_POST_PATHS = (MCP_HTTP_PATH, f"{MCP_HTTP_PATH}/")
 
 class StatelessTransportMiddleware:
     """
-    ASGI wrapper implementing Doc 01 transport invariants:
+    ASGI wrapper implementing stateless HTTP transport invariants:
     - OPTIONS 204 CORS preflight
     - Legacy session header stripping
     - MCP response headers on all responses
@@ -182,7 +182,7 @@ def wrap_stateless_transport(
     advertise_app: bool = False,
     custom_extensions: Optional[dict[str, str]] = None,
 ) -> ASGIApp:
-    """Wrap an ASGI app with Doc 01 stateless HTTP middleware."""
+    """Wrap an ASGI app with stateless HTTP middleware."""
     pipeline = StatelessIngressPipeline(
         IngressContext(
             server_name=server_name,

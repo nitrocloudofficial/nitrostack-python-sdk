@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 stateless HTTP transport (Doc 01)."""
+"""Tests for MCP 2.0 stateless HTTP transport."""
 
 import asyncio
 import json

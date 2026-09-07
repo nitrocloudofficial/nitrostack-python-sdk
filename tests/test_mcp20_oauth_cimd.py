@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 OAuth 2.1, CIMD, and SSRF security (Doc 08)."""
+"""Tests for MCP 2.0 OAuth 2.1, CIMD, and SSRF security."""
 
 import asyncio
 import json

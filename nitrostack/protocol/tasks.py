@@ -1,4 +1,4 @@
-"""MCP Tasks protocol helpers — Doc 05 (2026-07-28)."""
+"""MCP Tasks protocol helpers for 2026-07-28."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def ttl_seconds_to_ms(ttl_seconds: Optional[int]) -> Optional[int]:
 
 
 def build_task_create_jsonrpc_result(request_id: Any, task: dict[str, Any]) -> dict[str, Any]:
-    """Build Doc 05 §4.2 task-augmented ``tools/call`` success envelope."""
+    """Build task-augmented ``tools/call`` success envelope."""
     return {
         "jsonrpc": "2.0",
         "id": request_id,

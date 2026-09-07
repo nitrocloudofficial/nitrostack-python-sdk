@@ -1,4 +1,4 @@
-"""Standard JSON-RPC error codes for MCP 2026-07-28 (Doc 02 §2)."""
+"""Standard JSON-RPC error codes for MCP 2026-07-28."""
 
 from __future__ import annotations
 

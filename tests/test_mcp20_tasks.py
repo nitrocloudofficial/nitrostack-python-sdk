@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 Tasks protocol and lifecycle (Doc 05)."""
+"""Tests for MCP 2.0 Tasks protocol and lifecycle."""
 
 import asyncio
 import os
@@ -93,7 +93,7 @@ class TestTaskSupportNegotiation:
             async def sync_only(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="TasksDoc05Forbidden", controllers=[SyncController])
+        @module(name="TasksForbidden", controllers=[SyncController])
         class ForbiddenModule:
             pass
 
@@ -128,7 +128,7 @@ class TestTaskSupportNegotiation:
             async def heavy_job(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="TasksDoc05Required", controllers=[HeavyController])
+        @module(name="TasksRequired", controllers=[HeavyController])
         class RequiredModule:
             pass
 
@@ -161,7 +161,7 @@ class TestTaskWireHandlers:
                 async def noop(self, input: EchoInput, context: ExecutionContext) -> str:
                     return "ok"
 
-            @module(name="TasksDoc05Get", controllers=[DummyController])
+            @module(name="TasksGet", controllers=[DummyController])
             class GetModule:
                 pass
 
@@ -191,7 +191,7 @@ class TestTaskWireHandlers:
             async def noop2(self, input: EchoInput, context: ExecutionContext) -> str:
                 return "ok"
 
-        @module(name="TasksDoc05List", controllers=[DummyController])
+        @module(name="TasksList", controllers=[DummyController])
         class ListModule:
             pass
 
@@ -220,7 +220,7 @@ class TestTaskWireHandlers:
                 async def noop3(self, input: EchoInput, context: ExecutionContext) -> str:
                     return "ok"
 
-            @module(name="TasksDoc05Cancel", controllers=[DummyController])
+            @module(name="TasksCancel", controllers=[DummyController])
             class CancelModule:
                 pass
 
@@ -250,7 +250,7 @@ class TestTaskWireHandlers:
             async def slow_echo(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="TasksDoc05Create", controllers=[AsyncController])
+        @module(name="TasksCreate", controllers=[AsyncController])
         class CreateModule:
             pass
 

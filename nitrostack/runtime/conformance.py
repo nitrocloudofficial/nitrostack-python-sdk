@@ -1,4 +1,4 @@
-"""MCP 2.0 implementation blueprint conformance registry (Doc 10)."""
+"""MCP 2026-07-28 implementation blueprint conformance registry."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 
 class ConformanceArea(str, Enum):
-    """Five verification areas from Doc 10 §4."""
+    """Five verification areas for the MCP 2026-07-28 blueprint."""
 
     STATELESS_HTTP = "stateless_http"
     JSONRPC = "jsonrpc"
@@ -41,7 +41,7 @@ BLUEPRINT_CONFORMANCE_AREAS: dict[ConformanceArea, str] = {
     ),
 }
 
-# Canonical module paths implementing the Doc 10 recommended layout (actual names).
+# Canonical module paths implementing the recommended package layout.
 REQUIRED_BLUEPRINT_MODULES: tuple[str, ...] = (
     "nitrostack.core.app",
     "nitrostack.core.context",

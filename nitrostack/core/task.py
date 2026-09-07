@@ -1,10 +1,10 @@
 """
-MCP Task state machine (Phase 1 / Doc 05–06).
+MCP task state machine.
 
 ``TaskManager`` owns lifecycle logic; persistence is delegated to a pluggable
 ``TaskStore`` (default: ``InMemoryTaskStore``).
 
-Doc 06 eviction invariants:
+TTL eviction invariants:
 - ``working`` / ``input_required`` tasks are never evicted.
 - TTL countdown starts only after a terminal transition.
 - ``cleanup_expired(now_ms)`` removes terminal tasks where
@@ -34,7 +34,7 @@ from nitrostack.tasks.authorization import check_task_access, list_task_wire_dat
 
 
 class TaskStatus(Enum):
-    """Task lifecycle statuses required by Phase 1 / Doc 05."""
+    """Task lifecycle statuses required by MCP 2026-07-28."""
 
     WORKING = "working"
     INPUT_REQUIRED = "input_required"

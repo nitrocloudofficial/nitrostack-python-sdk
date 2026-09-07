@@ -1,4 +1,4 @@
-"""Task subsystem shared types (Doc 05/06)."""
+"""Task subsystem shared types."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def datetime_to_ms(value: datetime.datetime) -> int:
 
 
 class TaskAccessContext(BaseModel):
-    """Identity metadata for multi-tenant task authorization (Doc 07)."""
+    """Identity metadata for multi-tenant task authorization."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -35,7 +35,7 @@ class TaskAccessContext(BaseModel):
 
 @dataclass
 class TaskWireData:
-    """Protocol-visible task metadata (Doc 06 §3.1)."""
+    """Protocol-visible task metadata."""
 
     task_id: str
     status: TaskStatus = "working"
@@ -59,7 +59,7 @@ class TaskWireData:
 
 @dataclass
 class TaskEntry:
-    """Internal server task state persisted by ``TaskStore`` (Doc 06 §3.2)."""
+    """Internal server task state persisted by ``TaskStore``."""
 
     task_id: str
     data: TaskWireData

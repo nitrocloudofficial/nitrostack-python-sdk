@@ -1,4 +1,4 @@
-"""MCP 2.0 HTTP header names and builders (Doc 01 §2)."""
+"""MCP 2.0 HTTP header names and builders."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Mapping, Optional
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 
-# Request headers (Doc 01 §2.1)
+# Request headers
 HEADER_CONTENT_TYPE = "Content-Type"
 HEADER_MCP_PROTOCOL_VERSION = "MCP-Protocol-Version"
 HEADER_MCP_METHOD = "Mcp-Method"
@@ -16,16 +16,16 @@ HEADER_MCP_PARAM_PREFIX = "Mcp-Param-"
 HEADER_AUTHORIZATION = "Authorization"
 HEADER_LAST_EVENT_ID = "Last-Event-ID"
 
-# Response headers (Doc 01 §2.2)
+# Response headers
 HEADER_VARY = "Vary"
 
-# CORS headers (Doc 01 §2.3)
+# CORS headers
 HEADER_ACCESS_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin"
 HEADER_ACCESS_CONTROL_ALLOW_METHODS = "Access-Control-Allow-Methods"
 HEADER_ACCESS_CONTROL_ALLOW_HEADERS = "Access-Control-Allow-Headers"
 HEADER_ACCESS_CONTROL_EXPOSE_HEADERS = "Access-Control-Expose-Headers"
 
-# SSE anti-buffering (Doc 01 §5)
+# SSE anti-buffering
 HEADER_X_ACCEL_BUFFERING = "X-Accel-Buffering"
 HEADER_CACHE_CONTROL = "Cache-Control"
 
@@ -86,7 +86,7 @@ def build_mcp_response_headers(
 def build_sse_stream_headers(
     protocol_version: str = MODERN_PROTOCOL_VERSION,
 ) -> dict[str, str]:
-    """SSE stream headers including proxy buffering guards (Doc 01 §5)."""
+    """SSE stream headers including proxy buffering guards."""
     return build_mcp_response_headers(
         content_type=MCP_SSE_CONTENT_TYPE,
         protocol_version=protocol_version,

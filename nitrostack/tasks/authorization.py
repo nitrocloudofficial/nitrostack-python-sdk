@@ -1,4 +1,4 @@
-"""Task authorization and multi-tenant isolation (Doc 07)."""
+"""Task authorization and multi-tenant isolation."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def list_task_wire_data_for_context(
     limit: int = 50,
 ) -> Tuple[List[TaskWireData], Optional[str]]:
     """
-    Filter, sort, and paginate task entries for a caller context (Doc 07 §5).
+    Filter, sort, and paginate task entries for a caller context.
     """
     filtered = [entry for entry in entries if entry_matches_access_context(entry, context)]
     filtered.sort(key=lambda entry: entry.data.created_at, reverse=True)

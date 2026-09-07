@@ -1,4 +1,4 @@
-"""SSE notification bus helpers (Doc 01 §5)."""
+"""SSE notification bus helpers."""
 
 from __future__ import annotations
 

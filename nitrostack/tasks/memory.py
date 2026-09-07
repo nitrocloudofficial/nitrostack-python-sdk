@@ -1,4 +1,4 @@
-"""In-memory TaskStore for development and single-replica deployments (Doc 06)."""
+"""In-memory TaskStore for development and single-replica deployments."""
 
 from __future__ import annotations
 

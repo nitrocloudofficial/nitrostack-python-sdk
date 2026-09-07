@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 tool/resource/prompt contracts (Doc 03)."""
+"""Tests for MCP 2.0 tool/resource/prompt contracts."""
 
 import pytest
 from pydantic import BaseModel, Field

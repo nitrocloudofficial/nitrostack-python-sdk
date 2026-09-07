@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 task store and distributed persistence (Doc 06)."""
+"""Tests for MCP 2.0 task store and distributed persistence."""
 
 import asyncio
 import os

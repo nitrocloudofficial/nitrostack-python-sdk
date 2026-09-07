@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 JSON-RPC wire specification (Doc 02)."""
+"""Tests for MCP 2.0 JSON-RPC wire specification."""
 
 import asyncio
 import json

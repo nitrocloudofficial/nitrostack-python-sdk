@@ -1,4 +1,4 @@
-"""W3C Trace Context extraction for MCP _meta envelopes (Doc 09 §2)."""
+"""W3C Trace Context extraction for MCP _meta envelopes."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _meta_get(meta: dict[str, Any], bare: str, prefixed: str) -> Optional[str]:
 
 
 def extract_trace_context(meta: dict[str, Any] | None) -> TraceContext | None:
-    """Extract W3C trace fields from a ``_meta`` dict (Doc 09 §2.1)."""
+    """Extract W3C trace fields from a ``_meta`` dict."""
     if not meta:
         return None
 

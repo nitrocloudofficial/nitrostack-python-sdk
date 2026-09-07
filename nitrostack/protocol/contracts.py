@@ -1,4 +1,4 @@
-"""Wire contract builders for tools, resources, and prompts (Doc 03)."""
+"""Wire contract builders for tools, resources, and prompts."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ def build_cache_hint_meta(
     *,
     cache_scope: Literal["public", "private"] = "private",
 ) -> dict[str, Any]:
-    """Build tool/resource ``_meta`` cache hint (SEP-2549; Doc 03 §1.1)."""
+    """Build tool/resource ``_meta`` cache hint (SEP-2549)."""
     return {
         MCP_CACHE_HINT_KEY: {
             "ttlMs": ttl_ms,
@@ -36,7 +36,7 @@ def build_resource_text_content(
     *,
     mime_type: str = "application/json",
 ) -> dict[str, Any]:
-    """Build a text ``resources/read`` content item (Doc 03 §2.3)."""
+    """Build a text ``resources/read`` content item."""
     return {
         "uri": uri,
         "mimeType": mime_type,
@@ -50,7 +50,7 @@ def build_resource_blob_content(
     *,
     mime_type: str = "application/octet-stream",
 ) -> dict[str, Any]:
-    """Build a base64 blob ``resources/read`` content item (Doc 03 §2.3)."""
+    """Build a base64 blob ``resources/read`` content item."""
     return {
         "uri": uri,
         "mimeType": mime_type,
@@ -59,7 +59,7 @@ def build_resource_blob_content(
 
 
 def build_prompt_text_message(role: str, text: str) -> dict[str, Any]:
-    """Build a single prompt message entry (Doc 03 §3.2)."""
+    """Build a single prompt message entry."""
     return {
         "role": role,
         "content": {
@@ -73,7 +73,7 @@ def build_prompt_get_result(
     description: str,
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build the ``prompts/get`` result payload (Doc 03 §3.2)."""
+    """Build the ``prompts/get`` result payload."""
     return {
         "description": description,
         "messages": messages,

@@ -1,4 +1,4 @@
-"""Cache hint resolution for tools, resources, and list endpoints (Doc 09 §3)."""
+"""Cache hint resolution for tools, resources, and list endpoints."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def resolve_tool_cache_hint_meta(
     method: Optional[Callable] = None,
 ) -> Optional[dict[str, Any]]:
     """
-    Resolve tool ``_meta`` cache hints (Doc 09 §3.2).
+    Resolve tool ``_meta`` cache hints.
 
     Priority: explicit ``metadata['cacheHint']`` / wire key, then ``@cache(ttl=...)``.
     """

@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 architectural foundation (Doc 00)."""
+"""Tests for MCP 2.0 architectural foundation."""
 
 import pytest
 

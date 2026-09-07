@@ -1,4 +1,4 @@
-"""Runtime layer identifiers matching the Doc 00 architecture diagram."""
+"""Runtime layer identifiers for the MCP 2026-07-28 architecture."""
 
 from enum import Enum
 

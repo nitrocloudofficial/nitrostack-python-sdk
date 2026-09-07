@@ -1,4 +1,4 @@
-"""JSON Schema 2020-12 normalization and depth bounding (Doc 03 §1.2, SEP-2106)."""
+"""JSON Schema 2020-12 normalization and depth bounding (SEP-2106)."""
 
 from __future__ import annotations
 

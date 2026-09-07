@@ -1,4 +1,4 @@
-"""JSON-RPC 2.0 wire protocol (Doc 02)."""
+"""JSON-RPC 2.0 wire protocol."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from nitrostack.protocol.meta import RequestMeta, split_params_and_meta
 
 JSONRPC_VERSION = "2.0"
 
-# Backward-compatible aliases (Doc 01)
+# Backward-compatible aliases
 PARSE_ERROR = int(JsonRpcErrorCode.PARSE_ERROR)
 HEADER_BODY_MISMATCH = int(JsonRpcErrorCode.HEADER_BODY_MISMATCH)
 
@@ -144,13 +144,13 @@ def jsonrpc_error(request_id: Any, code: int, message: str, data: Any = None) ->
 
 
 def build_ping_response(request_id: Any) -> dict[str, Any]:
-    """Ping fast path (Doc 01 §3 step 3)."""
+    """Ping fast path."""
     return jsonrpc_success(request_id, {})
 
 
 def build_tool_error_result(message: str, *, text_type: str = "text") -> dict[str, Any]:
     """
-    Tool business failure — JSON-RPC success with isError: true (Doc 02 §3).
+    Tool business failure — JSON-RPC success with isError: true.
     NOT a top-level JSON-RPC error response.
     """
     return {

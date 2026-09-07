@@ -1,4 +1,4 @@
-"""OAuth 2.1 security helpers (Doc 08)."""
+"""OAuth 2.1 security helpers."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ class AuthorizationIssuerMismatchError(ValueError):
 
 def validate_authorization_iss(response_iss: str | None, expected_issuer: str) -> None:
     """
-    Validate RFC 9207 ``iss`` anti-mixup parameter (Doc 08 §5.1).
+    Validate RFC 9207 ``iss`` anti-mixup parameter.
 
     Authorization responses MUST include ``iss`` and it MUST match the intended
     authorization server's issuer identifier.

@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 task authorization and tenant isolation (Doc 07)."""
+"""Tests for MCP 2.0 task authorization and tenant isolation."""
 
 import asyncio
 import os
@@ -144,11 +144,11 @@ class TestWireHandlersAntiEnumeration:
             async def owner_tool(self, input: EchoInput, context: ExecutionContext) -> str:
                 return input.value
 
-        @module(name="Doc07Auth", controllers=[OwnerController])
+        @module(name="TaskAuth", controllers=[OwnerController])
         class AuthModule:
             pass
 
-        @mcp_app(module=AuthModule, server=ServerConfig(name="doc07-auth"))
+        @mcp_app(module=AuthModule, server=ServerConfig(name="task-auth"))
         class AuthApp:
             pass
 

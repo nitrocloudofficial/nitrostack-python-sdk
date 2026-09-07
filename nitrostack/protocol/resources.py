@@ -1,4 +1,4 @@
-"""Resource URI resolution for static resources and templates (Doc 03 §2)."""
+"""Resource URI resolution for static resources and templates."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def resolve_resource_uri(
     templates: Sequence[tuple[Pattern[str], Any]],
 ) -> Optional[ResourceMatch]:
     """
-    Resolve a resource URI (Doc 03 §2.4):
+    Resolve a resource URI:
     1. Exact static map lookup
     2. URI template pattern match
     """

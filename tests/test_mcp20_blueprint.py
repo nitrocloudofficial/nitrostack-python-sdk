@@ -1,4 +1,4 @@
-"""Blueprint conformance verification (Doc 10 §4)."""
+"""Blueprint conformance verification."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Stateless HTTP ingress pipeline (Doc 01 §3)."""
+"""Stateless HTTP ingress pipeline."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ RegistryDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str
 
 
 class DispatchStage(str, Enum):
-    """Six-step ingress lifecycle from Doc 01 §3."""
+    """Six-step stateless HTTP ingress lifecycle."""
 
     CORS_SECURITY = "cors_security"
     BODY_PARSING = "body_parsing"
@@ -53,7 +53,7 @@ class IngressContext:
 
 
 def is_task_wire_interception(method: str, params: dict[str, Any]) -> bool:
-    """Doc 01 §3 step 4 — route to task subsystem when matched."""
+    """Ingress step 4 — route to the task subsystem when matched."""
     if method.startswith(TASK_METHOD_PREFIX):
         return True
     return method == "tools/call" and bool(params.get("task"))
@@ -64,7 +64,7 @@ class StatelessIngressPipeline:
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
 
     Handles ping and server/discover inline. Task and registry methods return
-    None so the underlying MCP server can handle them (Doc 05+ adds task handler).
+    None so the underlying MCP server can handle them.
     """
 
     def __init__(

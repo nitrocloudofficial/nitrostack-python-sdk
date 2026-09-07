@@ -1,4 +1,4 @@
-"""CORS configuration for stateless MCP HTTP (Doc 01 §2.3)."""
+"""CORS configuration for stateless MCP HTTP."""
 
 from __future__ import annotations
 
@@ -32,6 +32,6 @@ def build_cors_headers(
 
 
 def cors_preflight_response_headers(request_headers: Mapping[str, str]) -> dict[str, str]:
-    """Headers for OPTIONS preflight — HTTP 204 No Content (Doc 01 §2.3)."""
+    """Headers for OPTIONS preflight — HTTP 204 No Content."""
     origin = get_header(request_headers, "Origin")
     return build_cors_headers(origin=origin or "*")

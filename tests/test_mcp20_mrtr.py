@@ -1,4 +1,4 @@
-"""Tests for MCP 2.0 MRTR multi round-trip requests (Doc 04)."""
+"""Tests for MCP 2.0 MRTR multi round-trip requests."""
 
 import asyncio
 import os

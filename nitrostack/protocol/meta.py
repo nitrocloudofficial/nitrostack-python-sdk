@@ -1,4 +1,4 @@
-"""Request _meta envelope parsing (Doc 02 §5)."""
+"""Request _meta envelope parsing."""
 
 from __future__ import annotations
 

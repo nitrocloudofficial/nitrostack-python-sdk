@@ -1,4 +1,4 @@
-"""Deprecated MCP methods rejected on the 2026-07-28 wire (Doc 02 §4)."""
+"""Deprecated MCP methods rejected on the 2026-07-28 wire."""
 
 from __future__ import annotations
 

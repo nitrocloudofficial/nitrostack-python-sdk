@@ -1,4 +1,4 @@
-"""Epic and acceptance-criteria verification for PYTHONSDK-11 (Doc 11)."""
+"""Acceptance-criteria verification for MCP 2026-07-28."""
 
 from __future__ import annotations
 
@@ -23,36 +23,21 @@ from nitrostack.core.di import DIContainer
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.runtime.conformance import assert_blueprint_layout
-from nitrostack.runtime.epic_acceptance import (
+from nitrostack.runtime.acceptance import (
     ACCEPTANCE_CRITERIA,
-    EPIC_DELIVERABLES,
-    MCP20_SPEC_DOCS,
     MCP20_TEST_MODULES,
-    ImplementationEpic,
+    PROTOCOL_DELIVERABLES,
+    ProtocolArea,
     acceptance_criteria_registered,
-    deliverables_for_epic,
-    epic_coverage_complete,
-    iter_epic_summary,
+    deliverables_for_area,
+    iter_area_summary,
     modern_protocol_target,
+    protocol_coverage_complete,
 )
+from nitrostack.runtime.conformance import assert_blueprint_layout
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-_SPEC_CANDIDATES = (
-    REPO_ROOT.parent / "traker" / "stateless-doc-for-python",
-    REPO_ROOT.parent.parent / "traker" / "stateless-doc-for-python",
-)
-
-
-def _resolve_spec_root() -> Path | None:
-    for candidate in _SPEC_CANDIDATES:
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
-SPEC_ROOT = _resolve_spec_root()
 
 
 class EchoInput(BaseModel):
@@ -67,14 +52,14 @@ def teardown_function() -> None:
     DIContainer.reset()
 
 
-class TestEpicRegistry:
-    def test_all_seven_epics_have_deliverables(self):
-        assert epic_coverage_complete()
-        for line in iter_epic_summary():
+class TestProtocolRegistry:
+    def test_all_areas_have_deliverables(self):
+        assert protocol_coverage_complete()
+        for line in iter_area_summary():
             assert "0 deliverable" not in line
 
-    def test_epic_deliverable_count(self):
-        assert len(EPIC_DELIVERABLES) >= 14
+    def test_deliverable_count(self):
+        assert len(PROTOCOL_DELIVERABLES) >= 14
 
     def test_acceptance_criteria_registered(self):
         assert acceptance_criteria_registered()
@@ -93,28 +78,19 @@ class TestEpicRegistry:
     def test_modern_protocol_target(self):
         assert modern_protocol_target() == "2026-07-28"
 
-    @pytest.mark.parametrize("epic", list(ImplementationEpic))
-    def test_each_epic_maps_to_spec_and_tests(self, epic: ImplementationEpic):
-        items = deliverables_for_epic(epic)
-        assert items, f"Epic {epic} has no deliverables"
+    @pytest.mark.parametrize("area", list(ProtocolArea))
+    def test_each_area_maps_to_tests(self, area: ProtocolArea):
+        items = deliverables_for_area(area)
+        assert items, f"Area {area} has no deliverables"
         for item in items:
-            assert item.spec_doc.endswith(".md")
-            assert item.test_module.startswith("tests/test_mcp20_doc")
+            assert item.test_module.startswith("tests/test_mcp20_")
 
 
-class TestSpecAndTestTraceability:
+class TestLayoutAndTestTraceability:
     def test_all_mcp20_test_modules_exist(self):
         for module_path in MCP20_TEST_MODULES:
             path = REPO_ROOT / module_path
             assert path.is_file(), module_path
-
-    @pytest.mark.parametrize("doc_name", MCP20_SPEC_DOCS)
-    def test_spec_documents_exist(self, doc_name: str):
-        if SPEC_ROOT is None:
-            pytest.skip("Spec folder not available beside the SDK checkout")
-        path = SPEC_ROOT / doc_name
-        assert path.is_file(), path
-        assert path.stat().st_size > 0
 
     def test_blueprint_layout_importable(self):
         assert_blueprint_layout()
@@ -129,11 +105,11 @@ class TestAcceptanceTaskConformance:
                 await asyncio.sleep(0.05)
                 return input.value
 
-        @module(name="Doc11Tasks", controllers=[AsyncController])
+        @module(name="AcceptanceTasks", controllers=[AsyncController])
         class TasksModule:
             pass
 
-        @mcp_app(module=TasksModule, server=ServerConfig(name="doc11-tasks"))
+        @mcp_app(module=TasksModule, server=ServerConfig(name="acceptance-tasks"))
         class TasksApp:
             pass
 
@@ -168,15 +144,15 @@ class TestAcceptanceTaskConformance:
 
             @injectable()
             class DummyController:
-                @tool(name="noop_doc11", description="noop", input_schema=EchoInput)
-                async def noop_doc11(self, input: EchoInput, context: ExecutionContext) -> str:
+                @tool(name="noop_accept", description="noop", input_schema=EchoInput)
+                async def noop_accept(self, input: EchoInput, context: ExecutionContext) -> str:
                     return "ok"
 
-            @module(name="Doc11Cancel", controllers=[DummyController])
+            @module(name="AcceptanceCancel", controllers=[DummyController])
             class CancelModule:
                 pass
 
-            @mcp_app(module=CancelModule, server=ServerConfig(name="doc11-cancel"))
+            @mcp_app(module=CancelModule, server=ServerConfig(name="acceptance-cancel"))
             class CancelApp:
                 pass
 
@@ -235,7 +211,7 @@ class TestAcceptanceStatelessInvariant:
 
 
 class TestAutomatedTestCoverageMap:
-    def test_doc_test_modules_importable(self):
+    def test_mcp20_test_modules_importable(self):
         for module_path in MCP20_TEST_MODULES:
             file_path = REPO_ROOT / module_path
             spec = importlib.util.spec_from_file_location(
@@ -247,5 +223,5 @@ class TestAutomatedTestCoverageMap:
             spec.loader.exec_module(module)
 
     def test_full_mcp20_suite_module_count(self):
-        doc_tests = sorted(REPO_ROOT.glob("tests/test_mcp20_doc*.py"))
-        assert len(doc_tests) == 12
+        suite = sorted(REPO_ROOT.glob("tests/test_mcp20_*.py"))
+        assert len(suite) == 12

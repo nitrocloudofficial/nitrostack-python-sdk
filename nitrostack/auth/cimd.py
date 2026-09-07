@@ -1,4 +1,4 @@
-"""Client ID Metadata Document (CIMD) resolution with SSRF defenses (Doc 08)."""
+"""Client ID Metadata Document (CIMD) resolution with SSRF defenses."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class CimdFetchError(ValueError):
 
 def validate_client_identifier_url(client_id_url: str, *, allow_loopback: bool = False) -> str:
     """
-    Validate a CIMD ``client_id`` URL before any network fetch (Doc 08 §3).
+    Validate a CIMD ``client_id`` URL before any network fetch.
 
     Returns the normalized URL string on success.
     """
@@ -116,7 +116,7 @@ def is_blocked_ip(ip_str: str) -> bool:
 
 
 async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False) -> None:
-    """DNS pre-resolution and IP range filtering (Doc 08 §4.1)."""
+    """DNS pre-resolution and IP range filtering."""
     validate_client_identifier_url(url_str, allow_loopback=allow_loopback)
     parsed = urllib.parse.urlparse(url_str)
     hostname = parsed.hostname
@@ -204,7 +204,7 @@ async def resolve_cimd(
     timeout_sec: float = CIMD_FETCH_TIMEOUT_SEC,
 ) -> dict[str, Any]:
     """
-    Fetch and validate a Client ID Metadata Document (Doc 08 §4).
+    Fetch and validate a Client ID Metadata Document.
 
     Applies URL validation, DNS/IP filtering, redirect blocking, timeout,
     payload size bounding, and anti-impersonation ``client_id`` checks.

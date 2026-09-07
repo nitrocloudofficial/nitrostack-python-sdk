@@ -1,4 +1,4 @@
-"""Stateless HTTP invariants from Doc 00 §2 and Doc 01."""
+"""Stateless HTTP invariants for MCP 2026-07-28."""
 
 from dataclasses import dataclass
 
