@@ -9,13 +9,11 @@ from nitrostack.protocol.constants import MAX_SCHEMA_DEPTH
 JSON_SCHEMA_2020_12_URI = "https://json-schema.org/draft/2020-12/schema"
 
 _COMPOSITION_KEYS = frozenset({"allOf", "anyOf", "oneOf"})
-_NESTED_SCHEMA_KEYS = frozenset(
+_MAP_SCHEMA_KEYS = frozenset({"properties", "patternProperties"})
+_SINGLE_SCHEMA_KEYS = frozenset(
     {
-        "properties",
-        "patternProperties",
         "additionalProperties",
         "items",
-        "prefixItems",
         "contains",
         "propertyNames",
         "if",
@@ -53,12 +51,14 @@ def bound_schema_depth(
                 def_key: bound_schema_depth(def_val, max_depth=max_depth, depth=depth + 1)
                 for def_key, def_val in value.items()
             }
-        elif key in _NESTED_SCHEMA_KEYS:
+        elif key in _MAP_SCHEMA_KEYS and isinstance(value, dict):
+            result[key] = {
+                nested_key: bound_schema_depth(nested_val, max_depth=max_depth, depth=depth + 1)
+                for nested_key, nested_val in value.items()
+            }
+        elif key in _SINGLE_SCHEMA_KEYS or key == "prefixItems":
             if isinstance(value, dict):
-                result[key] = {
-                    nested_key: bound_schema_depth(nested_val, max_depth=max_depth, depth=depth + 1)
-                    for nested_key, nested_val in value.items()
-                }
+                result[key] = bound_schema_depth(value, max_depth=max_depth, depth=depth + 1)
             elif isinstance(value, list):
                 result[key] = [
                     bound_schema_depth(item, max_depth=max_depth, depth=depth + 1) for item in value

@@ -63,8 +63,9 @@ class StatelessIngressPipeline:
     """
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
 
-    Handles ping and server/discover inline. Task and registry methods return
-    None so the underlying MCP server can handle them.
+    Handles ping, server/discover, and deprecated-method rejection inline.
+    Task and tool methods always return None so ``TaskManager`` plus the
+    low-level MCP server remain the only production task path.
     """
 
     def __init__(

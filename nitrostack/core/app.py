@@ -76,7 +76,7 @@ class ServerConfig:
     # `start()` time (`MCP_STATELESS`, `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`);
     # the env var wins if both are set, matching the existing `transport_type`/
     # `MCP_TRANSPORT_TYPE` precedence below.
-    stateless: bool = True
+    stateless: bool = False
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
     json_response: bool = False
@@ -390,19 +390,25 @@ class McpApplication:
         container = DIContainer.get_instance()
         self._assert_declared_dependencies(resolved_modules, container)
 
-        # Instantiate all providers and controllers to populate container
+        # Instantiate all providers and controllers to populate container.
+        # Scan both: providers with @tool/@resource/@prompt must stay discoverable.
         module_instances: List[Any] = []
+        seen_instance_ids: Set[int] = set()
         for mod in resolved_modules:
             mod_config = getattr(mod, "_mcp_module_config", None)
             if mod_config:
-                # Register & Resolve all providers
                 for provider in mod_config.providers:
-                    container.resolve(provider)
-                # Register & Resolve all controllers
+                    instance = container.resolve(provider)
+                    if id(instance) not in seen_instance_ids:
+                        seen_instance_ids.add(id(instance))
+                        module_instances.append(instance)
                 for controller in mod_config.controllers:
-                    module_instances.append(container.resolve(controller))
+                    instance = container.resolve(controller)
+                    if id(instance) not in seen_instance_ids:
+                        seen_instance_ids.add(id(instance))
+                        module_instances.append(instance)
 
-        # 3. Discover decorated methods on resolved module instances only
+        # 3. Discover decorated methods on resolved module providers and controllers
         for instance in module_instances:
             # Scan members of this instance
             for name, member in inspect.getmembers(instance):

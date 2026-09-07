@@ -47,7 +47,7 @@ class ToolConfig:
     title: Optional[str] = None
     output_schema: Optional[Any] = None
     annotations: ToolAnnotations = field(default_factory=ToolAnnotations)
-    task_support: Literal["forbidden", "optional", "required"] = "optional"
+    task_support: Literal["forbidden", "optional", "required"] = "forbidden"
     visibility: Literal["visible", "hidden"] = "visible"
     examples: Optional[ToolExamples] = None
     invocation: Optional[ToolInvocation] = None
@@ -96,7 +96,7 @@ def tool(
     title: Optional[str] = None,
     output_schema: Optional[Any] = None,
     annotations: Optional[ToolAnnotations] = None,
-    task_support: Literal["forbidden", "optional", "required"] = "optional",
+    task_support: Literal["forbidden", "optional", "required"] = "forbidden",
     visibility: Literal["visible", "hidden"] = "visible",
     examples: Optional[ToolExamples] = None,
     invocation: Optional[ToolInvocation] = None,

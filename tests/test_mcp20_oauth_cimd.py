@@ -10,12 +10,13 @@ import pytest
 from nitrostack.auth.cimd import (
     CimdFetchError,
     CimdValidationError,
+    _fetch_cimd_bytes,
     assert_safe_fetch_target,
     is_blocked_ip,
     resolve_cimd,
     validate_client_identifier_url,
 )
-from nitrostack.auth.oauth_module import build_protected_resource_metadata
+from nitrostack.auth.oauth_module import apply_cimd_to_registration_body, build_protected_resource_metadata
 from nitrostack.auth.oauth_security import (
     AuthorizationIssuerMismatchError,
     validate_authorization_iss,
@@ -91,7 +92,7 @@ class TestCimdResolver:
         async def _run():
             url = "https://app.nitrostack.io/oauth/client-metadata.json"
 
-            def fake_fetch(_url, *, timeout_sec):
+            def fake_fetch(_url, *, timeout_sec, pinned_ip=None):
                 raise CimdFetchError("HTTP redirects are not allowed for CIMD fetch")
 
             with patch("nitrostack.auth.cimd.assert_safe_fetch_target", return_value=None):
@@ -147,6 +148,40 @@ class TestCimdResolver:
                     assert doc["client_name"] == "NitroStudio"
 
         asyncio.run(_run())
+
+
+    def test_fetch_connects_to_pinned_ip(self):
+        connected: dict[str, object] = {}
+
+        def fake_create(address, timeout=None):
+            connected["addr"] = address
+            raise OSError("stop before handshake")
+
+        with patch("nitrostack.auth.cimd.socket.create_connection", side_effect=fake_create):
+            with pytest.raises(CimdFetchError):
+                _fetch_cimd_bytes(
+                    "https://app.nitrostack.io/oauth/client-metadata.json",
+                    timeout_sec=1.0,
+                    pinned_ip="8.8.8.8",
+                )
+        assert connected["addr"][0] == "8.8.8.8"
+
+
+class TestCimdRegistrationWiring:
+    def test_applies_cimd_document_to_registration_body(self):
+        url = "https://app.nitrostack.io/oauth/client-metadata.json"
+        with patch(
+            "nitrostack.auth.oauth_module.resolve_cimd_sync",
+            return_value={"client_id": url, "client_name": "Studio"},
+        ):
+            body = apply_cimd_to_registration_body({"client_id": url, "redirect_uris": []})
+        assert body["client_id"] == url
+        assert body["_cimd"]["client_name"] == "Studio"
+
+    def test_leaves_non_url_client_id_unchanged(self):
+        body = apply_cimd_to_registration_body({"client_id": "static-client"})
+        assert body["client_id"] == "static-client"
+        assert "_cimd" not in body
 
 
 class TestProtectedResourceMetadata:

@@ -187,9 +187,9 @@ class TaskManager:
         entry = await self._require_entry(task_id, access_context=access_context)
         return self._snapshot_from_entry(entry)
 
-    async def update_progress(self, task_id: str, progress: Any) -> None:
-        """Update progress for an active task."""
-        entry = await self._require_entry(task_id)
+    def update_progress_sync(self, task_id: str, progress: Any) -> None:
+        """Synchronous progress update for ``TaskContext`` (same-loop safe)."""
+        entry = self._require_entry_sync(task_id)
         status = _status_from_wire(entry.status)
         if is_terminal_status(status):
             if status == TaskStatus.EXPIRED:
@@ -199,7 +199,11 @@ class TaskManager:
         entry.data.status_message = str(progress)
         entry.data.last_updated_at = now
         entry.status = entry.data.status
-        await self._store.set(task_id, entry)
+        self._store_set_sync(task_id, entry)
+
+    async def update_progress(self, task_id: str, progress: Any) -> None:
+        """Update progress for an active task."""
+        self.update_progress_sync(task_id, progress)
 
     async def require_input(
         self,
@@ -263,14 +267,14 @@ class TaskManager:
         await self._store.set(task_id, entry)
         self._signal_done(task_id)
 
-    async def cancel_task(
+    def cancel_task_sync(
         self,
         task_id: str,
         *,
         access_context: Optional[TaskAccessContext] = None,
     ) -> None:
-        """Transition an active task to ``cancelled``."""
-        entry = await self._require_entry(task_id, access_context=access_context)
+        """Synchronous cancel for ``TaskContext`` (same-loop safe)."""
+        entry = self._require_entry_sync(task_id, access_context=access_context)
         status = _status_from_wire(entry.status)
         if is_terminal_status(status):
             if status == TaskStatus.EXPIRED:
@@ -280,10 +284,19 @@ class TaskManager:
         entry.data.status = "cancelled"
         entry.data.status_message = "Task cancelled by client"
         entry.data.last_updated_at = utc_now()
-        await self._store.set(task_id, entry)
+        self._store_set_sync(task_id, entry)
         handle = self._runtime.setdefault(task_id, _RuntimeTaskHandle())
         handle.cancelled = True
         self._signal_done(task_id)
+
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> None:
+        """Transition an active task to ``cancelled``."""
+        self.cancel_task_sync(task_id, access_context=access_context)
 
     async def list_tasks(
         self,
@@ -387,6 +400,30 @@ class TaskManager:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _store_get_sync(self, task_id: str) -> Optional[TaskEntry]:
+        getter = getattr(self._store, "get_sync", None)
+        if getter is None:
+            raise RuntimeError("Task store does not support synchronous reads")
+        return getter(task_id)
+
+    def _store_set_sync(self, task_id: str, entry: TaskEntry) -> None:
+        setter = getattr(self._store, "set_sync", None)
+        if setter is None:
+            raise RuntimeError("Task store does not support synchronous writes")
+        setter(task_id, entry)
+
+    def _require_entry_sync(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskEntry:
+        entry = self._store_get_sync(task_id)
+        if entry is None:
+            raise TaskNotFoundError(task_id)
+        check_task_access(entry, access_context)
+        return entry
 
     async def _require_entry(
         self,

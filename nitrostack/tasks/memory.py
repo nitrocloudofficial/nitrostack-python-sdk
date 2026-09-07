@@ -15,11 +15,17 @@ class InMemoryTaskStore(TaskStore):
     def __init__(self) -> None:
         self._entries: Dict[str, TaskEntry] = {}
 
-    async def get(self, task_id: str) -> Optional[TaskEntry]:
+    def get_sync(self, task_id: str) -> Optional[TaskEntry]:
         return self._entries.get(task_id)
 
-    async def set(self, task_id: str, entry: TaskEntry) -> None:
+    def set_sync(self, task_id: str, entry: TaskEntry) -> None:
         self._entries[task_id] = entry
+
+    async def get(self, task_id: str) -> Optional[TaskEntry]:
+        return self.get_sync(task_id)
+
+    async def set(self, task_id: str, entry: TaskEntry) -> None:
+        self.set_sync(task_id, entry)
 
     async def delete(self, task_id: str) -> bool:
         return self._entries.pop(task_id, None) is not None

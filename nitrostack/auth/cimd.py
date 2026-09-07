@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import ipaddress
 import json
 import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Optional
 
 from nitrostack.protocol.constants import MAX_CIMD_BYTES
 
@@ -115,8 +117,15 @@ def is_blocked_ip(ip_str: str) -> bool:
     return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
 
 
-async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False) -> None:
-    """DNS pre-resolution and IP range filtering."""
+def _pick_pinned_ip(resolved_ips: set[str]) -> str:
+    ipv4 = sorted(ip for ip in resolved_ips if ":" not in ip)
+    if ipv4:
+        return ipv4[0]
+    return sorted(resolved_ips)[0]
+
+
+async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False) -> Optional[str]:
+    """DNS pre-resolution and IP range filtering. Returns the pinned destination IP."""
     validate_client_identifier_url(url_str, allow_loopback=allow_loopback)
     parsed = urllib.parse.urlparse(url_str)
     hostname = parsed.hostname
@@ -124,7 +133,9 @@ async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False
         raise CimdFetchError(f"Invalid hostname in URL: {url_str}")
 
     if allow_loopback and hostname.lower() in _LOOPBACK_HOSTS:
-        return
+        if hostname.lower() == "::1":
+            return "::1"
+        return "127.0.0.1"
 
     loop = asyncio.get_running_loop()
     try:
@@ -143,19 +154,90 @@ async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False
         if is_blocked_ip(ip):
             raise CimdFetchError(f"Destination {hostname} resolved to blocked IP: {ip}")
 
+    return _pick_pinned_ip(resolved_ips)
 
-def _fetch_cimd_bytes(url_str: str, *, timeout_sec: float) -> bytes:
-    class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            raise urllib.error.HTTPError(
-                url_str,
-                code,
-                "HTTP redirects are not allowed for CIMD fetch",
-                headers,
-                fp,
-            )
 
-    opener = urllib.request.build_opener(_NoRedirectHandler)
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, hostname: str, pinned_ip: str, port: Optional[int] = None, **kwargs: Any) -> None:
+        super().__init__(hostname, port=port, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        peer = self.sock.getpeername()[0]
+        if peer != self._pinned_ip or is_blocked_ip(peer):
+            self.sock.close()
+            raise CimdFetchError(f"Peer address {peer} is not the pinned safe IP")
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, hostname: str, pinned_ip: str, port: Optional[int] = None, **kwargs: Any) -> None:
+        super().__init__(hostname, port=port, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        peer = self.sock.getpeername()[0]
+        if peer != self._pinned_ip or is_blocked_ip(peer):
+            self.sock.close()
+            raise CimdFetchError(f"Peer address {peer} is not the pinned safe IP")
+        context = self._context if getattr(self, "_context", None) else ssl.create_default_context()
+        self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, hostname: str, pinned_ip: str) -> None:
+        super().__init__()
+        self._hostname = hostname
+        self._pinned_ip = pinned_ip
+
+    def http_open(self, req: urllib.request.Request):
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPConnection(self._hostname, self._pinned_ip, **kwargs),
+            req,
+        )
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, hostname: str, pinned_ip: str) -> None:
+        super().__init__()
+        self._hostname = hostname
+        self._pinned_ip = pinned_ip
+
+    def https_open(self, req: urllib.request.Request):
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPSConnection(self._hostname, self._pinned_ip, **kwargs),
+            req,
+        )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            "HTTP redirects are not allowed for CIMD fetch",
+            headers,
+            fp,
+        )
+
+
+def _fetch_cimd_bytes(
+    url_str: str,
+    *,
+    timeout_sec: float,
+    pinned_ip: Optional[str] = None,
+) -> bytes:
+    parsed = urllib.parse.urlparse(url_str)
+    hostname = parsed.hostname
+    handlers: list[urllib.request.BaseHandler] = [_NoRedirectHandler()]
+    if pinned_ip and hostname:
+        if (parsed.scheme or "").lower() == "http":
+            handlers.append(_PinnedHTTPHandler(hostname, pinned_ip))
+        else:
+            handlers.append(_PinnedHTTPSHandler(hostname, pinned_ip))
+
+    opener = urllib.request.build_opener(*handlers)
     request = urllib.request.Request(url_str, headers={"Accept": "application/json"}, method="GET")
 
     try:
@@ -179,12 +261,16 @@ def _fetch_cimd_bytes(url_str: str, *, timeout_sec: float) -> bytes:
                     raise CimdFetchError(f"CIMD exceeds maximum size of {MAX_CIMD_BYTES} bytes")
                 chunks.append(chunk)
             return b"".join(chunks)
+    except CimdFetchError:
+        raise
     except urllib.error.HTTPError as exc:
         if 300 <= exc.code < 400:
             raise CimdFetchError("HTTP redirects are not allowed for CIMD fetch") from exc
         raise CimdFetchError(f"CIMD fetch failed with HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise CimdFetchError(f"CIMD fetch failed: {exc.reason}") from exc
+    except OSError as exc:
+        raise CimdFetchError(f"CIMD fetch failed: {exc}") from exc
 
 
 def _validate_cimd_document(doc: Any, fetched_url: str) -> dict[str, Any]:
@@ -210,9 +296,14 @@ async def resolve_cimd(
     payload size bounding, and anti-impersonation ``client_id`` checks.
     """
     normalized = validate_client_identifier_url(client_id_url, allow_loopback=allow_loopback)
-    await assert_safe_fetch_target(normalized, allow_loopback=allow_loopback)
+    pinned_ip = await assert_safe_fetch_target(normalized, allow_loopback=allow_loopback)
 
-    body = await asyncio.to_thread(_fetch_cimd_bytes, normalized, timeout_sec=timeout_sec)
+    body = await asyncio.to_thread(
+        _fetch_cimd_bytes,
+        normalized,
+        timeout_sec=timeout_sec,
+        pinned_ip=pinned_ip,
+    )
     if len(body) > MAX_CIMD_BYTES:
         raise CimdFetchError(f"CIMD exceeds maximum size of {MAX_CIMD_BYTES} bytes")
     try:
@@ -221,3 +312,45 @@ async def resolve_cimd(
         raise CimdValidationError("CIMD document must be valid UTF-8 JSON") from exc
 
     return _validate_cimd_document(document, normalized)
+
+
+def looks_like_cimd_url(value: Any) -> bool:
+    """Return True when ``value`` is an http(s) client identifier URL."""
+    return isinstance(value, str) and value.startswith(("https://", "http://"))
+
+
+def resolve_cimd_sync(
+    client_id_url: str,
+    *,
+    allow_loopback: bool = False,
+    timeout_sec: float = CIMD_FETCH_TIMEOUT_SEC,
+) -> dict[str, Any]:
+    """Synchronous wrapper for registration / other non-async callers."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            resolve_cimd(client_id_url, allow_loopback=allow_loopback, timeout_sec=timeout_sec)
+        )
+    raise CimdFetchError("CIMD resolution cannot run nested on a running event loop")
+
+
+def looks_like_cimd_url(value: Any) -> bool:
+    """Return True when ``value`` is an http(s) client identifier URL."""
+    return isinstance(value, str) and value.startswith(("https://", "http://"))
+
+
+def resolve_cimd_sync(
+    client_id_url: str,
+    *,
+    allow_loopback: bool = False,
+    timeout_sec: float = CIMD_FETCH_TIMEOUT_SEC,
+) -> dict[str, Any]:
+    """Synchronous wrapper for registration / other non-async callers."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            resolve_cimd(client_id_url, allow_loopback=allow_loopback, timeout_sec=timeout_sec)
+        )
+    raise CimdFetchError("CIMD resolution cannot run nested on a running event loop")

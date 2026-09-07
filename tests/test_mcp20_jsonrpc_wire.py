@@ -13,6 +13,7 @@ from nitrostack.protocol.jsonrpc import (
     PARSE_ERROR,
     HeaderBodyMismatchError,
     InvalidParamsError,
+    InvalidRequestError,
     JsonRpcParseError,
     build_tool_error_result,
     map_exception_to_jsonrpc,
@@ -134,6 +135,19 @@ class TestJsonRpcParseErrors:
         with pytest.raises(JsonRpcParseError) as exc:
             parse_jsonrpc_request(b"{")
         assert int(exc.value.code) == PARSE_ERROR
+
+    def test_non_object_is_invalid_request(self):
+        with pytest.raises(InvalidRequestError) as exc:
+            parse_jsonrpc_request(b"[]")
+        assert int(exc.value.code) == int(JsonRpcErrorCode.INVALID_REQUEST)
+
+    def test_wrong_jsonrpc_version_is_invalid_request(self):
+        with pytest.raises(InvalidRequestError):
+            parse_jsonrpc_request(b'{"jsonrpc":"1.0","id":1,"method":"ping"}')
+
+    def test_missing_method_is_invalid_request(self):
+        with pytest.raises(InvalidRequestError):
+            parse_jsonrpc_request(b'{"jsonrpc":"2.0","id":1}')
 
     def test_wire_error_to_response(self):
         err = InvalidParamsError("amount must be positive", data={"param": "amount"})

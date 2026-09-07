@@ -126,12 +126,10 @@ class TaskContext:
         self.progress_message = message
         manager = self._task_manager
         if manager is not None:
-            try:
-                import asyncio
-
-                asyncio.create_task(manager.update_progress(self.task_id, message))
-            except Exception:
-                pass
+            updater = getattr(manager, "update_progress_sync", None)
+            if updater is None:
+                raise RuntimeError("Task manager does not support synchronous progress updates")
+            updater(self.task_id, message)
         self._push_progress_notification(message)
 
     def _push_progress_notification(self, message: str) -> None:
@@ -158,12 +156,10 @@ class TaskContext:
         manager = self._task_manager
         if manager is None:
             return
-        try:
-            import asyncio
-
-            asyncio.create_task(manager.cancel_task(self.task_id))
-        except Exception:
-            pass
+        canceller = getattr(manager, "cancel_task_sync", None)
+        if canceller is None:
+            raise RuntimeError("Task manager does not support synchronous cancel")
+        canceller(self.task_id)
 
     def throw_if_cancelled(self) -> None:
         manager = self._task_manager

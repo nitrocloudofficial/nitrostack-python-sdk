@@ -55,6 +55,13 @@ class TestJsonSchema2020_12:
             node = node["properties"]["child"]
         assert node["properties"]["child"] == {}
 
+    def test_items_object_is_a_single_schema(self):
+        bounded = bound_schema_depth(
+            {"type": "array", "items": {"type": "string", "minLength": 1}},
+            max_depth=8,
+        )
+        assert bounded["items"] == {"type": "string", "minLength": 1}
+
 
 class TestResourceUriResolution:
     def test_static_resource_exact_match(self):

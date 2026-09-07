@@ -77,6 +77,26 @@ class TestCheckTaskAccess:
         entry = TaskEntry(task_id="t1", data=TaskWireData(task_id="t1"), owner_id="user-a")
         check_task_access(entry, None)
 
+    def test_empty_http_context_denies_owned_task(self):
+        entry = TaskEntry(
+            task_id="t1",
+            data=TaskWireData(task_id="t1"),
+            owner_id="user-a",
+            tenant_id="tenant-a",
+        )
+        with pytest.raises(TaskNotFoundError):
+            check_task_access(entry, TaskAccessContext())
+
+    def test_partial_context_denies_when_task_has_tenant(self):
+        entry = TaskEntry(
+            task_id="t1",
+            data=TaskWireData(task_id="t1"),
+            owner_id="alice",
+            tenant_id="acme",
+        )
+        with pytest.raises(TaskNotFoundError):
+            check_task_access(entry, TaskAccessContext(user_id="alice"))
+
 
 class TestListFiltering:
     def test_filters_by_tenant_and_sorts_desc(self):
@@ -208,7 +228,7 @@ class TestWireHandlersAntiEnumeration:
 
 
 class TestExtractTaskAccessContext:
-    def test_reads_identity_from_request_meta(self):
+    def test_ignores_spoofed_meta_identity(self):
         rc = RequestContext(
             request_id="1",
             meta=types.RequestParams.Meta(
@@ -219,6 +239,47 @@ class TestExtractTaskAccessContext:
         )
         ctx = extract_task_access_context(rc)
         assert ctx is not None
-        assert ctx.user_id == "u1"
-        assert ctx.tenant_id == "t1"
-        assert ctx.session_id == "s1"
+        assert ctx.user_id is None
+        assert ctx.tenant_id is None
+        assert ctx.session_id is None
+
+    def test_uses_verified_jwt_not_meta(self):
+        from types import SimpleNamespace
+
+        from nitrostack.auth.jwt import JWTService
+
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta(
+                __pydantic_extra__={"userId": "eve", "tenantId": "evil"}
+            ),
+            session=None,
+            lifespan_context=None,
+            request=SimpleNamespace(headers={"authorization": f"Bearer {token}"}),
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id == "alice"
+        assert ctx.tenant_id == "acme"
+
+    def test_failed_jwt_returns_empty_context(self):
+        from types import SimpleNamespace
+
+        from nitrostack.auth.jwt import JWTService
+
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        rc = RequestContext(
+            request_id="1",
+            meta=None,
+            session=None,
+            lifespan_context=None,
+            request=SimpleNamespace(headers={"authorization": "Bearer not-a-jwt"}),
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id is None
+        assert ctx.tenant_id is None

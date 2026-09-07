@@ -10,11 +10,13 @@ import threading
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
 from nitrostack.auth.oauth_module import (
+    apply_cimd_to_registration_body,
     build_authorization_server_metadata,
     build_protected_resource_metadata,
     build_registration_response,
     is_client_registration_enabled,
 )
+from nitrostack.auth.cimd import CimdFetchError, CimdValidationError
 from nitrostack.core.errors import AudienceMismatchError, ConfigurationError, TokenInactiveError
 
 
@@ -208,6 +210,19 @@ class OAuthService:
                     body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
                 except Exception:
                     body = {}
+
+                try:
+                    body = apply_cimd_to_registration_body(body)
+                except (CimdValidationError, CimdFetchError) as exc:
+                    _write_json(
+                        self,
+                        400,
+                        {
+                            "error": "invalid_client_metadata",
+                            "error_description": str(exc),
+                        },
+                    )
+                    return
 
                 _write_json(self, 200, build_registration_response(service_instance, body))
 

@@ -18,7 +18,7 @@ from nitrostack.protocol.jsonrpc import (
     validate_header_body_method,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
+from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers, resolve_allowed_origin
 from nitrostack.transports.dispatch import (
     IngressContext,
     StatelessIngressPipeline,
@@ -54,6 +54,20 @@ class TestCors:
     def test_preflight_headers(self):
         headers = cors_preflight_response_headers({"Origin": "https://app.example.com"})
         assert "Access-Control-Allow-Origin" in headers
+
+    def test_does_not_reflect_arbitrary_origin(self):
+        headers = build_cors_headers(origin="https://evil.example")
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+    def test_allowlist_echoes_only_listed_origin(self):
+        assert resolve_allowed_origin(
+            "https://app.example.com",
+            allowed_origins=("https://app.example.com",),
+        ) == "https://app.example.com"
+        assert resolve_allowed_origin(
+            "https://evil.example",
+            allowed_origins=("https://app.example.com",),
+        ) == "https://app.example.com"
 
 
 class TestJsonRpcParsing:
@@ -179,3 +193,117 @@ class TestSse:
             {"method": "notifications/tasks/status", "params": {"taskId": "abc"}}
         )
         assert b"notifications/tasks/status" in frame
+
+
+class TestReplayDoesNotSynthesizeDisconnect:
+    def test_waits_for_real_disconnect(self):
+        from nitrostack.transports.middleware import StatelessTransportMiddleware
+
+        calls = {"n": 0}
+
+        async def original_receive():
+            calls["n"] += 1
+            return {"type": "http.disconnect"}
+
+        replay = StatelessTransportMiddleware._replay_receive(b"{}", original_receive)
+
+        async def _run():
+            first = await replay()
+            assert first == {"type": "http.request", "body": b"{}", "more_body": False}
+            assert calls["n"] == 0
+            second = await replay()
+            assert second == {"type": "http.disconnect"}
+            assert calls["n"] == 1
+
+        asyncio.run(_run())
+
+
+class TestOptionsScopedToMcpPath:
+    def test_options_mcp_is_204_health_is_forwarded(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+        from pydantic import BaseModel, Field
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="OptionsHttp", controllers=[EchoController])
+            class OptionsModule:
+                pass
+
+            @mcp_app(module=OptionsModule, server=ServerConfig(name="options-http", stateless=True))
+            class OptionsApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(OptionsApp))
+            http_app = app.get_combined_app(stateless=True, json_response=True)
+            with TestClient(http_app) as client:
+                mcp_opt = client.options("/mcp")
+                health_opt = client.options("/mcp/health")
+                call = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+            assert mcp_opt.status_code == 204
+            assert health_opt.status_code != 204
+            assert call.status_code == 200
+            assert call.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+
+
+class TestProviderToolDiscovery:
+    def test_provider_tools_are_registered(self):
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.decorators import ToolConfig
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        assert ToolConfig(name="x", description="d", input_schema={}).task_support == "forbidden"
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class ToolProvider:
+                @tool(name="from_provider", description="provider", input_schema=EchoInput)
+                async def from_provider(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="ProviderTools", providers=[ToolProvider], controllers=[])
+            class ProviderModule:
+                pass
+
+            @mcp_app(module=ProviderModule, server=ServerConfig(name="provider-tools"))
+            class ProviderApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(ProviderApp))
+            assert "from_provider" in app._tools
+            assert app._tools["from_provider"].config.task_support == "forbidden"
+        finally:
+            DIContainer.reset()

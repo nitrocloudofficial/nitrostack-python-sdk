@@ -106,4 +106,4 @@ class TestServerConfigMcp20:
     def test_default_stateless_config(self):
         cfg = ServerConfig(name="test-server")
         assert cfg.protocol_version == MODERN_PROTOCOL_VERSION
-        assert cfg.stateless is True
+        assert cfg.stateless is False

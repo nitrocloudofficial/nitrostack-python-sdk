@@ -384,12 +384,13 @@ class TestTaskContext:
         ctx = TaskContext(task.id, manager.raw)
         ctx.throw_if_cancelled()  # should not raise
 
-    def test_update_progress_after_cancel_does_not_raise(self):
+    def test_update_progress_after_cancel_raises(self):
         manager = _manager()
         task = manager.create_task()
         ctx = TaskContext(task.id, manager.raw)
         manager.cancel_task(task.id)
-        ctx.update_progress("ignored")  # swallowed
+        with pytest.raises(TaskAlreadyTerminalError):
+            ctx.update_progress("ignored")
 
 
 # ===========================================================================

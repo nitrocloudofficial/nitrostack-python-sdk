@@ -20,6 +20,11 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from nitrostack.auth.cimd import (
+    looks_like_cimd_url,
+    resolve_cimd_sync,
+)
+
 if TYPE_CHECKING:
     from nitrostack.auth.oauth import OAuthService
 
@@ -77,6 +82,23 @@ def is_client_registration_enabled(service: "OAuthService") -> bool:
     Deprecated on MCP 2026-07-28 in favor of Client ID Metadata Documents (CIMD).
     """
     return bool(service.enable_client_registration and service.static_client_id)
+
+
+def apply_cimd_to_registration_body(body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    When registration includes a CIMD ``client_id`` URL, fetch and validate it.
+
+    Returns the body unchanged when ``client_id`` is not a URL. Raises
+    ``CimdValidationError`` / ``CimdFetchError`` on a failed CIMD fetch.
+    """
+    payload = dict(body or {})
+    client_id = payload.get("client_id")
+    if not looks_like_cimd_url(client_id):
+        return payload
+    document = resolve_cimd_sync(str(client_id))
+    payload["client_id"] = document["client_id"]
+    payload["_cimd"] = document
+    return payload
 
 
 def build_registration_response(service: "OAuthService", body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

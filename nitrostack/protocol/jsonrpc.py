@@ -89,15 +89,15 @@ def parse_jsonrpc_request(raw_body: bytes) -> JsonRpcRequest:
         raise JsonRpcParseError(str(exc)) from exc
 
     if not isinstance(payload, dict):
-        raise JsonRpcParseError("Request must be a JSON object")
+        raise InvalidRequestError("Request must be a JSON object")
     if payload.get("jsonrpc") != JSONRPC_VERSION:
-        raise JsonRpcParseError("jsonrpc must be '2.0'")
+        raise InvalidRequestError("jsonrpc must be '2.0'")
     if "method" not in payload or not isinstance(payload["method"], str):
-        raise JsonRpcParseError("method is required and must be a string")
+        raise InvalidRequestError("method is required and must be a string")
 
     params = payload.get("params") or {}
     if not isinstance(params, dict):
-        raise JsonRpcParseError("params must be an object when present")
+        raise InvalidRequestError("params must be an object when present")
 
     business_params, meta = split_params_and_meta(params)
 

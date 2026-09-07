@@ -22,7 +22,7 @@ MCP_POST_PATHS = (MCP_HTTP_PATH, f"{MCP_HTTP_PATH}/")
 class StatelessTransportMiddleware:
     """
     ASGI wrapper implementing stateless HTTP transport invariants:
-    - OPTIONS 204 CORS preflight
+    - OPTIONS 204 CORS preflight on MCP paths only
     - Legacy session header stripping
     - MCP response headers on all responses
     - Pre-dispatch for POST /mcp (ping, server/discover)
@@ -47,7 +47,7 @@ class StatelessTransportMiddleware:
         method = scope.get("method", "GET").upper()
         path = scope.get("path", "")
 
-        if method == "OPTIONS":
+        if method == "OPTIONS" and path in self.mcp_paths:
             await self._send_options(scope, receive, send)
             return
 
@@ -56,7 +56,7 @@ class StatelessTransportMiddleware:
             handled = await self._try_pre_dispatch(scope, body, send)
             if handled:
                 return
-            receive = self._replay_receive(body)
+            receive = self._replay_receive(body, receive)
 
         await self._forward_with_stateless_headers(scope, receive, send)
 
@@ -96,7 +96,7 @@ class StatelessTransportMiddleware:
 
         status, jsonrpc_response = result
         origin = get_header(req_headers, "Origin")
-        cors = build_cors_headers(origin=origin or "*")
+        cors = build_cors_headers(origin=origin)
         response_headers = build_mcp_response_headers(extra=cors)
         assert_stateless_headers(response_headers)
 
@@ -130,7 +130,7 @@ class StatelessTransportMiddleware:
                 merged = build_mcp_response_headers(
                     content_type=raw_headers.get("content-type", "application/json"),
                     extra={
-                        **build_cors_headers(origin=get_header(req_headers, "Origin") or "*"),
+                        **build_cors_headers(origin=get_header(req_headers, "Origin")),
                         **strip_legacy_session_headers(raw_headers),
                     },
                 )
@@ -155,7 +155,7 @@ class StatelessTransportMiddleware:
         return body
 
     @staticmethod
-    def _replay_receive(body: bytes) -> Any:
+    def _replay_receive(body: bytes, original_receive: Any) -> Any:
         sent = False
 
         async def replay() -> dict[str, Any]:
@@ -163,7 +163,13 @@ class StatelessTransportMiddleware:
             if not sent:
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.disconnect"}
+            # Body was already buffered. Wait for a real client disconnect
+            # instead of synthesizing one — Streamable HTTP treats disconnect
+            # as an abort of the in-flight request.
+            while True:
+                message = await original_receive()
+                if message.get("type") == "http.disconnect":
+                    return message
 
         return replay
 
