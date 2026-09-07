@@ -25,7 +25,11 @@ class FileLogger:
         self.logger = logging.getLogger(name)
         
         # Read log level from environment
-        level_str = os.environ.get("NITROSTACK_LOG_LEVEL", "DEBUG").upper()
+        level_str = (
+            os.environ.get("NITROSTACK_LOG_LEVEL")
+            or os.environ.get("NITRO_LOG_LEVEL")
+            or "DEBUG"
+        ).upper()
         level = getattr(logging, level_str, logging.DEBUG)
         self.logger.setLevel(level)
         

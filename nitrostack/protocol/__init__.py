@@ -60,13 +60,21 @@ from nitrostack.protocol.tasks import (
 from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     MODERN_PROTOCOL_VERSION,
+    PROTOCOL_ERA_ENV,
     SUPPORTED_PROTOCOL_VERSIONS,
+    protocol_version_for_era,
+    resolve_protocol_era,
+    stateless_for_era,
 )
 
 __all__ = [
     "LEGACY_PROTOCOL_VERSION",
     "MODERN_PROTOCOL_VERSION",
+    "PROTOCOL_ERA_ENV",
     "SUPPORTED_PROTOCOL_VERSIONS",
+    "protocol_version_for_era",
+    "resolve_protocol_era",
+    "stateless_for_era",
     "MCPExtensionId",
     "RuntimeLayer",
     "LEGACY_SESSION_HEADER",

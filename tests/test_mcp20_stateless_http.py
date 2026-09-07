@@ -307,3 +307,60 @@ class TestProviderToolDiscovery:
             assert app._tools["from_provider"].config.task_support == "forbidden"
         finally:
             DIContainer.reset()
+
+
+class TestNitroMcpProtocolVersionEnv:
+    def test_modern_era_enables_stateless_without_mcp_stateless(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "2026-07-28")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="EraHttp", controllers=[EchoController])
+            class EraModule:
+                pass
+
+            @mcp_app(module=EraModule, server=ServerConfig(name="era-http"))
+            class EraApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(EraApp))
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                mcp_opt = client.options("/mcp")
+                call = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "ping",
+                    },
+                )
+            assert mcp_opt.status_code == 204
+            assert call.status_code == 200
+            assert call.json()["result"] == {}
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

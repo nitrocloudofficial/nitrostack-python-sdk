@@ -37,7 +37,12 @@ from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
 from nitrostack.protocol.schema import normalize_input_schema, normalize_output_schema
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
-from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.protocol.version import (
+    MODERN_PROTOCOL_VERSION,
+    protocol_version_for_era,
+    resolve_protocol_era,
+    stateless_for_era,
+)
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
 from nitrostack.protocol.cache_hints import (
     build_list_endpoint_cache_hint_meta,
@@ -66,16 +71,21 @@ def resolve_http_port() -> int:
     return int(os.environ.get("PORT") or os.environ.get("MCP_SERVER_PORT") or DEFAULT_HTTP_PORT)
 
 
+def resolve_http_host() -> str:
+    """Bind host. ``HOST`` matches the TypeScript templates; default is ``0.0.0.0``."""
+    return (os.environ.get("HOST") or "0.0.0.0").strip() or "0.0.0.0"
+
+
 @dataclass
 class ServerConfig:
     name: str
     version: str = "1.0.0"
     transport_type: Optional[Literal["stdio", "http", "dual"]] = None
     protocol_version: str = MODERN_PROTOCOL_VERSION
-    # Streamable HTTP options (Phase 3). Each can also be set via env var at
-    # `start()` time (`MCP_STATELESS`, `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`);
-    # the env var wins if both are set, matching the existing `transport_type`/
-    # `MCP_TRANSPORT_TYPE` precedence below.
+    # Streamable HTTP options (Phase 3). Env at `start()` / `get_combined_app()`:
+    # `MCP_STATELESS`, `NITRO_MCP_PROTOCOL_VERSION` (TS-compatible), `ENABLE_CORS`,
+    # `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`, `MCP_TRANSPORT_TYPE`.
+    # Explicit `MCP_STATELESS` wins over the protocol-era mapping.
     stateless: bool = False
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
@@ -1340,7 +1350,7 @@ class McpApplication:
         *,
         max_sessions: Optional[int] = None,
         session_idle_timeout: Optional[float] = None,
-        enable_cors: bool = True,
+        enable_cors: Optional[bool] = None,
         stateless: Optional[bool] = None,
         json_response: Optional[bool] = None,
     ) -> Any:
@@ -1350,13 +1360,31 @@ class McpApplication:
         (`/mcp/health`) endpoints. See `nitrostack.transports.http.build_http_app`
         for the full behavior (session cap, CORS, DNS-rebinding protection).
 
-        Any argument left as `None` falls back to this app's `ServerConfig`.
+        Any argument left as `None` falls back to env (TypeScript-compatible
+        ``NITRO_MCP_PROTOCOL_VERSION``, ``ENABLE_CORS``, ``MCP_STATELESS``) then
+        this app's `ServerConfig`.
         """
         from nitrostack.transports.http import build_http_app
 
-        effective_stateless = (
-            self.server_config.stateless if stateless is None else stateless
-        )
+        era = resolve_protocol_era()
+        if stateless is not None:
+            effective_stateless = stateless
+        else:
+            env_stateless = self._env_bool("MCP_STATELESS")
+            if env_stateless is not None:
+                effective_stateless = env_stateless
+            else:
+                era_stateless = stateless_for_era(era)
+                effective_stateless = (
+                    self.server_config.stateless if era_stateless is None else era_stateless
+                )
+
+        if enable_cors is None:
+            env_cors = self._env_bool("ENABLE_CORS")
+            enable_cors = True if env_cors is None else env_cors
+
+        protocol_version = protocol_version_for_era(era, self.server_config.protocol_version)
+
         http_app = build_http_app(
             self,
             max_sessions=max_sessions if max_sessions is not None else self.server_config.max_sessions,
@@ -1377,7 +1405,7 @@ class McpApplication:
                 http_app,
                 server_name=self.server_config.name,
                 server_version=self.server_config.version,
-                protocol_version=self.server_config.protocol_version,
+                protocol_version=protocol_version,
                 advertise_tasks=self._advertise_tasks_extension(),
                 advertise_app=has_widgets,
                 custom_extensions=self._custom_extensions(),
@@ -1421,10 +1449,8 @@ class McpApplication:
         transport = os.environ.get("MCP_TRANSPORT_TYPE") or self.server_config.transport_type
         node_env = os.environ.get("NODE_ENV", "development")
         port = resolve_http_port()
+        host = resolve_http_host()
 
-        stateless = self._env_bool("MCP_STATELESS")
-        if stateless is None:
-            stateless = self.server_config.stateless
         json_response = self._env_bool("MCP_JSON_RESPONSE")
         if json_response is None:
             json_response = self.server_config.json_response
@@ -1438,12 +1464,11 @@ class McpApplication:
             app = self.get_combined_app(
                 max_sessions=max_sessions,
                 session_idle_timeout=session_idle_timeout,
-                stateless=stateless,
                 json_response=json_response,
             )
             config = uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=host,
                 port=port,
                 log_level="info",
                 timeout_graceful_shutdown=graceful_timeout_ms / 1000,
@@ -1456,13 +1481,12 @@ class McpApplication:
             app = self.get_combined_app(
                 max_sessions=max_sessions,
                 session_idle_timeout=session_idle_timeout,
-                stateless=stateless,
                 json_response=json_response,
             )
             await run_dual(
                 self,
                 app,
-                host="0.0.0.0",
+                host=host,
                 port=port,
                 graceful_timeout=graceful_timeout_ms / 1000,
             )

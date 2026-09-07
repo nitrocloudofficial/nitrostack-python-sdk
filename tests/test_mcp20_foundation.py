@@ -2,7 +2,7 @@
 
 import pytest
 
-from nitrostack.core.app import ServerConfig
+from nitrostack.core.app import ServerConfig, resolve_http_host
 from nitrostack.protocol.constants import (
     LEGACY_SESSION_HEADER,
     MAX_CIMD_BYTES,
@@ -14,6 +14,9 @@ from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     MODERN_PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    protocol_version_for_era,
+    resolve_protocol_era,
+    stateless_for_era,
 )
 from nitrostack.runtime.stateless import (
     DEFAULT_STATELESS_INVARIANTS,
@@ -107,3 +110,47 @@ class TestServerConfigMcp20:
         cfg = ServerConfig(name="test-server")
         assert cfg.protocol_version == MODERN_PROTOCOL_VERSION
         assert cfg.stateless is False
+
+
+class TestTypescriptCompatibleProtocolEra:
+    @pytest.mark.parametrize(
+        "raw,era",
+        [
+            ("auto", "modern"),
+            ("2026-07-28", "modern"),
+            ("modern", "modern"),
+            ("latest", "modern"),
+            ("legacy", "legacy"),
+            ("2025-06-18", "legacy"),
+            ("", None),
+            (None, None),
+        ],
+    )
+    def test_resolve_protocol_era(self, raw, era, monkeypatch):
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        assert resolve_protocol_era(raw) == era
+
+    def test_reads_nitro_mcp_protocol_version_env(self, monkeypatch):
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "2026-07-28")
+        assert resolve_protocol_era() == "modern"
+        assert stateless_for_era(resolve_protocol_era()) is True
+        assert protocol_version_for_era("modern") == MODERN_PROTOCOL_VERSION
+
+    def test_legacy_era_is_sessionful(self):
+        assert stateless_for_era("legacy") is False
+        assert protocol_version_for_era("legacy") == LEGACY_PROTOCOL_VERSION
+
+    def test_unset_era_does_not_force_stateless(self, monkeypatch):
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        assert resolve_protocol_era() is None
+        assert stateless_for_era(None) is None
+
+
+class TestTypescriptCompatibleHost:
+    def test_host_defaults_to_all_interfaces(self, monkeypatch):
+        monkeypatch.delenv("HOST", raising=False)
+        assert resolve_http_host() == "0.0.0.0"
+
+    def test_host_env_matches_typescript(self, monkeypatch):
+        monkeypatch.setenv("HOST", "localhost")
+        assert resolve_http_host() == "localhost"
