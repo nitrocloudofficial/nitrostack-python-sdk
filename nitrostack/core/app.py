@@ -82,10 +82,11 @@ class ServerConfig:
     version: str = "1.0.0"
     transport_type: Optional[Literal["stdio", "http", "dual"]] = None
     protocol_version: str = MODERN_PROTOCOL_VERSION
-    # Streamable HTTP options (Phase 3). Env at `start()` / `get_combined_app()`:
-    # `MCP_STATELESS`, `NITRO_MCP_PROTOCOL_VERSION` (TS-compatible), `ENABLE_CORS`,
+    # Streamable HTTP options. Env at `start()` / `get_combined_app()`:
+    # `MCP_STATELESS`, `NITRO_MCP_PROTOCOL_VERSION`, `ENABLE_CORS`,
     # `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`, `MCP_TRANSPORT_TYPE`.
-    # Explicit `MCP_STATELESS` wins over the protocol-era mapping.
+    # `MCP_STATELESS` wins over the protocol-era mapping. Unset era is `auto`
+    # and does not force this flag; only `modern` sets stateless HTTP.
     stateless: bool = False
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
@@ -1360,9 +1361,9 @@ class McpApplication:
         (`/mcp/health`) endpoints. See `nitrostack.transports.http.build_http_app`
         for the full behavior (session cap, CORS, DNS-rebinding protection).
 
-        Any argument left as `None` falls back to env (TypeScript-compatible
-        ``NITRO_MCP_PROTOCOL_VERSION``, ``ENABLE_CORS``, ``MCP_STATELESS``) then
-        this app's `ServerConfig`.
+        Any argument left as ``None`` falls back to env
+        (``NITRO_MCP_PROTOCOL_VERSION``, ``ENABLE_CORS``, ``MCP_STATELESS``)
+        then this app's ``ServerConfig``. Unset protocol era is ``auto``.
         """
         from nitrostack.transports.http import build_http_app
 
@@ -1370,14 +1371,10 @@ class McpApplication:
         if stateless is not None:
             effective_stateless = stateless
         else:
-            env_stateless = self._env_bool("MCP_STATELESS")
-            if env_stateless is not None:
-                effective_stateless = env_stateless
-            else:
-                era_stateless = stateless_for_era(era)
-                effective_stateless = (
-                    self.server_config.stateless if era_stateless is None else era_stateless
-                )
+            era_stateless = stateless_for_era(era)
+            effective_stateless = (
+                self.server_config.stateless if era_stateless is None else era_stateless
+            )
 
         if enable_cors is None:
             env_cors = self._env_bool("ENABLE_CORS")

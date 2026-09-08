@@ -1,4 +1,4 @@
-"""MCP protocol version identifiers and TypeScript-compatible era selection."""
+"""MCP protocol version identifiers and protocol-era selection."""
 
 from __future__ import annotations
 
@@ -11,44 +11,80 @@ LEGACY_PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = (MODERN_PROTOCOL_VERSION,)
 
 PROTOCOL_ERA_ENV = "NITRO_MCP_PROTOCOL_VERSION"
-ProtocolEra = Literal["modern", "legacy"]
+STATELESS_OVERRIDE_ENV = "MCP_STATELESS"
 
-_MODERN_ALIASES = frozenset({"auto", "modern", "latest", MODERN_PROTOCOL_VERSION})
+ProtocolEra = Literal["legacy", "modern", "auto"]
+
+_AUTO_ALIASES = frozenset({"auto"})
+_MODERN_ALIASES = frozenset({"modern", "latest", MODERN_PROTOCOL_VERSION})
 _LEGACY_ALIASES = frozenset({"legacy", LEGACY_PROTOCOL_VERSION})
+_TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
+_FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
 
 
-def resolve_protocol_era(raw: Optional[str] = None) -> Optional[ProtocolEra]:
-    """
-    Map ``NITRO_MCP_PROTOCOL_VERSION`` the same way as the TypeScript SDK.
-
-    * ``auto`` / ``modern`` / ``latest`` / ``2026-07-28`` → modern (stateless)
-    * ``legacy`` / ``2025-06-18`` → legacy (sessionful)
-    * unset / empty → ``None`` (keep ``ServerConfig`` defaults)
-
-    Unset does **not** default to ``auto`` here. TypeScript does; Python keeps
-    ``stateless=False`` unless the env var (or ``MCP_STATELESS``) is set, so
-    existing sessionful apps do not flip silently.
-    """
-    value = (raw if raw is not None else os.environ.get(PROTOCOL_ERA_ENV) or "").strip().lower()
+def _parse_bool_token(raw: Optional[str]) -> Optional[bool]:
+    if raw is None:
+        return None
+    value = raw.strip().lower()
     if not value:
         return None
+    if value in _TRUE_TOKENS:
+        return True
+    if value in _FALSE_TOKENS:
+        return False
+    return None
+
+
+def resolve_protocol_era(
+    raw: Optional[str] = None,
+    *,
+    stateless_override: Optional[str] = None,
+) -> ProtocolEra:
+    """
+    Resolve the active protocol era.
+
+    Precedence: ``MCP_STATELESS`` (explicit boolean) then
+    ``NITRO_MCP_PROTOCOL_VERSION``. Unset values default to ``auto``.
+
+    ``auto`` is not ``modern``. ``modern`` is stateless-only; ``auto`` is the
+    dual-spec era and does not force the 1.x ``stateless=True`` transport flag.
+    """
+    override = (
+        stateless_override
+        if stateless_override is not None
+        else os.environ.get(STATELESS_OVERRIDE_ENV)
+    )
+    flag = _parse_bool_token(override)
+    if flag is True:
+        return "modern"
+    if flag is False:
+        return "legacy"
+
+    value = (raw if raw is not None else os.environ.get(PROTOCOL_ERA_ENV) or "").strip().lower()
+    if not value or value in _AUTO_ALIASES:
+        return "auto"
     if value in _MODERN_ALIASES:
         return "modern"
     if value in _LEGACY_ALIASES:
         return "legacy"
-    return None
+    return "auto"
 
 
 def protocol_version_for_era(era: Optional[ProtocolEra], fallback: str = MODERN_PROTOCOL_VERSION) -> str:
     if era == "legacy":
         return LEGACY_PROTOCOL_VERSION
-    if era == "modern":
+    if era in ("modern", "auto"):
         return MODERN_PROTOCOL_VERSION
     return fallback
 
 
 def stateless_for_era(era: Optional[ProtocolEra]) -> Optional[bool]:
-    """Modern era implies stateless HTTP; legacy implies sessionful. Unset → None."""
+    """
+    Map era onto the 1.x Streamable HTTP ``stateless`` flag.
+
+    ``modern`` → True, ``legacy`` → False, ``auto`` → None so the HTTP factory
+    does not treat dual-spec as modern-only.
+    """
     if era == "modern":
         return True
     if era == "legacy":

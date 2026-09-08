@@ -116,21 +116,23 @@ class TestTypescriptCompatibleProtocolEra:
     @pytest.mark.parametrize(
         "raw,era",
         [
-            ("auto", "modern"),
+            ("auto", "auto"),
             ("2026-07-28", "modern"),
             ("modern", "modern"),
             ("latest", "modern"),
             ("legacy", "legacy"),
             ("2025-06-18", "legacy"),
-            ("", None),
-            (None, None),
+            ("", "auto"),
+            (None, "auto"),
         ],
     )
     def test_resolve_protocol_era(self, raw, era, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
         assert resolve_protocol_era(raw) == era
 
     def test_reads_nitro_mcp_protocol_version_env(self, monkeypatch):
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
         monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "2026-07-28")
         assert resolve_protocol_era() == "modern"
         assert stateless_for_era(resolve_protocol_era()) is True
@@ -140,10 +142,22 @@ class TestTypescriptCompatibleProtocolEra:
         assert stateless_for_era("legacy") is False
         assert protocol_version_for_era("legacy") == LEGACY_PROTOCOL_VERSION
 
-    def test_unset_era_does_not_force_stateless(self, monkeypatch):
+    def test_unset_era_defaults_to_auto_without_forcing_stateless(self, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
-        assert resolve_protocol_era() is None
-        assert stateless_for_era(None) is None
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        assert resolve_protocol_era() == "auto"
+        assert stateless_for_era("auto") is None
+        assert protocol_version_for_era("auto") == MODERN_PROTOCOL_VERSION
+
+    def test_mcp_stateless_true_forces_modern(self, monkeypatch):
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "legacy")
+        assert resolve_protocol_era(stateless_override="true") == "modern"
+
+    def test_mcp_stateless_false_forces_legacy(self, monkeypatch):
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "modern")
+        monkeypatch.setenv("MCP_STATELESS", "false")
+        assert resolve_protocol_era() == "legacy"
+        assert stateless_for_era("legacy") is False
 
 
 class TestTypescriptCompatibleHost:
