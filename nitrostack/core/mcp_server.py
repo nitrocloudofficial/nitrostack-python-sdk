@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional
 import mcp.types as types
 from mcp.server.lowlevel import Server as LowLevelServer
 from mcp.server.lowlevel.server import NotificationOptions
+from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
 
 
 class NitroStackMcpServer(LowLevelServer):
@@ -22,7 +23,13 @@ class NitroStackMcpServer(LowLevelServer):
     """
 
     def __init__(self, name: str, version: Optional[str] = None):
-        super().__init__(name=name, version=version or "")
+        self.subscription_bus = InMemorySubscriptionBus()
+        self.listen_handler = ListenHandler(self.subscription_bus)
+        super().__init__(
+            name=name,
+            version=version or "",
+            on_subscriptions_listen=self.listen_handler,
+        )
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
         self.sessionful: bool = False

@@ -58,8 +58,10 @@ from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.transports.headers import (
     CORS_ALLOW_HEADER_NAMES,
     CORS_EXPOSE_HEADER_NAMES,
+    SSE_SUBSCRIPTIONS_PATH,
     strip_legacy_session_headers_asgi,
 )
+from nitrostack.transports.subscriptions import subscriptions_listen_endpoint
 from nitrostack.transports.proxy import public_url_for_request
 
 if TYPE_CHECKING:
@@ -755,6 +757,14 @@ def build_http_app(
         Mount(endpoint, app=mcp_asgi_app),
         Route("/sse", endpoint=handle_sse, methods=["GET"]),
     ]
+    if protocol_era != "legacy":
+        routes.append(
+            Route(
+                SSE_SUBSCRIPTIONS_PATH,
+                endpoint=subscriptions_listen_endpoint(mcp_app),
+                methods=["GET", "POST"],
+            )
+        )
 
     # Rewrite `/mcp` → `/mcp/` *before* routing so Inspector never sees a 307.
     # CORS stays outermost so preflight still works on the original path.
@@ -788,4 +798,6 @@ def build_http_app(
     app.state.sessionful = http_engine == "sessionful"
     app.state.session_manager = session_manager
     app.state.streamable_http_manager_count = 1
+    app.state.subscription_bus = getattr(mcp_app.mcp_server, "subscription_bus", None)
+    app.state.protocol_version = protocol_version_for_era(protocol_era)
     return app

@@ -47,6 +47,8 @@ MODERN_METHOD_CONTRACTS: tuple[MethodContract, ...] = (
     _contract("notifications/cancelled"),
     _contract("notifications/progress"),
     _contract("server/discover", requires_method_header=False),
+    _contract("subscriptions/listen"),
+    _contract("notifications/subscriptions/acknowledged"),
     _contract("tools/list"),
     _contract("tools/call", name_field=NAME_FIELD_NAME),
     _contract("notifications/tools/list_changed"),

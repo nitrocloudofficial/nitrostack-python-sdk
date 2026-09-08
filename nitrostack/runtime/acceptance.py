@@ -67,6 +67,11 @@ PROTOCOL_DELIVERABLES: tuple[ProtocolDeliverable, ...] = (
         "tests/test_mcp20_stateless_http.py",
     ),
     ProtocolDeliverable(
+        ProtocolArea.STATELESS_HTTP,
+        "GET /subscriptions/listen SSE attach on modern and auto",
+        "tests/test_mcp20_subscriptions.py",
+    ),
+    ProtocolDeliverable(
         ProtocolArea.REGISTRIES_SCHEMA,
         "JSON Schema 2020-12 with depth bounding (max 64)",
         "tests/test_mcp20_contracts.py",
