@@ -53,7 +53,12 @@ from nitrostack.protocol.version import (
     WireMode,
     protocol_version_for_era,
 )
-from nitrostack.transports.headers import CORS_ALLOW_HEADER_NAMES, strip_legacy_session_headers_asgi
+from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
+from nitrostack.transports.headers import (
+    CORS_ALLOW_HEADER_NAMES,
+    CORS_EXPOSE_HEADER_NAMES,
+    strip_legacy_session_headers_asgi,
+)
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -62,9 +67,8 @@ logger = logging.getLogger("nitrostack.transports.http")
 
 DEFAULT_ENDPOINT = "/mcp"
 
-# Shared 2026 allow-headers. Expose-headers on this layer stay sessionful.
+# Shared 2026 allow-headers. Session id is exposed only on the sessionful engine.
 CORS_ALLOW_HEADERS = list(CORS_ALLOW_HEADER_NAMES)
-CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
 
 # The Accept value `StreamableHTTPServerTransport` requires: it needs
 # `application/json` on POST and `text/event-stream` on both POST and GET.
@@ -727,6 +731,9 @@ def build_http_app(
         Middleware(ExactEndpointSlashMiddleware, endpoint=endpoint),
     ]
     if enable_cors:
+        expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
+        if http_engine == "sessionful":
+            expose_headers.append(LEGACY_SESSION_HEADER)
         middleware.insert(
             0,
             Middleware(
@@ -734,7 +741,7 @@ def build_http_app(
                 allow_origins=["*"],
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                 allow_headers=CORS_ALLOW_HEADERS,
-                expose_headers=CORS_EXPOSE_HEADERS,
+                expose_headers=expose_headers,
             ),
         )
 

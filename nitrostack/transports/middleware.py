@@ -227,8 +227,8 @@ class StatelessTransportMiddleware:
                     req_headers,
                     content_type=raw_headers.get("content-type", "application/json"),
                     extra={
-                        **build_cors_headers(origin=get_header(req_headers, "Origin")),
                         **strip_legacy_session_headers(raw_headers),
+                        **build_cors_headers(origin=get_header(req_headers, "Origin")),
                     },
                     body=body,
                 )

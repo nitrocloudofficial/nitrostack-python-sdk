@@ -316,6 +316,11 @@ class TestCors:
         headers = build_cors_headers()
         assert "GET, POST, DELETE, OPTIONS" in headers["Access-Control-Allow-Methods"]
         assert "Mcp-Method" in headers["Access-Control-Allow-Headers"]
+        expose = headers["Access-Control-Expose-Headers"]
+        assert "MCP-Protocol-Version" in expose
+        assert "Mcp-Method" in expose
+        assert "Mcp-Name" in expose
+        assert "Mcp-Session-Id" not in expose
 
     def test_preflight_headers(self):
         headers = cors_preflight_response_headers(
@@ -2276,3 +2281,76 @@ class TestResponseEchoHeaders:
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestCorsExposeHeaders:
+    def test_http_mcp_response_exposes_echo_headers_not_session_id(self, monkeypatch):
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="CorsExposeHttp", controllers=[EchoController])
+            class CorsExposeModule:
+                pass
+
+            @mcp_app(module=CorsExposeModule, server=ServerConfig(name="cors-expose"))
+            class CorsExposeApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(CorsExposeApp))
+            http_app = app.get_combined_app(json_response=True)
+            origin = "https://app.example.com"
+            with TestClient(http_app) as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "Origin": origin,
+                        "MCP-Protocol-Version": "2025-06-18",
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+                preflight = client.options(
+                    "/mcp",
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
+            assert response.status_code == 200, response.text
+            expose = response.headers.get("access-control-expose-headers", "")
+            assert "MCP-Protocol-Version" in expose
+            assert "Mcp-Method" in expose
+            assert "Mcp-Session-Id" not in expose
+            assert preflight.status_code == 204
+            preflight_expose = preflight.headers.get("access-control-expose-headers", "")
+            assert "MCP-Protocol-Version" in preflight_expose
+            assert "Mcp-Method" in preflight_expose
+            assert "Mcp-Session-Id" not in preflight_expose
+        finally:
+            DIContainer.reset()
+            monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)

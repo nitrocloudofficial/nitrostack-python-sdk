@@ -47,7 +47,12 @@ CORS_ALLOW_HEADER_NAMES: tuple[str, ...] = (
     "Mcp-Session-Id",
 )
 CORS_ALLOW_HEADERS = ", ".join(CORS_ALLOW_HEADER_NAMES)
-CORS_EXPOSE_HEADERS = "MCP-Protocol-Version, Mcp-Method, Mcp-Name"
+CORS_EXPOSE_HEADER_NAMES: tuple[str, ...] = (
+    "MCP-Protocol-Version",
+    "Mcp-Method",
+    "Mcp-Name",
+)
+CORS_EXPOSE_HEADERS = ", ".join(CORS_EXPOSE_HEADER_NAMES)
 
 MCP_HTTP_PATH = "/mcp"
 SSE_SUBSCRIPTIONS_PATH = "/subscriptions/listen"
