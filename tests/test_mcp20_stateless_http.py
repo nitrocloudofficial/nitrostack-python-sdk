@@ -22,6 +22,7 @@ from nitrostack.transports.cors import build_cors_headers, cors_preflight_respon
 from nitrostack.transports.dispatch import (
     IngressContext,
     StatelessIngressPipeline,
+    is_header_only_ping,
     is_task_wire_interception,
 )
 from nitrostack.transports.headers import (
@@ -376,6 +377,25 @@ class TestPingFastPath:
         resp = build_ping_response("ping-1")
         assert resp == {"jsonrpc": "2.0", "id": "ping-1", "result": {}}
 
+    def test_header_only_ping_empty_or_non_jsonrpc_body(self):
+        headers = {"Mcp-Method": "ping"}
+        assert is_header_only_ping(b"", headers) is True
+        assert is_header_only_ping(b"   \n", headers) is True
+        assert is_header_only_ping(b"not-json", headers) is True
+        assert is_header_only_ping(b"{}", headers) is True
+
+    def test_header_only_ping_does_not_apply_to_other_methods(self):
+        assert is_header_only_ping(b"", {"Mcp-Method": "tools/call"}) is False
+        assert is_header_only_ping(b"", {}) is False
+
+    def test_parsed_jsonrpc_body_is_not_header_only(self):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+        assert is_header_only_ping(body, {"Mcp-Method": "ping"}) is False
+        call = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "echo"}}
+        ).encode()
+        assert is_header_only_ping(call, {"Mcp-Method": "ping"}) is False
+
 
 class TestDiscovery:
     def test_discover_result_shape(self):
@@ -405,6 +425,59 @@ class TestDispatchPipeline:
             status, resp = await pipeline.handle_post(body, {})
             assert status == 200
             assert resp["result"] == {}
+
+        asyncio.run(_run())
+
+    def test_header_only_ping_empty_body(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            status, resp = await pipeline.handle_post(b"", {"Mcp-Method": "ping"})
+            assert status == 200
+            assert resp == {"jsonrpc": "2.0", "id": None, "result": {}}
+            assert "error" not in resp
+
+        asyncio.run(_run())
+
+    def test_header_only_ping_non_jsonrpc_body(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            status, resp = await pipeline.handle_post(b"not-json", {"Mcp-Method": "ping"})
+            assert status == 200
+            assert resp["result"] == {}
+
+        asyncio.run(_run())
+
+    def test_empty_body_without_ping_header_is_parse_error(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            status, resp = await pipeline.handle_post(b"", {"Mcp-Method": "tools/call"})
+            assert status == 400
+            assert resp["error"]["code"] == PARSE_ERROR
+
+        asyncio.run(_run())
+
+    def test_tools_call_body_with_ping_header_is_mismatch(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "echo"},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {"Mcp-Method": "ping"})
+            assert status == 400
+            assert resp["error"]["code"] == HEADER_BODY_MISMATCH
 
         asyncio.run(_run())
 
@@ -1441,6 +1514,98 @@ class TestTrustedProxyPublicUrl:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
             os.environ.pop("TRUSTED_PROXIES", None)
+
+
+class TestHeaderTriggeredPing:
+    def _http_app(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        DIContainer.reset()
+
+        @injectable()
+        class EchoController:
+            @tool(name="echo", description="echo", input_schema=EchoInput)
+            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name="HeaderPingHttp", controllers=[EchoController])
+        class HeaderPingModule:
+            pass
+
+        @mcp_app(module=HeaderPingModule, server=ServerConfig(name="header-ping-http"))
+        class HeaderPingApp:
+            pass
+
+        app = asyncio.run(McpApplicationFactory.create(HeaderPingApp))
+        return app.get_combined_app(json_response=True)
+
+    def test_empty_body_ping_header_succeeds(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            http_app = self._http_app(monkeypatch)
+            with TestClient(http_app) as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "ping",
+                    },
+                    content=b"",
+                )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["result"] == {}
+            assert "error" not in body
+            assert body.get("error", {}).get("code") != PARSE_ERROR
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_tools_call_body_with_ping_header_is_mismatch(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            http_app = self._http_app(monkeypatch)
+            with TestClient(http_app) as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "ping",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "x"}},
+                    },
+                )
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] == HEADER_BODY_MISMATCH
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
 
 
 class TestEnvelopeOnHandlerContext:

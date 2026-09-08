@@ -75,7 +75,26 @@ class DispatchStage(str, Enum):
 
 TASK_METHOD_PREFIX = "tasks/"
 TOOLS_CALL_METHOD = "tools/call"
+PING_METHOD = "ping"
 LEGACY_HANDSHAKE_METHODS = frozenset({"initialize", "notifications/initialized"})
+
+
+def is_header_only_ping(raw_body: bytes, request_headers: dict[str, str]) -> bool:
+    """True when ``Mcp-Method: ping`` and the body is empty or not JSON-RPC.
+
+    A parsed JSON-RPC body is never header-only: header/body match still applies.
+    Other ``Mcp-Method`` values are not answered from the header alone.
+    """
+    header_method = get_header(request_headers, HEADER_MCP_METHOD)
+    if header_method is None or header_method.strip() != PING_METHOD:
+        return False
+    if not raw_body or not raw_body.strip():
+        return True
+    try:
+        parse_jsonrpc_request(raw_body)
+    except (JsonRpcParseError, JsonRpcWireError):
+        return True
+    return False
 
 
 @dataclass
@@ -328,6 +347,14 @@ class StatelessIngressPipeline:
         Run ingress steps 2–5. Returns None to delegate to the underlying MCP app.
         Step 1 (CORS) is handled by transport middleware.
         """
+        if is_header_only_ping(raw_body, request_headers):
+            rejected_session = reject_incoming_session_id(
+                None, request_headers, self._context.wire_mode
+            )
+            if rejected_session is not None:
+                return rejected_session
+            return 200, build_ping_response(None)
+
         try:
             request = parse_jsonrpc_request(raw_body)
         except JsonRpcParseError as exc:
@@ -387,7 +414,7 @@ class StatelessIngressPipeline:
                 deprecated_msg,
             )
 
-        if request.method == "ping":
+        if request.method == PING_METHOD:
             return 200, build_ping_response(request.id)
 
         if request.method == INITIALIZE_METHOD and self._context.wire_mode == "stateless":
