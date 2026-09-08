@@ -495,9 +495,8 @@ class McpApplication:
             config_value=self.server_config.protocol_era
         )
 
-        # nitrostack owns these registries directly (no FastMCP-managed tool/resource
-        # manager in between) so that any number of low-level `Server` instances can be
-        # wired against the same registered tools/resources/prompts (see
+        # nitrostack owns these registries so any number of low-level `Server`
+        # instances can be wired against the same tools/resources/prompts (see
         # `create_configured_mcp_server`).
         self._tools: Dict[str, _ToolEntry] = {}
         self._resources: Dict[str, _ResourceEntry] = {}
@@ -509,7 +508,7 @@ class McpApplication:
         self._bootstrap()
 
     def _bootstrap(self) -> None:
-        # 1. Construct the low-level server directly (no FastMCP)
+        # 1. Construct the low-level server directly.
         self.mcp_server = NitroStackMcpServer(
             name=self.server_config.name,
             version=self.server_config.version,
@@ -1424,8 +1423,8 @@ class McpApplication:
         return types.GetPromptResult(description=cfg.description, messages=messages)
 
     # ------------------------------------------------------------------
-    # Task subsystem — registered directly on the low-level server's public
-    # `request_handlers`/`notification_handlers` dicts (no FastMCP reach-through).
+    # Task subsystem — registered on the low-level server's public
+    # `request_handlers`/`notification_handlers` dicts.
     # ------------------------------------------------------------------
 
     def _task_data_to_mcp_task(self, task) -> types.Task:

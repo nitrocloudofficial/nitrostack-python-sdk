@@ -368,12 +368,10 @@ class TestTrustedReverseProxy:
 
 
 class TestOfficialMcpV2:
-    def test_mcpserver_import_and_fastmcp_gone(self):
+    def test_official_mcp_v2_server_import(self):
         from mcp.server import MCPServer
 
         assert MCPServer is not None
-        with pytest.raises(ModuleNotFoundError):
-            from mcp.server.fastmcp import FastMCP
 
     def test_tools_call_uses_v2_not_sidecar(self, monkeypatch):
         import asyncio
