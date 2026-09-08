@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from nitrostack.cli.install import (
     _optional_extra_names,
     _run_pip,
+    ensure_project_venv,
     install_dependencies,
+    venv_python,
 )
 
 
@@ -68,7 +70,38 @@ def test_install_requirements_txt_and_dev_file(tmp_path):
 
 
 def test_run_pip_raises_on_nonzero_exit(tmp_path):
-    with patch("nitrostack.cli.install.subprocess.run") as run:
-        run.return_value.returncode = 3
-        with pytest.raises(RuntimeError, match="exit code 3"):
-            _run_pip(["-e", "."], cwd=str(tmp_path))
+    with patch("nitrostack.cli.install.ensure_project_venv", return_value=sys.executable):
+        with patch("nitrostack.cli.install.subprocess.run") as run:
+            run.return_value.returncode = 3
+            with pytest.raises(RuntimeError, match="exit code 3"):
+                _run_pip(["-e", "."], cwd=str(tmp_path))
+
+
+def test_ensure_project_venv_creates_and_reuses(tmp_path):
+    python = venv_python(str(tmp_path))
+
+    def fake_venv(cmd, **kwargs):
+        os.makedirs(os.path.dirname(python), exist_ok=True)
+        open(python, "w", encoding="utf-8").write("")
+        return type("R", (), {"returncode": 0})()
+
+    with patch("nitrostack.cli.install.subprocess.run", side_effect=fake_venv) as run:
+        first = ensure_project_venv(str(tmp_path))
+        second = ensure_project_venv(str(tmp_path))
+    assert first == python == second
+    run.assert_called_once()
+    assert run.call_args.args[0][:3] == [sys.executable, "-m", "venv"]
+
+
+def test_install_requirements_uses_venv_python(tmp_path):
+    (tmp_path / "requirements.txt").write_text("nitrostack\n", encoding="utf-8")
+    venv_py = venv_python(str(tmp_path))
+    with patch("nitrostack.cli.install.ensure_project_venv", return_value=venv_py) as ensure:
+        with patch("nitrostack.cli.install.subprocess.run") as run:
+            run.return_value.returncode = 0
+            install_dependencies(cwd=str(tmp_path), production=False)
+    ensure.assert_called()
+    cmd = run.call_args.args[0]
+    assert cmd[0] == venv_py
+    assert cmd[1:4] == ["-m", "pip", "install"]
+    assert cmd[4] == "-r"
