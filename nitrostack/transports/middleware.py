@@ -94,6 +94,13 @@ class StatelessTransportMiddleware:
 
         if path in self.mcp_paths and self.pipeline is not None:
             raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
+            if method == "GET":
+                rejected = self.pipeline.reject_method_policy(b"", raw_headers)
+                if rejected is not None:
+                    await self._send_pipeline_response(
+                        scope, send, raw_headers, rejected, body=b""
+                    )
+                    return
             if self.pipeline.forbids_incoming_session_id(raw_headers):
                 await self._send_session_id_rejected(scope, send, raw_headers)
                 return
@@ -107,8 +114,11 @@ class StatelessTransportMiddleware:
         raw_body: bytes,
         request_headers: dict[str, str],
     ) -> Optional[tuple[int, dict[str, Any]]]:
-        """Re-apply ``-32020`` / ``-32022`` on live headers and the replay snapshot."""
+        """Re-apply method policy, ``-32020``, and ``-32022`` on replay."""
         assert self.pipeline is not None
+        policy_rejected = self.pipeline.reject_method_policy(raw_body, request_headers)
+        if policy_rejected is not None:
+            return policy_rejected
         method_rejected = self.pipeline.reject_jsonrpc_mcp_method(raw_body, request_headers)
         if method_rejected is not None:
             return method_rejected
@@ -358,12 +368,24 @@ class SessionlessHttpGuard:
         from nitrostack.runtime.stateless import has_incoming_session_id
         from nitrostack.transports.dispatch import (
             is_header_only_ping,
-            reject_legacy_handshake,
+            reject_modern_method_policy,
         )
+        from nitrostack.transports.headers import HEADER_MCP_METHOD, get_header
 
         if path in MCP_POST_PATHS and has_incoming_session_id(raw_headers):
             await self._sender._send_session_id_rejected(scope, send, raw_headers)
             return
+        if path in MCP_POST_PATHS and method == "GET":
+            header_method = get_header(raw_headers, HEADER_MCP_METHOD)
+            if header_method is not None:
+                rejected = reject_modern_method_policy(
+                    header_method.strip(), None, self.protocol_era
+                )
+                if rejected is not None:
+                    await self._sender._send_pipeline_response(
+                        scope, send, raw_headers, rejected, body=b""
+                    )
+                    return
         if method != "POST" or path not in MCP_POST_PATHS:
             await self.app(scope, receive, send)
             return
@@ -383,8 +405,6 @@ class SessionlessHttpGuard:
             parse_jsonrpc_request,
             validate_header_body_method,
         )
-        from nitrostack.transports.headers import HEADER_MCP_METHOD, get_header
-
         try:
             request = parse_jsonrpc_request(body)
         except (JsonRpcParseError, JsonRpcWireError):
@@ -395,7 +415,9 @@ class SessionlessHttpGuard:
             )
             return
 
-        rejected = reject_legacy_handshake(request, self.protocol_era)
+        rejected = reject_modern_method_policy(
+            request.method, request.id, self.protocol_era
+        )
         if rejected is not None:
             await self._sender._send_pipeline_response(
                 scope, send, raw_headers, rejected, body=body

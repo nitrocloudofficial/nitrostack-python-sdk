@@ -427,7 +427,13 @@ class TestDeprecatedMethods:
     def test_pipeline_rejects_tasks_list(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+                IngressContext(
+                    "srv",
+                    "1.0.0",
+                    MODERN_PROTOCOL_VERSION,
+                    wire_mode="reject",
+                    protocol_era="modern",
+                )
             )
             body = json.dumps(
                 {"jsonrpc": "2.0", "id": 1, "method": "tasks/list", "params": {}}
@@ -435,6 +441,24 @@ class TestDeprecatedMethods:
             status, resp = await pipeline.handle_post(body, {"Mcp-Method": "tasks/list"})
             assert status == 200
             assert resp["error"]["code"] == int(JsonRpcErrorCode.METHOD_NOT_FOUND)
+
+        asyncio.run(_run())
+
+    def test_pipeline_auto_forwards_tasks_list(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext(
+                    "srv",
+                    "1.0.0",
+                    MODERN_PROTOCOL_VERSION,
+                    wire_mode="stateless",
+                    protocol_era="auto",
+                )
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": "tasks/list", "params": {}}
+            ).encode()
+            assert await pipeline.handle_post(body, {"Mcp-Method": "tasks/list"}) is None
 
         asyncio.run(_run())
 

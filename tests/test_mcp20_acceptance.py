@@ -223,4 +223,4 @@ class TestAutomatedTestCoverageMap:
 
     def test_full_mcp20_suite_module_count(self):
         suite = sorted(REPO_ROOT.glob("tests/test_mcp20_*.py"))
-        assert len(suite) == 14
+        assert len(suite) == 15

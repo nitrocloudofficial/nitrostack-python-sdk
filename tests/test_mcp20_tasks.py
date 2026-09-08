@@ -194,7 +194,10 @@ class TestTaskWireHandlers:
         class ListModule:
             pass
 
-        @mcp_app(module=ListModule, server=ServerConfig(name="tasks-list"))
+        @mcp_app(
+            module=ListModule,
+            server=ServerConfig(name="tasks-list", protocol_era="modern"),
+        )
         class ListApp:
             pass
 

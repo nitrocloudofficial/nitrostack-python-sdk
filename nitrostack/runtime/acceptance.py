@@ -52,6 +52,11 @@ PROTOCOL_DELIVERABLES: tuple[ProtocolDeliverable, ...] = (
         "tests/test_mcp20_tasks.py",
     ),
     ProtocolDeliverable(
+        ProtocolArea.CORE_JSONRPC,
+        "Deprecated methods share one policy on every modern route",
+        "tests/test_mcp20_deprecated.py",
+    ),
+    ProtocolDeliverable(
         ProtocolArea.STATELESS_HTTP,
         "POST /mcp stateless ingress without Mcp-Session-Id",
         "tests/test_mcp20_stateless_http.py",

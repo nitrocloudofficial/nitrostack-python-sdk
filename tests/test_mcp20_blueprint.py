@@ -183,7 +183,10 @@ class TestJsonRpcConformance:
         class JsonRpcModule:
             pass
 
-        @mcp_app(module=JsonRpcModule, server=ServerConfig(name="jsonrpc"))
+        @mcp_app(
+            module=JsonRpcModule,
+            server=ServerConfig(name="jsonrpc", protocol_era="modern"),
+        )
         class JsonRpcApp:
             pass
 

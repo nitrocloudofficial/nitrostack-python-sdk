@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.method_contract import DEPRECATED_MODERN_METHODS as _DEPRECATED_MESSAGES
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -72,12 +73,7 @@ MODERN_JSONRPC_ERROR_CODES: frozenset[int] = frozenset(
     }
 )
 
-DEPRECATED_MODERN_METHODS: frozenset[str] = frozenset(
-    {
-        "tasks/result",
-        "tasks/list",
-    }
-)
+DEPRECATED_MODERN_METHODS: frozenset[str] = frozenset(_DEPRECATED_MESSAGES)
 
 
 def verify_package_layout(modules: Iterable[str] | None = None) -> list[str]:

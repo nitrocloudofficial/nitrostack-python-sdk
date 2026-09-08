@@ -8,7 +8,10 @@ from enum import Enum
 from collections.abc import Awaitable
 from typing import Any, Callable, Optional, Union
 
-from nitrostack.protocol.deprecated import deprecated_method_message
+from nitrostack.protocol.deprecated import (
+    deprecated_method_message,
+    rejects_deprecated_method,
+)
 from nitrostack.protocol.discovery import (
     INITIALIZE_METHOD,
     INITIALIZED_NOTIFICATION,
@@ -156,11 +159,56 @@ def reject_legacy_handshake(
     era: ProtocolEra,
 ) -> Optional[tuple[int, dict[str, Any]]]:
     """Era ``modern`` answers ``initialize`` / ``initialized`` as method-not-found."""
+    return reject_legacy_handshake_method(request.method, request.id, era)
+
+
+def reject_legacy_handshake_method(
+    method: str,
+    request_id: Any,
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Era ``modern`` answers handshake methods as method-not-found."""
     if not rejects_legacy_initialize(era):
         return None
-    if request.method not in LEGACY_HANDSHAKE_METHODS:
+    if method not in LEGACY_HANDSHAKE_METHODS:
         return None
-    return 200, MethodNotFoundError(request.method).to_response(request.id)
+    return 200, MethodNotFoundError(method).to_response(request_id)
+
+
+def reject_deprecated_method(
+    request: JsonRpcRequest,
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Era ``modern`` answers retired 2025 methods as method-not-found."""
+    return reject_deprecated_method_name(request.method, request.id, era)
+
+
+def reject_deprecated_method_name(
+    method: str,
+    request_id: Any,
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Same retired-method error used on POST, GET, and replay."""
+    if not rejects_deprecated_method(method, era):
+        return None
+    message = deprecated_method_message(method)
+    return 200, jsonrpc_error(
+        request_id,
+        int(JsonRpcErrorCode.METHOD_NOT_FOUND),
+        message or f"Method not found: {method}",
+    )
+
+
+def reject_modern_method_policy(
+    method: str,
+    request_id: Any,
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Handshake then retired-method policy. ``auto`` does not error here."""
+    handshake = reject_legacy_handshake_method(method, request_id, era)
+    if handshake is not None:
+        return handshake
+    return reject_deprecated_method_name(method, request_id, era)
 
 
 def reject_legacy_wire(
@@ -355,6 +403,22 @@ class StatelessIngressPipeline:
             request, request_headers, self._context.resolved_era()
         )
 
+    def reject_method_policy(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Handshake and retired-method policy for POST, GET, and replay."""
+        era = self._context.resolved_era()
+        try:
+            request = parse_jsonrpc_request(raw_body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            header_method = get_header(request_headers, HEADER_MCP_METHOD)
+            if header_method is None:
+                return None
+            return reject_modern_method_policy(header_method.strip(), None, era)
+        return reject_modern_method_policy(request.method, request.id, era)
+
     def response_protocol_version(self) -> str:
         """Advertised version used when the request does not name a supported one."""
         return self._context.protocol_version
@@ -439,13 +503,9 @@ class StatelessIngressPipeline:
         if rejected is not None:
             return rejected
 
-        deprecated_msg = deprecated_method_message(request.method)
-        if deprecated_msg is not None:
-            return 200, jsonrpc_error(
-                request.id,
-                int(JsonRpcErrorCode.METHOD_NOT_FOUND),
-                deprecated_msg,
-            )
+        deprecated = reject_deprecated_method(request, self._context.resolved_era())
+        if deprecated is not None:
+            return deprecated
 
         if request.method == PING_METHOD:
             return 200, build_ping_response(request.id)

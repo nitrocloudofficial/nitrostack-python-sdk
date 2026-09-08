@@ -76,7 +76,10 @@ from nitrostack.transports.headers import (
     extract_mcp_scope_headers,
     merge_mcp_param_headers,
 )
-from nitrostack.protocol.deprecated import deprecated_method_message
+from nitrostack.protocol.deprecated import (
+    deprecated_method_message,
+    rejects_deprecated_method,
+)
 from nitrostack.protocol.tasks import (
     DEFAULT_TASK_TTL_MS,
     task_support_forbidden_message,
@@ -862,6 +865,9 @@ class McpApplication:
                 request_ctx.reset(token)
 
         async def _subscribe_resource(_ctx: ServerRequestContext, params: SubscribeRequestParams):
+            if rejects_deprecated_method("resources/subscribe", self.protocol_era):
+                message = deprecated_method_message("resources/subscribe")
+                raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             if str(params.uri) not in self._resources:
                 raise ResourceNotFoundError(str(params.uri))
             return types.EmptyResult()
@@ -1527,10 +1533,8 @@ class McpApplication:
         return GetTaskResult(**payload)
 
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
-        modern_protocol = self.server_config.protocol_version == MODERN_PROTOCOL_VERSION
-
         async def handle_list_tasks(req):
-            if modern_protocol:
+            if rejects_deprecated_method("tasks/list", self.protocol_era):
                 message = deprecated_method_message("tasks/list")
                 raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             tasks_list = []
@@ -1582,7 +1586,7 @@ class McpApplication:
             )
 
         async def handle_get_task_payload(req):
-            if modern_protocol:
+            if rejects_deprecated_method("tasks/result", self.protocol_era):
                 message = deprecated_method_message("tasks/result")
                 raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             params = getattr(req, "params", req)

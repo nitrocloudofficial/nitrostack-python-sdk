@@ -11,8 +11,9 @@ from nitrostack.protocol.contracts import (
     build_resource_blob_content,
     build_resource_text_content,
 )
-from nitrostack.protocol.deprecated import deprecated_method_message
+from nitrostack.protocol.deprecated import deprecated_method_message, rejects_deprecated_method
 from nitrostack.protocol.method_contract import (
+    DEPRECATED_MODERN_METHODS,
     MODERN_METHOD_CONTRACTS,
     MethodContract,
     contract_for,
@@ -143,6 +144,8 @@ __all__ = [
     "flatten_request_meta_object",
     "split_params_and_meta",
     "deprecated_method_message",
+    "rejects_deprecated_method",
+    "DEPRECATED_MODERN_METHODS",
     "MODERN_METHOD_CONTRACTS",
     "MethodContract",
     "contract_for",
