@@ -48,7 +48,12 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 
-from nitrostack.protocol.version import HttpEngine, ProtocolEra, WireMode
+from nitrostack.protocol.version import (
+    HttpEngine,
+    ProtocolEra,
+    WireMode,
+    protocol_version_for_era,
+)
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -568,7 +573,9 @@ def build_http_app(
             {
                 "status": "ok",
                 "transport": "streamable-http",
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": protocol_version_for_era(protocol_era),
+                "protocolEra": protocol_era,
+                "statelessCapable": http_engine == "sessionless",
                 "stateless": stateless,
                 "jsonResponse": json_response,
                 "sessions": session_cap.active_session_count if session_cap else None,

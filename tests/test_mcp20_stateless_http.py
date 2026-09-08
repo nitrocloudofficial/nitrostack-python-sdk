@@ -735,3 +735,68 @@ class TestModernEraRejectsLegacyWire:
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestHealthAdvertisesEra:
+    def _health_body(self, monkeypatch, era_value: str) -> dict:
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", era_value)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="HealthEraHttp", controllers=[EchoController])
+            class HealthEraModule:
+                pass
+
+            @mcp_app(module=HealthEraModule, server=ServerConfig(name="health-era-http"))
+            class HealthEraApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(HealthEraApp))
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                response = client.get("/mcp/health")
+            assert response.status_code == 200
+            return response.json()
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_modern_health_reports_modern_era(self, monkeypatch):
+        body = self._health_body(monkeypatch, "modern")
+        assert body["status"] == "ok"
+        assert body["transport"] == "streamable-http"
+        assert body["protocolEra"] == "modern"
+        assert body["protocolVersion"] == "2026-07-28"
+        assert body["statelessCapable"] is True
+        assert "stateless" in body
+        assert "uptimeSeconds" in body
+
+    def test_auto_health_reports_auto_not_modern(self, monkeypatch):
+        body = self._health_body(monkeypatch, "auto")
+        assert body["protocolEra"] == "auto"
+        assert body["protocolEra"] != "modern"
+        assert body["statelessCapable"] is True
+
+    def test_legacy_health_reports_legacy_era(self, monkeypatch):
+        body = self._health_body(monkeypatch, "legacy")
+        assert body["protocolEra"] == "legacy"
+        assert body["protocolVersion"] == "2025-06-18"
+        assert body["statelessCapable"] is False
