@@ -86,8 +86,8 @@ def resolve_http_port() -> int:
 
 
 def resolve_http_host() -> str:
-    """Bind host. ``HOST`` matches the TypeScript templates; default is ``0.0.0.0``."""
-    return (os.environ.get("HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    """Bind host. ``HOST`` matches the TypeScript templates; default is ``127.0.0.1``."""
+    return (os.environ.get("HOST") or "127.0.0.1").strip() or "127.0.0.1"
 
 
 @dataclass

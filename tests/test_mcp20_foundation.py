@@ -266,8 +266,16 @@ class TestTypescriptCompatibleProtocolEra:
 
 
 class TestTypescriptCompatibleHost:
-    def test_host_defaults_to_all_interfaces(self, monkeypatch):
+    def test_host_defaults_to_loopback(self, monkeypatch):
         monkeypatch.delenv("HOST", raising=False)
+        assert resolve_http_host() == "127.0.0.1"
+
+    def test_empty_host_defaults_to_loopback(self, monkeypatch):
+        monkeypatch.setenv("HOST", "  ")
+        assert resolve_http_host() == "127.0.0.1"
+
+    def test_host_all_interfaces_still_available(self, monkeypatch):
+        monkeypatch.setenv("HOST", "0.0.0.0")
         assert resolve_http_host() == "0.0.0.0"
 
     def test_host_env_matches_typescript(self, monkeypatch):

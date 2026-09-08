@@ -37,7 +37,7 @@ async def run_dual(
     mcp_app: "McpApplication",
     http_app: Any,
     *,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 3000,
     graceful_timeout: float = 10.0,
 ) -> None:
