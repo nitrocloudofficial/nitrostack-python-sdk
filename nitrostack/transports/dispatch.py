@@ -27,14 +27,24 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
     validate_header_body_method,
     validate_header_body_name,
+    UnsupportedProtocolVersionError,
     validate_protocol_version_header_meta,
     validate_required_mcp_method,
     validate_required_mcp_name,
+    validate_supported_protocol_version,
 )
 from nitrostack.protocol.meta import envelope_protocol_version
-from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, WireMode
+from nitrostack.protocol.version import (
+    LEGACY_PROTOCOL_VERSION,
+    ProtocolEra,
+    WireMode,
+    protocol_era_for_wire_mode,
+    supported_protocol_versions_for_era,
+)
 from nitrostack.runtime.stateless import (
     has_incoming_session_id,
+    is_unsupported_protocol_version,
+    request_protocol_version,
     sessionless_rejects_incoming_session_id,
 )
 from nitrostack.transports.headers import (
@@ -75,6 +85,12 @@ class IngressContext:
     advertise_app: bool = False
     custom_extensions: Optional[dict[str, str]] = None
     wire_mode: WireMode = "stateless"
+    protocol_era: Optional[ProtocolEra] = None
+
+    def resolved_era(self) -> ProtocolEra:
+        if self.protocol_era is not None:
+            return self.protocol_era
+        return protocol_era_for_wire_mode(self.wire_mode)
 
 
 def reject_incoming_session_id(
@@ -192,6 +208,29 @@ def reject_protocol_version_mismatch(
     return None
 
 
+def reject_unsupported_protocol_version(
+    request: JsonRpcRequest,
+    request_headers: dict[str, str],
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """
+    Reject a present protocol version that the era does not support.
+
+    Absent header and envelope versions are allowed (legacy default). The
+    header is not required on ``modern`` in this sidecar.
+    """
+    header_version = get_header(request_headers, HEADER_MCP_PROTOCOL_VERSION)
+    meta_version = envelope_protocol_version(request.meta)
+    version = request_protocol_version(header_version, meta_version)
+    if not is_unsupported_protocol_version(version, era):
+        return None
+    try:
+        validate_supported_protocol_version(version, supported_protocol_versions_for_era(era))
+    except UnsupportedProtocolVersionError as exc:
+        return 400, exc.to_response(request.id)
+    return None
+
+
 class StatelessIngressPipeline:
     """
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
@@ -257,6 +296,20 @@ class StatelessIngressPipeline:
             return None
         return reject_protocol_version_mismatch(request, request_headers)
 
+    def reject_unsupported_protocol_version_header(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Replay-path unsupported protocol version check."""
+        try:
+            request = parse_jsonrpc_request(raw_body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            return None
+        return reject_unsupported_protocol_version(
+            request, request_headers, self._context.resolved_era()
+        )
+
     async def handle_post(
         self,
         raw_body: bytes,
@@ -300,6 +353,12 @@ class StatelessIngressPipeline:
         version_mismatch = reject_protocol_version_mismatch(request, request_headers)
         if version_mismatch is not None:
             return version_mismatch
+
+        unsupported = reject_unsupported_protocol_version(
+            request, request_headers, self._context.resolved_era()
+        )
+        if unsupported is not None:
+            return unsupported
 
         rejected = reject_legacy_wire(request, request_headers, self._context.wire_mode)
         if rejected is not None:

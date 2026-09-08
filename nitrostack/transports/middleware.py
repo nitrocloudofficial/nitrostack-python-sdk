@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional
 
 from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import jsonrpc_error
-from nitrostack.protocol.version import WireMode
+from nitrostack.protocol.version import ProtocolEra, WireMode
 from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
 from nitrostack.transports.dispatch import (
@@ -82,6 +82,12 @@ class StatelessTransportMiddleware:
             )
             if version_rejected is not None:
                 await self._send_pipeline_response(scope, send, raw_headers, version_rejected)
+                return
+            unsupported = self.pipeline.reject_unsupported_protocol_version_header(
+                body, raw_headers
+            )
+            if unsupported is not None:
+                await self._send_pipeline_response(scope, send, raw_headers, unsupported)
                 return
             receive = self._replay_receive(body, receive)
 
@@ -257,6 +263,7 @@ def wrap_stateless_transport(
     advertise_app: bool = False,
     custom_extensions: Optional[dict[str, str]] = None,
     wire_mode: WireMode = "stateless",
+    protocol_era: Optional[ProtocolEra] = None,
     discover_handler: Optional[DiscoverHandler] = None,
     initialize_handler: Optional[InitializeHandler] = None,
 ) -> ASGIApp:
@@ -270,6 +277,7 @@ def wrap_stateless_transport(
             advertise_app=advertise_app,
             custom_extensions=custom_extensions,
             wire_mode=wire_mode,
+            protocol_era=protocol_era,
         ),
         discover_handler=discover_handler,
         initialize_handler=initialize_handler,

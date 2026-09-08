@@ -7,7 +7,7 @@ import pytest
 
 from nitrostack.core.errors import ResourceNotFoundError, ToolExecutionError, ValidationError
 from nitrostack.protocol.deprecated import deprecated_method_message
-from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import (
     HEADER_BODY_MISMATCH,
     PARSE_ERROR,
@@ -42,6 +42,11 @@ class TestErrorCodes:
         assert int(JsonRpcErrorCode.INVALID_PARAMS) == -32602
         assert int(JsonRpcErrorCode.INTERNAL_ERROR) == -32603
         assert int(JsonRpcErrorCode.HEADER_BODY_MISMATCH) == -32020
+        assert int(JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION) == -32022
+        assert (
+            ERROR_CODE_MESSAGES[JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION]
+            == "Unsupported protocol version"
+        )
 
 
 class TestMetaEnvelope:
@@ -303,6 +308,90 @@ class TestHeaderBodyMismatch:
             )
             assert status == 200
             assert resp["result"] == {}
+
+        asyncio.run(_run())
+
+
+class TestUnsupportedProtocolVersion:
+    def test_unknown_header_is_rejected(self):
+        from nitrostack.protocol.jsonrpc import (
+            UNSUPPORTED_PROTOCOL_VERSION,
+            UnsupportedProtocolVersionError,
+            validate_supported_protocol_version,
+        )
+
+        with pytest.raises(UnsupportedProtocolVersionError) as exc:
+            validate_supported_protocol_version("1999-01-01", {"2026-07-28"})
+        assert int(exc.value.code) == UNSUPPORTED_PROTOCOL_VERSION
+        assert str(exc.value) == "Unsupported protocol version"
+
+    def test_pipeline_rejects_unknown_header(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "1999-01-01"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32022
+            assert resp["error"]["message"] == "Unsupported protocol version"
+
+        asyncio.run(_run())
+
+    def test_pipeline_accepts_supported_header(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            modern, modern_resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2026-07-28"}
+            )
+            legacy, legacy_resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2025-06-18"}
+            )
+            absent, absent_resp = await pipeline.handle_post(body, {})
+            assert modern == 200
+            assert modern_resp["result"] == {}
+            assert legacy == 200
+            assert legacy_resp["result"] == {}
+            assert absent == 200
+            assert absent_resp["result"] == {}
+
+        asyncio.run(_run())
+
+    def test_pipeline_rejects_envelope_only_unknown_version(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "ping",
+                    "params": {"_meta": {"mcp": {"protocolVersion": "1999-01-01"}}},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 400
+            assert resp["error"]["code"] == -32022
+
+        asyncio.run(_run())
+
+    def test_modern_rejects_legacy_dated_header(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2025-06-18", "Mcp-Method": "ping"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32022
 
         asyncio.run(_run())
 

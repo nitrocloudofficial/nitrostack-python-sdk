@@ -95,6 +95,24 @@ def resolve_protocol_era(
     return "auto"
 
 
+def supported_protocol_versions_for_era(era: ProtocolEra) -> frozenset[str]:
+    """Dated protocol versions this era accepts on the wire header or envelope."""
+    if era == "modern":
+        return frozenset({MODERN_PROTOCOL_VERSION})
+    if era == "legacy":
+        return frozenset({LEGACY_PROTOCOL_VERSION})
+    return frozenset({MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION})
+
+
+def protocol_era_for_wire_mode(wire_mode: WireMode) -> ProtocolEra:
+    """Map dual-spec wire mode onto the era that owns its supported versions."""
+    if wire_mode == "reject":
+        return "modern"
+    if wire_mode == "sessionful":
+        return "legacy"
+    return "auto"
+
+
 def protocol_version_for_era(era: Optional[ProtocolEra], fallback: str = MODERN_PROTOCOL_VERSION) -> str:
     if era == "legacy":
         return LEGACY_PROTOCOL_VERSION

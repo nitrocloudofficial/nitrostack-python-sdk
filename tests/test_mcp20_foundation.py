@@ -17,15 +17,19 @@ from nitrostack.protocol.version import (
     http_engine_for_era,
     needs_modern_engine,
     needs_sessionful_engine,
+    protocol_era_for_wire_mode,
     protocol_version_for_era,
     resolve_protocol_era,
     stateless_for_era,
+    supported_protocol_versions_for_era,
     wire_mode_for_era,
 )
 from nitrostack.runtime.stateless import (
     DEFAULT_STATELESS_INVARIANTS,
     assert_stateless_headers,
     has_incoming_session_id,
+    is_unsupported_protocol_version,
+    request_protocol_version,
     sessionless_rejects_incoming_session_id,
 )
 from nitrostack.tasks.store import TaskStore
@@ -41,6 +45,30 @@ class TestProtocolVersion:
 
     def test_supported_versions(self):
         assert MODERN_PROTOCOL_VERSION in SUPPORTED_PROTOCOL_VERSIONS
+
+    def test_supported_versions_per_era(self):
+        assert supported_protocol_versions_for_era("modern") == frozenset(
+            {MODERN_PROTOCOL_VERSION}
+        )
+        assert supported_protocol_versions_for_era("legacy") == frozenset(
+            {LEGACY_PROTOCOL_VERSION}
+        )
+        assert supported_protocol_versions_for_era("auto") == frozenset(
+            {MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION}
+        )
+        assert protocol_era_for_wire_mode("reject") == "modern"
+        assert protocol_era_for_wire_mode("stateless") == "auto"
+        assert protocol_era_for_wire_mode("sessionful") == "legacy"
+
+    def test_unsupported_protocol_version_contract(self):
+        assert request_protocol_version("2026-07-28", "2025-06-18") == "2026-07-28"
+        assert request_protocol_version(None, "2025-06-18") == "2025-06-18"
+        assert request_protocol_version(None, None) is None
+        assert is_unsupported_protocol_version("1999-01-01", "auto") is True
+        assert is_unsupported_protocol_version("2026-07-28", "auto") is False
+        assert is_unsupported_protocol_version("2025-06-18", "auto") is False
+        assert is_unsupported_protocol_version("2025-06-18", "modern") is True
+        assert is_unsupported_protocol_version(None, "modern") is False
 
 
 class TestDefenseInDepthConstants:

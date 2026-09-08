@@ -1725,3 +1725,70 @@ class TestProtocolVersionCrossCheck:
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestUnsupportedProtocolVersionHttp:
+    def test_http_unknown_version_is_rejected_and_supported_proceeds(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="UnsupportedVersionHttp", controllers=[EchoController])
+            class UnsupportedVersionModule:
+                pass
+
+            @mcp_app(module=UnsupportedVersionModule, server=ServerConfig(name="unsupported-version"))
+            class UnsupportedVersionApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(UnsupportedVersionApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+            with TestClient(http_app) as client:
+                unknown = client.post(
+                    "/mcp",
+                    headers={**json_headers, "MCP-Protocol-Version": "1999-01-01"},
+                    json=ping,
+                )
+                supported = client.post(
+                    "/mcp",
+                    headers={**json_headers, "MCP-Protocol-Version": "2026-07-28"},
+                    json={**ping, "id": 2},
+                )
+                legacy = client.post(
+                    "/mcp",
+                    headers={**json_headers, "MCP-Protocol-Version": "2025-06-18"},
+                    json={**ping, "id": 3},
+                )
+            assert unknown.status_code == 400
+            assert unknown.json()["error"]["code"] == -32022
+            assert unknown.json()["error"]["message"] == "Unsupported protocol version"
+            assert supported.status_code == 200, supported.text
+            assert supported.json()["result"] == {}
+            assert legacy.status_code == 200, legacy.text
+            assert legacy.json()["result"] == {}
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

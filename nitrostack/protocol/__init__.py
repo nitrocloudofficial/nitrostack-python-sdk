@@ -84,9 +84,11 @@ from nitrostack.protocol.version import (
     http_engine_for_era,
     needs_modern_engine,
     needs_sessionful_engine,
+    protocol_era_for_wire_mode,
     protocol_version_for_era,
     resolve_protocol_era,
     stateless_for_era,
+    supported_protocol_versions_for_era,
     wire_mode_for_era,
 )
 
@@ -102,9 +104,11 @@ __all__ = [
     "http_engine_for_era",
     "needs_modern_engine",
     "needs_sessionful_engine",
+    "protocol_era_for_wire_mode",
     "protocol_version_for_era",
     "resolve_protocol_era",
     "stateless_for_era",
+    "supported_protocol_versions_for_era",
     "wire_mode_for_era",
     "MCPExtensionId",
     "RuntimeLayer",

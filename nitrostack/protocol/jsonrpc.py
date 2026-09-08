@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from collections.abc import Collection
 from typing import Any, Optional
 
 from nitrostack.protocol.errors import JsonRpcErrorCode, ERROR_CODE_MESSAGES
@@ -14,6 +15,7 @@ JSONRPC_VERSION = "2.0"
 # Backward-compatible aliases
 PARSE_ERROR = int(JsonRpcErrorCode.PARSE_ERROR)
 HEADER_BODY_MISMATCH = int(JsonRpcErrorCode.HEADER_BODY_MISMATCH)
+UNSUPPORTED_PROTOCOL_VERSION = int(JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION)
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,14 @@ class InternalError(JsonRpcWireError):
 class HeaderBodyMismatchError(JsonRpcWireError):
     def __init__(self, message: str = "Header/body mismatch") -> None:
         super().__init__(JsonRpcErrorCode.HEADER_BODY_MISMATCH, message)
+
+
+class UnsupportedProtocolVersionError(JsonRpcWireError):
+    def __init__(self, message: Optional[str] = None) -> None:
+        super().__init__(
+            JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION,
+            message or ERROR_CODE_MESSAGES[JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION],
+        )
 
 
 def parse_jsonrpc_request(raw_body: bytes) -> JsonRpcRequest:
@@ -195,6 +205,15 @@ def validate_protocol_version_header_meta(
             f"MCP-Protocol-Version header '{header_version}' does not match "
             f"envelope protocol version '{meta_version}'"
         )
+
+
+def validate_supported_protocol_version(
+    version: Optional[str],
+    supported: Collection[str],
+) -> None:
+    """Reject a present protocol version that is not in the era's supported set."""
+    if isinstance(version, str) and version.strip() and version.strip() not in supported:
+        raise UnsupportedProtocolVersionError()
 
 
 def jsonrpc_success(request_id: Any, result: Any) -> dict[str, Any]:
