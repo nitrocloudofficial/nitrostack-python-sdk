@@ -40,9 +40,10 @@ from nitrostack.protocol.resources import extract_template_param_names, uri_temp
 from nitrostack.protocol.version import (
     MODERN_PROTOCOL_VERSION,
     ProtocolEra,
+    needs_modern_engine,
+    needs_sessionful_engine,
     protocol_version_for_era,
     resolve_protocol_era,
-    stateless_for_era,
     wire_mode_for_era,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
@@ -1372,13 +1373,17 @@ class McpApplication:
 
         era = resolve_protocol_era()
         self.protocol_era = era
+        wire_mode = wire_mode_for_era(era)
         if stateless is not None:
             effective_stateless = stateless
+        elif needs_sessionful_engine(era):
+            effective_stateless = False
+        elif needs_modern_engine(era):
+            # auto and modern share one sessionless /mcp manager.
+            # Era stays on the app; auto is not modern (wire_mode differs).
+            effective_stateless = True
         else:
-            era_stateless = stateless_for_era(era)
-            effective_stateless = (
-                self.server_config.stateless if era_stateless is None else era_stateless
-            )
+            effective_stateless = bool(self.server_config.stateless)
 
         if enable_cors is None:
             env_cors = self._env_bool("ENABLE_CORS")
@@ -1394,10 +1399,10 @@ class McpApplication:
             stateless=effective_stateless,
             json_response=self.server_config.json_response if json_response is None else json_response,
             protocol_era=era,
-            wire_mode=wire_mode_for_era(era),
+            wire_mode=wire_mode,
         )
 
-        if effective_stateless:
+        if needs_modern_engine(era) or effective_stateless:
             from nitrostack.transports.middleware import wrap_stateless_transport
 
             has_widgets = any(

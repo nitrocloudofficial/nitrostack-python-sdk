@@ -403,10 +403,135 @@ class TestNitroMcpProtocolVersionEnv:
 
             app = asyncio.run(McpApplicationFactory.create(AutoEraApp))
             http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
             assert app.protocol_era == "auto"
-            assert http_app.state.protocol_era == "auto"
-            assert http_app.state.wire_mode == "stateless"
-            assert http_app.state.stateless is False
+            assert state.protocol_era == "auto"
+            assert state.wire_mode == "stateless"
+            assert state.stateless is True
+            assert state.streamable_http_manager_count == 1
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+def _http_app_state(asgi):
+    current = asgi
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        state = getattr(current, "state", None)
+        if state is not None and getattr(state, "protocol_era", None) is not None:
+            return state
+        current = getattr(current, "app", None)
+    raise AssertionError("HTTP app is missing protocol era state")
+
+
+class TestAutoEraOneMcpDualClients:
+    def test_auto_serves_initialize_and_discover_on_one_mcp(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+        from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="DualClientHttp", controllers=[EchoController])
+            class DualClientModule:
+                pass
+
+            @mcp_app(module=DualClientModule, server=ServerConfig(name="dual-client-http"))
+            class DualClientApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(DualClientApp))
+            http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert state.protocol_era == "auto"
+            assert state.streamable_http_manager_count == 1
+            assert state.session_manager.stateless is True
+
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            modern_headers = {
+                **json_headers,
+                "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
+            }
+
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+                discover = client.post(
+                    "/mcp",
+                    headers={**modern_headers, "Mcp-Method": "server/discover"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "server/discover",
+                        "params": {},
+                    },
+                )
+                call = client.post(
+                    "/mcp",
+                    headers={
+                        **modern_headers,
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+
+            assert init.status_code == 200, init.text
+            assert "result" in init.json()
+            init_headers = {key.lower(): value for key, value in init.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in init_headers
+            assert not state.session_manager._server_instances
+
+            assert discover.status_code == 200, discover.text
+            discover_body = discover.json()["result"]
+            assert discover_body["protocolVersion"] == MODERN_PROTOCOL_VERSION
+            assert discover.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
+
+            assert call.status_code == 200, call.text
+            assert call.json()["result"]["content"][0]["text"] == "ok"
+            assert call.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
+            call_headers = {key.lower(): value for key, value in call.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in call_headers
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

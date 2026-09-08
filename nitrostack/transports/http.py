@@ -516,6 +516,8 @@ def build_http_app(
             allowed_origins=allowed_origins,
         )
 
+    # One manager on /mcp. auto/modern are sessionless; legacy is sessionful.
+    # A second StreamableHTTPSessionManager is not the dual-spec design.
     session_manager = StreamableHTTPSessionManager(
         app=mcp_app.mcp_server,
         stateless=stateless,
@@ -738,4 +740,6 @@ def build_http_app(
     app.state.protocol_era = protocol_era
     app.state.wire_mode = wire_mode
     app.state.stateless = stateless
+    app.state.session_manager = session_manager
+    app.state.streamable_http_manager_count = 1
     return app

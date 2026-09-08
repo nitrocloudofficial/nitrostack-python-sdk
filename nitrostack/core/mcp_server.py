@@ -16,6 +16,11 @@ class NitroStackMcpServer(LowLevelServer):
     """
     Thin subclass of the official low-level MCP `Server`.
 
+    One instance is the only Streamable HTTP engine on ``/mcp``. Era ``auto``
+    and ``modern`` share that mount (2025 ``initialize`` and 2026 methods);
+    they do not get a second session manager. Era ``legacy`` is the sessionful
+    path.
+
     The base `Server.get_capabilities()` only advertises a capability when a
     handler for the corresponding request type has been registered, and it
     always reports `resources.subscribe=False`. This subclass declares:
