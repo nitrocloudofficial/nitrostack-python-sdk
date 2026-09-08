@@ -10,6 +10,7 @@ from pathlib import Path
 from nitrostack.cli.generate import generate_component, generate_module as generate_module_from_template
 from nitrostack.cli.install import install_dependencies
 from nitrostack.cli.pack import pack_project
+from nitrostack.cli.skills import run_skills_flow
 from nitrostack.cli.upgrade import upgrade_project
 from nitrostack.cli.validators import format_report, validate_project
 
@@ -286,7 +287,7 @@ class DuffelService:
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Duffel-Version": "v1",
+            "Duffel-Version": "v2",
             "Content-Type": "application/json"
         }
         url = f"https://api.duffel.com{path}"
@@ -355,7 +356,7 @@ class DuffelService:
             "cabin_class": params.get("cabinClass", "economy"),
             "return_offers": True
         }
-        res = self._request("POST", "/offer_requests", duffel_params)
+        res = self._request("POST", "/air/offer_requests", duffel_params)
         return {
             "id": res.get("id"),
             "offers": res.get("offers", []),
@@ -390,7 +391,7 @@ class DuffelService:
                     }
                 ]
             }
-        return self._request("GET", f"/offers/{offer_id}")
+        return self._request("GET", f"/air/offers/{offer_id}")
 
     async def get_seats_for_offer(self, offer_id: str) -> List[Dict[str, Any]]:
         if self.is_mock:
@@ -424,7 +425,7 @@ class DuffelService:
                     ]
                 }
             ]
-        res = self._request("GET", f"/seat_maps?offer_id={offer_id}")
+        res = self._request("GET", f"/air/seat_maps?offer_id={offer_id}")
         return res if isinstance(res, list) else []
 
     async def create_order(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -464,7 +465,7 @@ class DuffelService:
             "passengers": params["passengers"],
             "type": "hold"
         }
-        return self._request("POST", "/orders", order_payload)
+        return self._request("POST", "/air/orders", order_payload)
 
     async def get_order(self, order_id: str) -> Dict[str, Any]:
         if self.is_mock:
@@ -507,7 +508,7 @@ class DuffelService:
                     }
                 ]
             }
-        return self._request("GET", f"/orders/{order_id}")
+        return self._request("GET", f"/air/orders/{order_id}")
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         if self.is_mock:
@@ -518,7 +519,7 @@ class DuffelService:
                 "confirmed_at": "2026-06-25T12:30:00Z"
             }
         cancel_payload = {"order_id": order_id}
-        return self._request("POST", "/order_cancellations", cancel_payload)
+        return self._request("POST", "/air/order_cancellations", cancel_payload)
 
     async def get_airlines(self) -> List[Dict[str, Any]]:
         if self.is_mock:
@@ -528,7 +529,7 @@ class DuffelService:
                 {"iata_code": "UA", "name": "United Airlines"},
                 {"iata_code": "BA", "name": "British Airways"}
             ]
-        res = self._request("GET", "/airlines")
+        res = self._request("GET", "/air/airlines")
         return res if isinstance(res, list) else []
 """
 
@@ -1242,7 +1243,7 @@ def _add_port_flags(parser):
     )
 
 
-def init_project(name: str = None, template: str = None, skip_install: bool = False, port=None, widget=None):
+def init_project(name: str = None, template: str = None, skip_install: bool = False, port=None, widget=None, force: bool = False):
     print_banner()
 
     # 1. Project name — optional CLI arg, otherwise the next readline
@@ -1359,6 +1360,8 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
             print("Please run 'npm install' inside 'src/widgets' manually.\n")
     elif not install_deps:
         print("\033[32m✓\033[0m Skipped dependency install")
+
+    run_skills_flow(os.path.abspath(name), force=force)
 
     # Success Card
     abs_path = os.path.abspath(name)
@@ -1725,6 +1728,11 @@ def main():
         help="Template to use: python-starter, python-pizzaz, python-oauth (default: interactive prompt)",
     )
     init_parser.add_argument("--skip-install", action="store_true", help="Skip installing widget npm dependencies")
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing agent skill directories when installing",
+    )
     _add_port_flags(init_parser)
 
     # dev command
@@ -1833,6 +1841,7 @@ def main():
             skip_install=args.skip_install,
             port=args.port,
             widget=args.widget,
+            force=args.force,
         )
     elif args.command == "dev":
         run_dev(port=args.port, widget=args.widget)

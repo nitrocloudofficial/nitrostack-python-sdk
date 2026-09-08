@@ -18,6 +18,7 @@ from nitrostack.cli._shared import (
     read_text,
     write_text_atomic,
 )
+from nitrostack.cli.skills import upgrade_agent_skills
 
 PYPI_JSON = "https://pypi.org/pypi/nitrostack/json"
 PYPI_VERSION_JSON = "https://pypi.org/pypi/nitrostack/{version}/json"
@@ -243,10 +244,26 @@ def upgrade_project(
 
     if dry_run:
         print("\nDry run — no files modified.")
-        return {"version": target, "spec": new_spec, "changes": changes, "dry_run": True, "written": []}
+        skills = upgrade_agent_skills(root, dry_run=True)
+        return {
+            "version": target,
+            "spec": new_spec,
+            "changes": changes,
+            "dry_run": True,
+            "written": [],
+            "skills": skills,
+        }
 
     written = _commit_file_changes(changes)
 
     print(f"\nUpgrade complete. nitrostack dependency is now {new_spec}.")
     print("Run `nitrostack-py install` to install the new version.")
-    return {"version": target, "spec": new_spec, "changes": changes, "dry_run": False, "written": written}
+    skills = upgrade_agent_skills(root, dry_run=False)
+    return {
+        "version": target,
+        "spec": new_spec,
+        "changes": changes,
+        "dry_run": False,
+        "written": written,
+        "skills": skills,
+    }

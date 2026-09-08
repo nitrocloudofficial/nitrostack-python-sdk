@@ -806,6 +806,7 @@ def test_main_dispatches_commands():
         kwargs = init.call_args.kwargs
         assert init.call_args.args[0] == "demo"
         assert kwargs["skip_install"] is True
+        assert kwargs["force"] is False
 
     with patch("sys.argv", ["nitrostack-py", "dev", "--port", "4000", "--widget", "4001"]), patch(
         "nitrostack.cli.main.run_dev"
