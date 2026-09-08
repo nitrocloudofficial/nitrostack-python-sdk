@@ -1527,6 +1527,108 @@ class TestEraSessionfulCoexistence:
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
 
 
+class TestUnsetEnvDefault:
+    def _echo_app(self):
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        @injectable()
+        class EchoController:
+            @tool(name="echo", description="echo", input_schema=EchoInput)
+            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name="UnsetEnvDefault", controllers=[EchoController])
+        class UnsetEnvModule:
+            pass
+
+        @mcp_app(module=UnsetEnvModule, server=ServerConfig(name="unset-env-default"))
+        class UnsetEnvApp:
+            pass
+
+        return asyncio.run(McpApplicationFactory.create(UnsetEnvApp))
+
+    def test_unset_env_http_is_auto_sessionless(self, monkeypatch, caplog):
+        import logging
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            with caplog.at_level(logging.INFO, logger="nitrostack.core.app"):
+                app = self._echo_app()
+                http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert app.protocol_era == "auto"
+            assert app.protocol_era_source == "default"
+            assert state.protocol_era == "auto"
+            assert state.http_engine == "sessionless"
+            assert "protocol era=auto (source=default)" in caplog.text
+
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+            assert init.status_code == 200, init.text
+            assert "result" in init.json()
+            assert init.json()["result"]["protocolVersion"] == "2025-06-18"
+            init_headers = {key.lower(): value for key, value in init.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in init_headers
+            assert not state.session_manager._server_instances
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+            os.environ.pop("MCP_STATELESS", None)
+
+    def test_mcp_stateless_false_still_forces_legacy(self, monkeypatch, caplog):
+        import logging
+        import os
+
+        from nitrostack.core.di import DIContainer
+
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.setenv("MCP_STATELESS", "false")
+        DIContainer.reset()
+        try:
+            with caplog.at_level(logging.INFO, logger="nitrostack.core.app"):
+                app = self._echo_app()
+                http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert app.protocol_era == "legacy"
+            assert app.protocol_era_source == "mcp_stateless"
+            assert state.protocol_era == "legacy"
+            assert state.http_engine == "sessionful"
+            assert "protocol era=legacy (source=mcp_stateless)" in caplog.text
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+            os.environ.pop("MCP_STATELESS", None)
+
+
 class TestAutoEraOneMcpDualClients:
     def test_auto_serves_initialize_and_discover_on_one_mcp(self, monkeypatch):
         import os

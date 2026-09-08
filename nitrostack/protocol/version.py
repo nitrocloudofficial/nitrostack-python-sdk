@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import Literal, Optional
 
 MODERN_PROTOCOL_VERSION = "2026-07-28"
@@ -14,6 +15,7 @@ PROTOCOL_ERA_ENV = "NITRO_MCP_PROTOCOL_VERSION"
 STATELESS_OVERRIDE_ENV = "MCP_STATELESS"
 
 ProtocolEra = Literal["legacy", "modern", "auto"]
+EraSource = Literal["mcp_stateless", "env", "config", "default"]
 # How the HTTP factory should treat 2025-shaped traffic for this era.
 # ``stateless`` here is the dual-spec fallback (sessionless initialize), not
 # the 1.x ``StreamableHTTPSessionManager(stateless=True)`` flag.
@@ -46,20 +48,41 @@ def _era_token(raw: Optional[str]) -> str:
     return (raw or "").strip().lower()
 
 
-def resolve_protocol_era(
+def _era_from_token(value: str) -> ProtocolEra:
+    if not value or value in _AUTO_ALIASES:
+        return "auto"
+    if value in _MODERN_ALIASES:
+        return "modern"
+    if value in _LEGACY_ALIASES:
+        return "legacy"
+    return "auto"
+
+
+@dataclass(frozen=True)
+class ProtocolEraResolution:
+    """Resolved era plus which input selected it."""
+
+    era: ProtocolEra
+    source: EraSource
+
+    def log_line(self) -> str:
+        return f"protocol era={self.era} (source={self.source})"
+
+
+def resolve_protocol_era_resolution(
     raw: Optional[str] = None,
     *,
     stateless_override: Optional[str] = None,
     config_value: Optional[str] = None,
-) -> ProtocolEra:
+) -> ProtocolEraResolution:
     """
-    Resolve the active protocol era.
+    Resolve the active protocol era and record how it was chosen.
 
     Precedence:
-    1. ``MCP_STATELESS`` (explicit boolean)
-    2. ``NITRO_MCP_PROTOCOL_VERSION`` (or the ``raw`` argument)
-    3. ``ServerConfig.protocol_era`` (``config_value``)
-    4. ``auto``
+    1. ``MCP_STATELESS`` (explicit boolean) → source ``mcp_stateless``
+    2. ``NITRO_MCP_PROTOCOL_VERSION`` (or the ``raw`` argument) → ``env``
+    3. ``ServerConfig.protocol_era`` (``config_value``) → ``config``
+    4. ``auto`` → ``default``
 
     Tokens (case-insensitive, trimmed): ``modern`` / ``latest`` / ``2026`` /
     ``2026-07-28``; ``auto`` / ``both`` / ``dual`` / ``dual-spec``; ``legacy`` /
@@ -76,23 +99,36 @@ def resolve_protocol_era(
     )
     flag = _parse_bool_token(override)
     if flag is True:
-        return "modern"
+        return ProtocolEraResolution("modern", "mcp_stateless")
     if flag is False:
-        return "legacy"
+        return ProtocolEraResolution("legacy", "mcp_stateless")
 
     if raw is not None:
         value = _era_token(raw)
-    else:
-        value = _era_token(os.environ.get(PROTOCOL_ERA_ENV))
-        if not value:
-            value = _era_token(config_value)
-    if not value or value in _AUTO_ALIASES:
-        return "auto"
-    if value in _MODERN_ALIASES:
-        return "modern"
-    if value in _LEGACY_ALIASES:
-        return "legacy"
-    return "auto"
+        source: EraSource = "env" if value else "default"
+        return ProtocolEraResolution(_era_from_token(value), source)
+
+    value = _era_token(os.environ.get(PROTOCOL_ERA_ENV))
+    if value:
+        return ProtocolEraResolution(_era_from_token(value), "env")
+    value = _era_token(config_value)
+    if value:
+        return ProtocolEraResolution(_era_from_token(value), "config")
+    return ProtocolEraResolution("auto", "default")
+
+
+def resolve_protocol_era(
+    raw: Optional[str] = None,
+    *,
+    stateless_override: Optional[str] = None,
+    config_value: Optional[str] = None,
+) -> ProtocolEra:
+    """Resolve the active protocol era. See ``resolve_protocol_era_resolution``."""
+    return resolve_protocol_era_resolution(
+        raw,
+        stateless_override=stateless_override,
+        config_value=config_value,
+    ).era
 
 
 def supported_protocol_versions_for_era(era: ProtocolEra) -> frozenset[str]:

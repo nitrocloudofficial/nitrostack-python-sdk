@@ -51,10 +51,11 @@ from nitrostack.protocol.schema import (
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import (
     MODERN_PROTOCOL_VERSION,
+    EraSource,
     ProtocolEra,
     protocol_version_for_era,
     resolve_http_engine,
-    resolve_protocol_era,
+    resolve_protocol_era_resolution,
     wire_mode_for_era,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
@@ -521,9 +522,11 @@ class McpApplication:
             raise ValueError("Invalid application class. Must be decorated with @mcp_app or @module.")
 
         self.mcp_server: Optional[NitroStackMcpServer] = None
-        self.protocol_era: ProtocolEra = resolve_protocol_era(
+        era_resolution = resolve_protocol_era_resolution(
             config_value=self.server_config.protocol_era
         )
+        self.protocol_era: ProtocolEra = era_resolution.era
+        self.protocol_era_source: EraSource = era_resolution.source
 
         # nitrostack owns these registries so any number of low-level `Server`
         # instances can be wired against the same tools/resources/prompts (see
@@ -1703,6 +1706,16 @@ class McpApplication:
     # Transports
     # ------------------------------------------------------------------
 
+    def _apply_protocol_era(self) -> ProtocolEra:
+        """Re-read env/config, store the era, and log how it was chosen."""
+        resolution = resolve_protocol_era_resolution(
+            config_value=self.server_config.protocol_era
+        )
+        self.protocol_era = resolution.era
+        self.protocol_era_source = resolution.source
+        logger.info(resolution.log_line())
+        return resolution.era
+
     def get_combined_app(
         self,
         *,
@@ -1724,8 +1737,7 @@ class McpApplication:
         """
         from nitrostack.transports.http import build_http_app
 
-        era = resolve_protocol_era(config_value=self.server_config.protocol_era)
-        self.protocol_era = era
+        era = self._apply_protocol_era()
         wire_mode = wire_mode_for_era(era)
         # Sessionful 1.x only when era is legacy. auto/modern stay sessionless.
         http_engine = resolve_http_engine(era, stateless=stateless)
@@ -1859,6 +1871,7 @@ class McpApplication:
             )
         else:
             # Default Stdio
+            self._apply_protocol_era()
             from nitrostack.transports.stdio import safe_stdio_transport
             with safe_stdio_transport():
                 await self._run_stdio()

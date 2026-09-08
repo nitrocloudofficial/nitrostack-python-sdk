@@ -23,6 +23,7 @@ from nitrostack.protocol.version import (
     protocol_era_for_wire_mode,
     protocol_version_for_era,
     resolve_protocol_era,
+    resolve_protocol_era_resolution,
     stateless_for_era,
     supported_protocol_versions_for_era,
     wire_mode_for_era,
@@ -209,17 +210,28 @@ class TestTypescriptCompatibleProtocolEra:
     def test_unset_era_defaults_to_auto_without_forcing_stateless(self, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
         monkeypatch.delenv("MCP_STATELESS", raising=False)
+        resolution = resolve_protocol_era_resolution()
+        assert resolution.era == "auto"
+        assert resolution.source == "default"
+        assert resolution.log_line() == "protocol era=auto (source=default)"
         assert resolve_protocol_era() == "auto"
         assert stateless_for_era("auto") is None
         assert protocol_version_for_era("auto") == MODERN_PROTOCOL_VERSION
 
     def test_mcp_stateless_true_forces_modern(self, monkeypatch):
         monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "legacy")
+        resolution = resolve_protocol_era_resolution(stateless_override="true")
+        assert resolution.era == "modern"
+        assert resolution.source == "mcp_stateless"
         assert resolve_protocol_era(stateless_override="true") == "modern"
 
     def test_mcp_stateless_false_forces_legacy(self, monkeypatch):
         monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "modern")
         monkeypatch.setenv("MCP_STATELESS", "false")
+        resolution = resolve_protocol_era_resolution()
+        assert resolution.era == "legacy"
+        assert resolution.source == "mcp_stateless"
+        assert resolution.log_line() == "protocol era=legacy (source=mcp_stateless)"
         assert resolve_protocol_era() == "legacy"
         assert stateless_for_era("legacy") is False
 
@@ -252,6 +264,9 @@ class TestTypescriptCompatibleProtocolEra:
     def test_config_era_used_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
         monkeypatch.delenv("MCP_STATELESS", raising=False)
+        resolution = resolve_protocol_era_resolution(config_value="legacy")
+        assert resolution.era == "legacy"
+        assert resolution.source == "config"
         assert resolve_protocol_era(config_value="legacy") == "legacy"
         assert resolve_protocol_era(config_value="modern") == "modern"
         assert resolve_protocol_era(config_value="2026-07-28") == "modern"
@@ -259,6 +274,9 @@ class TestTypescriptCompatibleProtocolEra:
     def test_env_wins_over_config_era(self, monkeypatch):
         monkeypatch.delenv("MCP_STATELESS", raising=False)
         monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        resolution = resolve_protocol_era_resolution(config_value="legacy")
+        assert resolution.era == "auto"
+        assert resolution.source == "env"
         assert resolve_protocol_era(config_value="legacy") == "auto"
 
     def test_stateless_override_wins_over_config_era(self, monkeypatch):
@@ -275,6 +293,9 @@ class TestTypescriptCompatibleProtocolEra:
     def test_server_config_protocol_era_default_is_unset(self):
         cfg = ServerConfig(name="test-server")
         assert cfg.protocol_era is None
+        resolution = resolve_protocol_era_resolution(config_value=cfg.protocol_era)
+        assert resolution.era == "auto"
+        assert resolution.source == "default"
         assert resolve_protocol_era(config_value=cfg.protocol_era) == "auto"
 
 
