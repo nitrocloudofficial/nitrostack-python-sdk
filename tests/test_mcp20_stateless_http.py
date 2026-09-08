@@ -361,6 +361,52 @@ class TestNitroMcpProtocolVersionEnv:
             assert mcp_opt.status_code == 204
             assert call.status_code == 200
             assert call.json()["result"] == {}
+            assert app.protocol_era == "modern"
+            inner = getattr(http_app, "app", http_app)
+            assert inner.state.protocol_era == "modern"
+            assert inner.state.wire_mode == "reject"
+            assert inner.state.stateless is True
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_auto_era_keeps_era_and_does_not_force_stateless(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="AutoEraHttp", controllers=[EchoController])
+            class AutoEraModule:
+                pass
+
+            @mcp_app(module=AutoEraModule, server=ServerConfig(name="auto-era-http"))
+            class AutoEraApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(AutoEraApp))
+            http_app = app.get_combined_app(json_response=True)
+            assert app.protocol_era == "auto"
+            assert http_app.state.protocol_era == "auto"
+            assert http_app.state.wire_mode == "stateless"
+            assert http_app.state.stateless is False
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

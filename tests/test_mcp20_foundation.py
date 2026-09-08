@@ -14,9 +14,12 @@ from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     MODERN_PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    needs_modern_engine,
+    needs_sessionful_engine,
     protocol_version_for_era,
     resolve_protocol_era,
     stateless_for_era,
+    wire_mode_for_era,
 )
 from nitrostack.runtime.stateless import (
     DEFAULT_STATELESS_INVARIANTS,
@@ -158,6 +161,19 @@ class TestTypescriptCompatibleProtocolEra:
         monkeypatch.setenv("MCP_STATELESS", "false")
         assert resolve_protocol_era() == "legacy"
         assert stateless_for_era("legacy") is False
+
+    def test_auto_is_not_modern_and_does_not_force_stateless(self):
+        assert resolve_protocol_era("auto") != resolve_protocol_era("modern")
+        assert stateless_for_era("auto") is None
+        assert stateless_for_era("modern") is True
+        assert wire_mode_for_era("auto") == "stateless"
+        assert wire_mode_for_era("modern") == "reject"
+        assert wire_mode_for_era("legacy") == "sessionful"
+        assert needs_modern_engine("auto") is True
+        assert needs_modern_engine("modern") is True
+        assert needs_modern_engine("legacy") is False
+        assert needs_sessionful_engine("auto") is False
+        assert needs_sessionful_engine("legacy") is True
 
 
 class TestTypescriptCompatibleHost:

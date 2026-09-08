@@ -14,6 +14,10 @@ PROTOCOL_ERA_ENV = "NITRO_MCP_PROTOCOL_VERSION"
 STATELESS_OVERRIDE_ENV = "MCP_STATELESS"
 
 ProtocolEra = Literal["legacy", "modern", "auto"]
+# How the HTTP factory should treat 2025-shaped traffic for this era.
+# ``stateless`` here is the dual-spec fallback (sessionless initialize), not
+# the 1.x ``StreamableHTTPSessionManager(stateless=True)`` flag.
+WireMode = Literal["sessionful", "stateless", "reject"]
 
 _AUTO_ALIASES = frozenset({"auto"})
 _MODERN_ALIASES = frozenset({"modern", "latest", MODERN_PROTOCOL_VERSION})
@@ -90,3 +94,28 @@ def stateless_for_era(era: Optional[ProtocolEra]) -> Optional[bool]:
     if era == "legacy":
         return False
     return None
+
+
+def wire_mode_for_era(era: ProtocolEra) -> WireMode:
+    """
+    Dual-spec policy for an era.
+
+    * ``legacy`` — sessionful 2025 wire only
+    * ``auto`` — accept 2025 ``initialize`` without a session (official v2 fallback)
+    * ``modern`` — reject 2025 sessionful wire
+    """
+    if era == "modern":
+        return "reject"
+    if era == "auto":
+        return "stateless"
+    return "sessionful"
+
+
+def needs_modern_engine(era: ProtocolEra) -> bool:
+    """True when ``/mcp`` should be the official 2026 engine (``modern`` or ``auto``)."""
+    return era in ("modern", "auto")
+
+
+def needs_sessionful_engine(era: ProtocolEra) -> bool:
+    """True only for ``legacy``. ``auto`` does not mount a second session manager."""
+    return era == "legacy"

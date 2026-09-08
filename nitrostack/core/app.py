@@ -39,9 +39,11 @@ from nitrostack.protocol.schema import normalize_input_schema, normalize_output_
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import (
     MODERN_PROTOCOL_VERSION,
+    ProtocolEra,
     protocol_version_for_era,
     resolve_protocol_era,
     stateless_for_era,
+    wire_mode_for_era,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
 from nitrostack.protocol.cache_hints import (
@@ -373,6 +375,7 @@ class McpApplication:
             raise ValueError("Invalid application class. Must be decorated with @mcp_app or @module.")
 
         self.mcp_server: Optional[NitroStackMcpServer] = None
+        self.protocol_era: ProtocolEra = resolve_protocol_era()
 
         # nitrostack owns these registries directly (no FastMCP-managed tool/resource
         # manager in between) so that any number of low-level `Server` instances can be
@@ -1368,6 +1371,7 @@ class McpApplication:
         from nitrostack.transports.http import build_http_app
 
         era = resolve_protocol_era()
+        self.protocol_era = era
         if stateless is not None:
             effective_stateless = stateless
         else:
@@ -1389,6 +1393,8 @@ class McpApplication:
             enable_cors=enable_cors,
             stateless=effective_stateless,
             json_response=self.server_config.json_response if json_response is None else json_response,
+            protocol_era=era,
+            wire_mode=wire_mode_for_era(era),
         )
 
         if effective_stateless:

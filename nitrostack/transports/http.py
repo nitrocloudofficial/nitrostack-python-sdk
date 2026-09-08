@@ -48,6 +48,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 
+from nitrostack.protocol.version import ProtocolEra, WireMode
+
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
 
@@ -469,6 +471,8 @@ def build_http_app(
     enable_cors: bool = True,
     stateless: bool = False,
     json_response: bool = False,
+    protocol_era: ProtocolEra = "auto",
+    wire_mode: WireMode = "stateless",
 ) -> Starlette:
     """
     Build the Starlette app exposing NitroStack's owned low-level server over
@@ -497,6 +501,10 @@ def build_http_app(
             that doesn't implement SSE parsing for POST responses sees the SSE
             form as a stream that ended without a result. Server-initiated
             streaming (progress, notifications) is unavailable in this mode.
+        protocol_era: ``legacy`` / ``modern`` / ``auto``. Distinct from ``stateless``.
+        wire_mode: Dual-spec policy for 2025 traffic (``sessionful``, ``stateless``
+            fallback, or ``reject``). ``auto`` uses ``stateless``; ``modern`` uses
+            ``reject``.
     """
     security_settings = None
     if not enable_cors:
@@ -726,4 +734,8 @@ def build_http_app(
         _enable_trace_logging()
         middleware.insert(0, Middleware(RequestTraceMiddleware))
 
-    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app.state.protocol_era = protocol_era
+    app.state.wire_mode = wire_mode
+    app.state.stateless = stateless
+    return app

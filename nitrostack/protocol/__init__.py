@@ -64,9 +64,13 @@ from nitrostack.protocol.version import (
     STATELESS_OVERRIDE_ENV,
     SUPPORTED_PROTOCOL_VERSIONS,
     ProtocolEra,
+    WireMode,
+    needs_modern_engine,
+    needs_sessionful_engine,
     protocol_version_for_era,
     resolve_protocol_era,
     stateless_for_era,
+    wire_mode_for_era,
 )
 
 __all__ = [
@@ -76,9 +80,13 @@ __all__ = [
     "STATELESS_OVERRIDE_ENV",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "ProtocolEra",
+    "WireMode",
+    "needs_modern_engine",
+    "needs_sessionful_engine",
     "protocol_version_for_era",
     "resolve_protocol_era",
     "stateless_for_era",
+    "wire_mode_for_era",
     "MCPExtensionId",
     "RuntimeLayer",
     "LEGACY_SESSION_HEADER",
