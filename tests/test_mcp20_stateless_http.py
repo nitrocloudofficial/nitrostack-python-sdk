@@ -7,7 +7,7 @@ import pytest
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.contracts import MCP_CACHE_HINT_KEY
-from nitrostack.protocol.discovery import DISCOVER_RESULT_TYPE, build_discover_result
+from nitrostack.protocol.discovery import DISCOVER_RESULT_TYPE, SERVER_DISCOVER_METHOD, build_discover_result
 from nitrostack.protocol.jsonrpc import (
     HEADER_BODY_MISMATCH,
     PARSE_ERROR,
@@ -127,22 +127,43 @@ class TestDispatchPipeline:
 
         asyncio.run(_run())
 
-    def test_handles_server_discover(self):
+    def test_forwards_server_discover_to_engine_handler(self):
+        async def _run():
+            payload = build_discover_result(
+                server_name="srv",
+                server_version="1.0.0",
+                protocol_version=MODERN_PROTOCOL_VERSION,
+            )
+
+            def _discover(_request):
+                return payload
+
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION),
+                discover_handler=_discover,
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "id": "req-001", "method": SERVER_DISCOVER_METHOD, "params": {}}
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            result = resp["result"]
+            assert result == payload
+            assert result["protocolVersion"] == "2026-07-28"
+            assert result["resultType"] == DISCOVER_RESULT_TYPE
+            assert MODERN_PROTOCOL_VERSION in result["supportedVersions"]
+
+        asyncio.run(_run())
+
+    def test_server_discover_without_engine_handler_is_not_answered(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
                 IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
             )
             body = json.dumps(
-                {"jsonrpc": "2.0", "id": "req-001", "method": "server/discover", "params": {}}
+                {"jsonrpc": "2.0", "id": "req-001", "method": SERVER_DISCOVER_METHOD, "params": {}}
             ).encode()
-            status, resp = await pipeline.handle_post(body, {})
-            assert status == 200
-            result = resp["result"]
-            assert result["protocolVersion"] == "2026-07-28"
-            assert result["resultType"] == DISCOVER_RESULT_TYPE
-            assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
-            assert result["cacheScope"] in ("public", "private")
-            assert MODERN_PROTOCOL_VERSION in result["supportedVersions"]
+            assert await pipeline.handle_post(body, {}) is None
 
         asyncio.run(_run())
 
@@ -640,6 +661,9 @@ class TestAutoEraOneMcpDualClients:
 
             assert discover.status_code == 200, discover.text
             discover_body = discover.json()["result"]
+            expected_discover = app.handle_server_discover()
+            assert discover_body == expected_discover
+            assert app.mcp_server.handle_server_discover() == expected_discover
             assert discover_body["protocolVersion"] == MODERN_PROTOCOL_VERSION
             assert discover.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
 

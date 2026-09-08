@@ -614,6 +614,27 @@ class McpApplication:
             return None
         return dict(extensions)
 
+    def handle_server_discover(self, protocol_version: Optional[str] = None) -> Dict[str, Any]:
+        """Single ``server/discover`` result for the mounted HTTP engine."""
+        from nitrostack.protocol.discovery import build_discover_result
+
+        has_widgets = any(
+            getattr(entry, "component", None) is not None
+            for entry in getattr(self, "_tools", {}).values()
+        )
+        version = protocol_version or protocol_version_for_era(
+            getattr(self, "protocol_era", None),
+            self.server_config.protocol_version,
+        )
+        return build_discover_result(
+            server_name=self.server_config.name,
+            server_version=self.server_config.version,
+            protocol_version=version,
+            advertise_tasks=self._advertise_tasks_extension(),
+            advertise_app=has_widgets,
+            custom_extensions=self._custom_extensions(),
+        )
+
     def _list_endpoint_cache_meta(self) -> Dict[str, Any]:
         return build_list_endpoint_cache_hint_meta()
 
@@ -666,6 +687,7 @@ class McpApplication:
 
         self._register_task_handlers(server)
         self._register_initialized_handler(server)
+        server.discover_handler = self.handle_server_discover
 
     def create_configured_mcp_server(self) -> NitroStackMcpServer:
         """
@@ -1414,6 +1436,9 @@ class McpApplication:
                 getattr(entry, "component", None) is not None
                 for entry in getattr(self, "_tools", {}).values()
             )
+            def _discover(_request: Any) -> Dict[str, Any]:
+                return self.handle_server_discover(protocol_version=protocol_version)
+
             http_app = wrap_stateless_transport(
                 http_app,
                 server_name=self.server_config.name,
@@ -1423,6 +1448,7 @@ class McpApplication:
                 advertise_app=has_widgets,
                 custom_extensions=self._custom_extensions(),
                 wire_mode=wire_mode,
+                discover_handler=_discover,
             )
 
         return http_app

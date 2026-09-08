@@ -5,7 +5,7 @@ Builds directly on the Python `mcp` SDK's low-level `Server` class: nitrostack
 owns registration/dispatch and only declares the protocol-level capabilities
 it actually implements.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import mcp.types as types
 from mcp.server.lowlevel import Server as LowLevelServer
@@ -33,6 +33,13 @@ class NitroStackMcpServer(LowLevelServer):
         super().__init__(name=name, version=version)
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
+        self.discover_handler: Optional[Callable[[], dict[str, Any]]] = None
+
+    def handle_server_discover(self) -> dict[str, Any]:
+        """Answer ``server/discover`` from this server instance."""
+        if self.discover_handler is None:
+            raise RuntimeError("server/discover is not configured on this server")
+        return self.discover_handler()
 
     def get_capabilities(
         self,

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable
+from typing import Any, Callable, Optional, Union
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.deprecated import deprecated_method_message
-from nitrostack.protocol.discovery import build_discover_result
+from nitrostack.protocol.discovery import SERVER_DISCOVER_METHOD
 from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import (
     HeaderBodyMismatchError,
@@ -34,6 +35,7 @@ from nitrostack.transports.headers import (
 
 TaskDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
 RegistryDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
+DiscoverHandler = Callable[[JsonRpcRequest], Union[Awaitable[dict[str, Any]], dict[str, Any]]]
 
 
 class DispatchStage(str, Enum):
@@ -109,7 +111,8 @@ class StatelessIngressPipeline:
     """
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
 
-    Handles ping, server/discover, and deprecated-method rejection inline.
+    Handles ping and deprecated-method rejection inline.
+    ``server/discover`` is forwarded to the HTTP engine handler when provided.
     Task and tool methods always return None so ``TaskManager`` plus the
     low-level MCP server remain the only production task path.
     """
@@ -120,10 +123,12 @@ class StatelessIngressPipeline:
         *,
         task_handler: Optional[TaskDispatchHandler] = None,
         registry_handler: Optional[RegistryDispatchHandler] = None,
+        discover_handler: Optional[DiscoverHandler] = None,
     ) -> None:
         self._context = context
         self._task_handler = task_handler
         self._registry_handler = registry_handler
+        self._discover_handler = discover_handler
 
     async def handle_post(
         self,
@@ -170,15 +175,12 @@ class StatelessIngressPipeline:
         if request.method == "ping":
             return 200, build_ping_response(request.id)
 
-        if request.method == "server/discover":
-            result = build_discover_result(
-                server_name=self._context.server_name,
-                server_version=self._context.server_version,
-                protocol_version=self._context.protocol_version,
-                advertise_tasks=self._context.advertise_tasks,
-                advertise_app=self._context.advertise_app,
-                custom_extensions=self._context.custom_extensions,
-            )
+        if request.method == SERVER_DISCOVER_METHOD:
+            if self._discover_handler is None:
+                return None
+            result = self._discover_handler(request)
+            if isinstance(result, Awaitable):
+                result = await result
             return 200, jsonrpc_success(request.id, result)
 
         if is_task_wire_interception(request.method, request.params):

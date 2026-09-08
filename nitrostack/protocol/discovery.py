@@ -1,8 +1,14 @@
-"""server/discover capability negotiation."""
+"""server/discover capability negotiation.
+
+Single payload builder for the HTTP engine. The ingress pipeline must not
+construct a second discover result.
+"""
 
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
+
+SERVER_DISCOVER_METHOD = "server/discover"
 
 from nitrostack.protocol.cache_hints import DEFAULT_LIST_CACHE_TTL_MS, build_list_endpoint_cache_hint_meta
 from nitrostack.protocol.extensions import MCPExtensionId
@@ -26,7 +32,7 @@ def build_discover_result(
     ttl_ms: int = DEFAULT_LIST_CACHE_TTL_MS,
     cache_scope: Literal["public", "private"] = "private",
 ) -> dict[str, Any]:
-    """Build the server/discover result payload."""
+    """Build the ``server/discover`` result for the mounted HTTP engine."""
     versions = list(supported_versions or SUPPORTED_PROTOCOL_VERSIONS)
     extensions: dict[str, dict[str, str]] = {}
     if advertise_app:

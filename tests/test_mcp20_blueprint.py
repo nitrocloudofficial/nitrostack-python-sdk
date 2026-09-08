@@ -98,7 +98,12 @@ class TestStatelessHttpConformance:
     def test_stateless_pipeline_handles_discover_without_session(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION),
+                discover_handler=lambda _req: build_discover_result(
+                    server_name="srv",
+                    server_version="1.0.0",
+                    protocol_version=MODERN_PROTOCOL_VERSION,
+                ),
             )
             body = json.dumps(
                 {"jsonrpc": "2.0", "id": "d1", "method": "server/discover", "params": {}}
