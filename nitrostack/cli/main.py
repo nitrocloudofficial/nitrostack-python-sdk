@@ -10,6 +10,7 @@ from pathlib import Path
 from nitrostack.cli.generate import generate_component, generate_module as generate_module_from_template
 from nitrostack.cli.install import install_dependencies
 from nitrostack.cli.pack import pack_project
+from nitrostack.cli.skills import run_skills_flow
 from nitrostack.cli.upgrade import upgrade_project
 from nitrostack.cli.validators import format_report, validate_project
 
@@ -1242,7 +1243,7 @@ def _add_port_flags(parser):
     )
 
 
-def init_project(name: str = None, template: str = None, skip_install: bool = False, port=None, widget=None):
+def init_project(name: str = None, template: str = None, skip_install: bool = False, port=None, widget=None, force: bool = False):
     print_banner()
 
     # 1. Project name — optional CLI arg, otherwise the next readline
@@ -1359,6 +1360,8 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
             print("Please run 'npm install' inside 'src/widgets' manually.\n")
     elif not install_deps:
         print("\033[32m✓\033[0m Skipped dependency install")
+
+    run_skills_flow(os.path.abspath(name), force=force)
 
     # Success Card
     abs_path = os.path.abspath(name)
@@ -1725,6 +1728,11 @@ def main():
         help="Template to use: python-starter, python-pizzaz, python-oauth (default: interactive prompt)",
     )
     init_parser.add_argument("--skip-install", action="store_true", help="Skip installing widget npm dependencies")
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing agent skill directories when installing",
+    )
     _add_port_flags(init_parser)
 
     # dev command
@@ -1833,6 +1841,7 @@ def main():
             skip_install=args.skip_install,
             port=args.port,
             widget=args.widget,
+            force=args.force,
         )
     elif args.command == "dev":
         run_dev(port=args.port, widget=args.widget)
