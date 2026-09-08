@@ -13,6 +13,7 @@ from nitrostack.transports.headers import (
     HEADER_ACCESS_CONTROL_ALLOW_METHODS,
     HEADER_ACCESS_CONTROL_ALLOW_ORIGIN,
     HEADER_ACCESS_CONTROL_EXPOSE_HEADERS,
+    HEADER_MCP_PARAM_PREFIX,
     get_header,
 )
 
@@ -68,7 +69,24 @@ def build_cors_headers(
     }
 
 
+def requested_mcp_param_headers(request_headers: Mapping[str, str]) -> tuple[str, ...]:
+    """Exact ``Mcp-Param-*`` names from ``Access-Control-Request-Headers``."""
+    raw = get_header(request_headers, "Access-Control-Request-Headers") or ""
+    prefix = HEADER_MCP_PARAM_PREFIX.lower()
+    echoed: list[str] = []
+    for item in raw.split(","):
+        name = item.strip()
+        if name.lower().startswith(prefix) and len(name) > len(HEADER_MCP_PARAM_PREFIX):
+            echoed.append(name)
+    return tuple(echoed)
+
+
 def cors_preflight_response_headers(request_headers: Mapping[str, str]) -> dict[str, str]:
     """Headers for OPTIONS preflight — HTTP 204 No Content."""
     origin = get_header(request_headers, "Origin")
-    return build_cors_headers(origin=origin)
+    headers = build_cors_headers(origin=origin)
+    extra = requested_mcp_param_headers(request_headers)
+    if extra:
+        current = headers[HEADER_ACCESS_CONTROL_ALLOW_HEADERS]
+        headers[HEADER_ACCESS_CONTROL_ALLOW_HEADERS] = current + ", " + ", ".join(extra)
+    return headers

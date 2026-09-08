@@ -36,10 +36,17 @@ MCP_JSON_CONTENT_TYPE = "application/json"
 MCP_SSE_CONTENT_TYPE = "text/event-stream"
 
 CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
-CORS_ALLOW_HEADERS = (
-    "Content-Type, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name, "
-    "Mcp-Param-*, Last-Event-ID"
+CORS_ALLOW_HEADER_NAMES: tuple[str, ...] = (
+    "Content-Type",
+    "Accept",
+    "Authorization",
+    "MCP-Protocol-Version",
+    "Mcp-Method",
+    "Mcp-Name",
+    "Last-Event-ID",
+    "Mcp-Session-Id",
 )
+CORS_ALLOW_HEADERS = ", ".join(CORS_ALLOW_HEADER_NAMES)
 CORS_EXPOSE_HEADERS = "MCP-Protocol-Version, Mcp-Method, Mcp-Name"
 
 MCP_HTTP_PATH = "/mcp"

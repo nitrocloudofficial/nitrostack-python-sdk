@@ -150,7 +150,10 @@ class TestStatelessHttpConformance:
     def test_cors_preflight_includes_mcp_headers(self):
         headers = cors_preflight_response_headers({"Origin": "https://app.example.com"})
         assert "Access-Control-Allow-Origin" in headers
-        assert "Mcp-Method" in headers.get("Access-Control-Allow-Headers", "")
+        allow = headers.get("Access-Control-Allow-Headers", "")
+        assert "Mcp-Method" in allow
+        assert "Mcp-Name" in allow
+        assert "MCP-Protocol-Version" in allow
 
 
 class TestJsonRpcConformance:

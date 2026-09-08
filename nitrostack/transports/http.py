@@ -53,7 +53,7 @@ from nitrostack.protocol.version import (
     WireMode,
     protocol_version_for_era,
 )
-from nitrostack.transports.headers import strip_legacy_session_headers_asgi
+from nitrostack.transports.headers import CORS_ALLOW_HEADER_NAMES, strip_legacy_session_headers_asgi
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -62,15 +62,8 @@ logger = logging.getLogger("nitrostack.transports.http")
 
 DEFAULT_ENDPOINT = "/mcp"
 
-# CORS headers for browser-based MCP clients (Inspector).
-CORS_ALLOW_HEADERS = [
-    "Content-Type",
-    "Accept",
-    "Authorization",
-    "Mcp-Session-Id",
-    "MCP-Protocol-Version",
-    "Last-Event-ID",
-]
+# Shared 2026 allow-headers. Expose-headers on this layer stay sessionful.
+CORS_ALLOW_HEADERS = list(CORS_ALLOW_HEADER_NAMES)
 CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
 
 # The Accept value `StreamableHTTPServerTransport` requires: it needs

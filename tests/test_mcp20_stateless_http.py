@@ -318,8 +318,18 @@ class TestCors:
         assert "Mcp-Method" in headers["Access-Control-Allow-Headers"]
 
     def test_preflight_headers(self):
-        headers = cors_preflight_response_headers({"Origin": "https://app.example.com"})
+        headers = cors_preflight_response_headers(
+            {
+                "Origin": "https://app.example.com",
+                "Access-Control-Request-Headers": "Mcp-Name, Mcp-Method, MCP-Protocol-Version, Mcp-Param-City",
+            }
+        )
         assert "Access-Control-Allow-Origin" in headers
+        allow = headers["Access-Control-Allow-Headers"]
+        assert "Mcp-Name" in allow
+        assert "Mcp-Method" in allow
+        assert "MCP-Protocol-Version" in allow
+        assert "Mcp-Param-City" in allow
 
     def test_does_not_reflect_arbitrary_origin(self):
         headers = build_cors_headers(origin="https://evil.example")
@@ -725,6 +735,70 @@ class TestOptionsScopedToMcpPath:
             assert call.json()["result"]["content"][0]["text"] == "ok"
         finally:
             DIContainer.reset()
+
+    def test_options_allow_headers_include_2026_mcp_names(self, monkeypatch):
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+        from pydantic import BaseModel, Field
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        monkeypatch.setenv("MCP_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="CorsAllowHeadersHttp", controllers=[EchoController])
+            class CorsAllowHeadersModule:
+                pass
+
+            @mcp_app(module=CorsAllowHeadersModule, server=ServerConfig(name="cors-allow-headers"))
+            class CorsAllowHeadersApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(CorsAllowHeadersApp))
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                allowed = client.options(
+                    "/mcp",
+                    headers={
+                        "Origin": "https://app.example.com",
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": (
+                            "Mcp-Name, Mcp-Method, MCP-Protocol-Version, Mcp-Param-City"
+                        ),
+                    },
+                )
+                unknown = client.options(
+                    "/mcp",
+                    headers={
+                        "Origin": "https://evil.example",
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "Mcp-Name",
+                    },
+                )
+            assert allowed.status_code == 204
+            allow = allowed.headers.get("access-control-allow-headers", "")
+            assert "Mcp-Name" in allow
+            assert "Mcp-Method" in allow
+            assert "MCP-Protocol-Version" in allow
+            assert "Mcp-Param-City" in allow
+            assert allowed.headers.get("access-control-allow-origin") == "https://app.example.com"
+            assert unknown.headers.get("access-control-allow-origin") != "https://evil.example"
+        finally:
+            DIContainer.reset()
+            monkeypatch.delenv("MCP_CORS_ALLOWED_ORIGINS", raising=False)
+            monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
 
 
 class TestProviderToolDiscovery:
