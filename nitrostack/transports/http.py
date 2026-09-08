@@ -59,6 +59,7 @@ from nitrostack.transports.headers import (
     CORS_EXPOSE_HEADER_NAMES,
     strip_legacy_session_headers_asgi,
 )
+from nitrostack.transports.proxy import public_url_for_request
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -85,11 +86,16 @@ def _server_meta(mcp_app: "McpApplication") -> Dict[str, str]:
     }
 
 
-def _landing_html(name: str, version: str, endpoint: str) -> str:
+def _landing_html(
+    name: str,
+    version: str,
+    endpoint: str,
+    public_mcp_url: Optional[str] = None,
+) -> str:
     safe_name = html.escape(name)
     safe_version = html.escape(version)
-    mcp_path = html.escape(endpoint.rstrip("/") or "/mcp")
-    health_path = f"{mcp_path}/health"
+    mcp_path = html.escape(public_mcp_url or (endpoint.rstrip("/") or "/mcp"))
+    health_path = html.escape(f"{(endpoint.rstrip('/') or '/mcp')}/health")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -559,6 +565,14 @@ def build_http_app(
             await mcp_app.mcp_server.run(streams[0], streams[1], mcp_app.mcp_server.create_initialization_options())
         return Response()
 
+    def _request_public_mcp_url(request) -> str:
+        port = os.environ.get("PORT") or os.environ.get("MCP_SERVER_PORT") or "3000"
+        return public_url_for_request(
+            request,
+            path=endpoint.rstrip("/") or "/mcp",
+            fallback_host=f"localhost:{port}",
+        )
+
     async def health_check(request):
         return JSONResponse(
             {
@@ -571,12 +585,20 @@ def build_http_app(
                 "jsonResponse": json_response,
                 "sessions": session_cap.active_session_count if session_cap else None,
                 "uptimeSeconds": round(time.monotonic() - _PROCESS_START, 2),
+                "publicUrl": _request_public_mcp_url(request),
             }
         )
 
     async def root_page(request):
         meta = _server_meta(mcp_app)
-        return HTMLResponse(_landing_html(meta["name"], meta["version"], endpoint))
+        return HTMLResponse(
+            _landing_html(
+                meta["name"],
+                meta["version"],
+                endpoint,
+                public_mcp_url=_request_public_mcp_url(request),
+            )
+        )
 
     async def oauth_not_supported(request):
         """Inspector DCR posts `/register` when Authentication is on.
@@ -584,13 +606,14 @@ def build_http_app(
         Return JSON (not the HTML 404 page) so the client shows a clear
         OAuth-off message instead of `Unexpected token '<'`.
         """
+        connect_url = _request_public_mcp_url(request)
         return JSONResponse(
             {
                 "error": "invalid_request",
                 "error_description": (
                     "This MCP server does not use OAuth. In MCP Inspector turn "
                     "Authentication off, then connect with Streamable HTTP to "
-                    f"http://localhost:{os.environ.get('PORT') or os.environ.get('MCP_SERVER_PORT') or '3000'}{endpoint}."
+                    f"{connect_url}."
                 ),
             },
             status_code=404,
@@ -665,6 +688,7 @@ def build_http_app(
                 "User-Agent": f"NitroStack/{meta['version']}",
                 "webSocketDebuggerUrl": "",
                 "transport": "mcp",
+                "publicUrl": _request_public_mcp_url(request),
                 "endpoints": {
                     "mcp": endpoint,
                     "sse": "/sse",

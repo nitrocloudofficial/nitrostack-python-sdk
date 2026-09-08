@@ -124,6 +124,42 @@ def _pick_pinned_ip(resolved_ips: set[str]) -> str:
     return sorted(resolved_ips)[0]
 
 
+def cimd_peer_is_acceptable(peer: str, pinned_ip: str) -> bool:
+    """Require the direct socket peer to match the pinned IP.
+
+    A configured trusted proxy hop is the only exception; untrusted peers
+    cannot stand in for the destination.
+    """
+    if peer == pinned_ip:
+        return not is_blocked_ip(peer)
+    from nitrostack.transports.proxy import peer_is_trusted
+
+    return peer_is_trusted(peer)
+
+
+def request_host_for_cimd(
+    headers: dict[str, str],
+    peer: Optional[str] = None,
+    trusted: Optional[Any] = None,
+) -> Optional[str]:
+    """Inbound host used for CIMD pins. Forwarded host requires a trusted peer."""
+    from nitrostack.transports.proxy import request_host_for_cimd as resolve_host
+
+    return resolve_host(headers, peer, trusted=trusted)
+
+
+def cimd_host_matches_request(
+    cimd_url: str,
+    headers: dict[str, str],
+    peer: Optional[str] = None,
+    trusted: Optional[Any] = None,
+) -> bool:
+    """True when the CIMD URL host equals the trusted-proxy-aware request host."""
+    from nitrostack.transports.proxy import cimd_url_matches_request_host
+
+    return cimd_url_matches_request_host(cimd_url, headers, peer, trusted=trusted)
+
+
 async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False) -> Optional[str]:
     """DNS pre-resolution and IP range filtering. Returns the pinned destination IP."""
     validate_client_identifier_url(url_str, allow_loopback=allow_loopback)
@@ -165,7 +201,7 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
     def connect(self) -> None:
         self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
         peer = self.sock.getpeername()[0]
-        if peer != self._pinned_ip or is_blocked_ip(peer):
+        if not cimd_peer_is_acceptable(peer, self._pinned_ip):
             self.sock.close()
             raise CimdFetchError(f"Peer address {peer} is not the pinned safe IP")
 
@@ -178,7 +214,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def connect(self) -> None:
         self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
         peer = self.sock.getpeername()[0]
-        if peer != self._pinned_ip or is_blocked_ip(peer):
+        if not cimd_peer_is_acceptable(peer, self._pinned_ip):
             self.sock.close()
             raise CimdFetchError(f"Peer address {peer} is not the pinned safe IP")
         context = self._context if getattr(self, "_context", None) else ssl.create_default_context()

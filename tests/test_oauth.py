@@ -319,6 +319,12 @@ def test_discovery_document_includes_registration_endpoint_when_given():
     )
     metadata = build_authorization_server_metadata(service, registration_endpoint="/oauth/v2/register")
     assert metadata["registration_endpoint"] == "/oauth/v2/register"
+    absolute = build_authorization_server_metadata(
+        service,
+        registration_endpoint="/oauth/v2/register",
+        public_origin="https://mcp.example.com",
+    )
+    assert absolute["registration_endpoint"] == "https://mcp.example.com/oauth/v2/register"
     print("Success! registration_endpoint included when supplied.")
 
 

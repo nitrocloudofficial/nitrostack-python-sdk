@@ -227,6 +227,7 @@ The SDK reads standard settings from the environment or `.env` files:
 | Environment Variable | Description |
 |---|---|
 | `HOST` | Bind address for HTTP/SSE (default: `127.0.0.1`). Set `0.0.0.0` to listen on all interfaces (containers). |
+| `TRUSTED_PROXIES` / `MCP_TRUSTED_PROXIES` | Comma-separated IPs, CIDRs, or hostnames allowed to send `X-Forwarded-Host` / `X-Forwarded-Proto`. Unset means those headers are ignored. `X-Forwarded-For` is never used to decide trust. |
 | `PORT` / `MCP_SERVER_PORT` | The port to bind for HTTP/SSE transport (default: `3000`). Overridden by `nitrostack-py --port`. |
 | `WIDGETS_DEV_PORT` | Widget Next.js port (default: `3001`). Overridden by `nitrostack-py --widget`. |
 | `MCP_TRANSPORT_TYPE` | Transport selection: `stdio`, `http`, or `dual` (combining stdio + HTTP/SSE). |

@@ -281,3 +281,74 @@ class TestTypescriptCompatibleHost:
     def test_host_env_matches_typescript(self, monkeypatch):
         monkeypatch.setenv("HOST", "localhost")
         assert resolve_http_host() == "localhost"
+
+
+class TestTrustedReverseProxy:
+    def test_default_ignores_forwarded_host(self, monkeypatch):
+        from nitrostack.transports.proxy import public_origin, request_host_for_cimd
+
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        monkeypatch.delenv("MCP_TRUSTED_PROXIES", raising=False)
+        headers = {
+            "Host": "internal:3000",
+            "X-Forwarded-Host": "mcp.example.com",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-For": "10.0.0.5",
+        }
+        assert public_origin(headers, peer="8.8.8.8") == "http://internal:3000"
+        assert request_host_for_cimd(headers, peer="8.8.8.8") == "internal"
+
+    def test_trusted_proxy_honors_forwarded_host(self, monkeypatch):
+        from nitrostack.transports.proxy import public_url, request_host_for_cimd
+
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        headers = {
+            "Host": "internal:3000",
+            "X-Forwarded-Host": "mcp.example.com",
+            "X-Forwarded-Proto": "https",
+        }
+        assert public_url(headers, peer="10.0.0.5", path="/mcp") == "https://mcp.example.com/mcp"
+        assert request_host_for_cimd(headers, peer="10.0.0.5") == "mcp.example.com"
+
+    def test_cidr_allow_list(self, monkeypatch):
+        from nitrostack.transports.proxy import peer_is_trusted
+
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.0/8")
+        assert peer_is_trusted("10.1.2.3") is True
+        assert peer_is_trusted("11.0.0.1") is False
+
+    def test_x_forwarded_for_does_not_grant_trust(self, monkeypatch):
+        from nitrostack.transports.proxy import public_origin
+
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        headers = {
+            "Host": "internal:3000",
+            "X-Forwarded-For": "10.0.0.5",
+            "X-Forwarded-Host": "evil.example",
+            "X-Forwarded-Proto": "https",
+        }
+        assert public_origin(headers, peer="8.8.8.8") == "http://internal:3000"
+
+    def test_untrusted_forwarded_host_cannot_rebind_cimd(self, monkeypatch):
+        from nitrostack.auth.cimd import cimd_host_matches_request, request_host_for_cimd
+
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        headers = {
+            "Host": "mcp.nitrostack.io",
+            "X-Forwarded-Host": "evil.example",
+        }
+        url = "https://evil.example/oauth/client-metadata.json"
+        assert request_host_for_cimd(headers, peer="8.8.8.8") == "mcp.nitrostack.io"
+        assert cimd_host_matches_request(url, headers, peer="8.8.8.8") is False
+
+    def test_trusted_proxy_cimd_host_matches_forwarded_host(self, monkeypatch):
+        from nitrostack.auth.cimd import cimd_host_matches_request, request_host_for_cimd
+
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        headers = {
+            "Host": "internal:3000",
+            "X-Forwarded-Host": "app.nitrostack.io",
+        }
+        url = "https://app.nitrostack.io/oauth/client-metadata.json"
+        assert request_host_for_cimd(headers, peer="10.0.0.5") == "app.nitrostack.io"
+        assert cimd_host_matches_request(url, headers, peer="10.0.0.5") is True

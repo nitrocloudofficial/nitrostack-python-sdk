@@ -1336,6 +1336,113 @@ class TestHealthAdvertisesEra:
         assert body["statelessCapable"] is False
 
 
+class TestTrustedProxyPublicUrl:
+    def _http_app(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        DIContainer.reset()
+
+        @injectable()
+        class EchoController:
+            @tool(name="echo", description="echo", input_schema=EchoInput)
+            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name="ProxyHttp", controllers=[EchoController])
+        class ProxyModule:
+            pass
+
+        @mcp_app(module=ProxyModule, server=ServerConfig(name="proxy-http"))
+        class ProxyApp:
+            pass
+
+        app = asyncio.run(McpApplicationFactory.create(ProxyApp))
+        return app.get_combined_app(json_response=True)
+
+    def test_health_ignores_untrusted_forwarded_host(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            http_app = self._http_app(monkeypatch)
+            with TestClient(http_app, client=("8.8.8.8", 4321)) as client:
+                response = client.get(
+                    "/mcp/health",
+                    headers={
+                        "Host": "internal:3000",
+                        "X-Forwarded-Host": "mcp.example.com",
+                        "X-Forwarded-Proto": "https",
+                    },
+                )
+                docs = client.get(
+                    "/",
+                    headers={
+                        "Host": "internal:3000",
+                        "X-Forwarded-Host": "mcp.example.com",
+                        "X-Forwarded-Proto": "https",
+                    },
+                )
+                oauth = client.get(
+                    "/.well-known/oauth-authorization-server",
+                    headers={
+                        "Host": "internal:3000",
+                        "X-Forwarded-Host": "mcp.example.com",
+                        "X-Forwarded-Proto": "https",
+                    },
+                )
+            assert response.status_code == 200
+            assert "mcp.example.com" not in response.json()["publicUrl"]
+            assert "mcp.example.com" not in docs.text
+            assert "mcp.example.com" not in oauth.json()["error_description"]
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_health_honors_trusted_forwarded_host(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        try:
+            http_app = self._http_app(monkeypatch)
+            with TestClient(http_app, client=("10.0.0.5", 4321)) as client:
+                headers = {
+                    "Host": "internal:3000",
+                    "X-Forwarded-Host": "mcp.example.com",
+                    "X-Forwarded-Proto": "https",
+                }
+                response = client.get("/mcp/health", headers=headers)
+                docs = client.get("/", headers=headers)
+                oauth = client.get("/.well-known/oauth-authorization-server", headers=headers)
+                version = client.get("/json/version", headers=headers)
+            assert response.status_code == 200
+            assert response.json()["publicUrl"] == "https://mcp.example.com/mcp"
+            assert "https://mcp.example.com/mcp" in docs.text
+            assert "https://mcp.example.com/mcp" in oauth.json()["error_description"]
+            assert version.json()["publicUrl"] == "https://mcp.example.com/mcp"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+            os.environ.pop("TRUSTED_PROXIES", None)
+
+
 class TestEnvelopeOnHandlerContext:
     def test_tool_reads_trace_and_protocol_version_not_spoofed_user(self, monkeypatch):
         import os

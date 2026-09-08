@@ -12,7 +12,10 @@ from nitrostack.auth.cimd import (
     CimdValidationError,
     _fetch_cimd_bytes,
     assert_safe_fetch_target,
+    cimd_host_matches_request,
+    cimd_peer_is_acceptable,
     is_blocked_ip,
+    request_host_for_cimd,
     resolve_cimd,
     validate_client_identifier_url,
 )
@@ -165,6 +168,66 @@ class TestCimdResolver:
                     pinned_ip="8.8.8.8",
                 )
         assert connected["addr"][0] == "8.8.8.8"
+
+
+class TestCimdTrustedProxyHost:
+    def test_direct_peer_must_match_pin(self, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        assert cimd_peer_is_acceptable("8.8.8.8", "8.8.8.8") is True
+        assert cimd_peer_is_acceptable("1.2.3.4", "8.8.8.8") is False
+
+    def test_trusted_proxy_peer_is_acceptable(self, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        assert cimd_peer_is_acceptable("10.0.0.5", "8.8.8.8") is True
+        assert cimd_peer_is_acceptable("10.0.0.9", "8.8.8.8") is False
+
+    def test_untrusted_forwarded_host_cannot_rebind_cimd(self, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        headers = {
+            "Host": "mcp.nitrostack.io",
+            "X-Forwarded-Host": "evil.example",
+        }
+        url = "https://evil.example/oauth/client-metadata.json"
+        assert request_host_for_cimd(headers, peer="8.8.8.8") == "mcp.nitrostack.io"
+        assert cimd_host_matches_request(url, headers, peer="8.8.8.8") is False
+
+    def test_apply_cimd_records_untrusted_request_host(self, monkeypatch):
+        monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+        url = "https://app.nitrostack.io/oauth/client-metadata.json"
+        headers = {
+            "Host": "mcp.nitrostack.io",
+            "X-Forwarded-Host": "app.nitrostack.io",
+        }
+        with patch(
+            "nitrostack.auth.oauth_module.resolve_cimd_sync",
+            return_value={"client_id": url, "client_name": "Studio"},
+        ):
+            body = apply_cimd_to_registration_body(
+                {"client_id": url},
+                headers=headers,
+                peer="8.8.8.8",
+            )
+        assert body["_cimd_request_host"] == "mcp.nitrostack.io"
+        assert body["_cimd_host_matches_request"] is False
+
+    def test_apply_cimd_honors_trusted_forwarded_host(self, monkeypatch):
+        monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
+        url = "https://app.nitrostack.io/oauth/client-metadata.json"
+        headers = {
+            "Host": "internal:3000",
+            "X-Forwarded-Host": "app.nitrostack.io",
+        }
+        with patch(
+            "nitrostack.auth.oauth_module.resolve_cimd_sync",
+            return_value={"client_id": url, "client_name": "Studio"},
+        ):
+            body = apply_cimd_to_registration_body(
+                {"client_id": url},
+                headers=headers,
+                peer="10.0.0.5",
+            )
+        assert body["_cimd_request_host"] == "app.nitrostack.io"
+        assert body["_cimd_host_matches_request"] is True
 
 
 class TestCimdRegistrationWiring:
