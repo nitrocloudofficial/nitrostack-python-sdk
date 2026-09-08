@@ -40,8 +40,8 @@ from nitrostack.protocol.resources import extract_template_param_names, uri_temp
 from nitrostack.protocol.version import (
     MODERN_PROTOCOL_VERSION,
     ProtocolEra,
+    http_engine_for_era,
     needs_modern_engine,
-    needs_sessionful_engine,
     protocol_version_for_era,
     resolve_protocol_era,
     wire_mode_for_era,
@@ -1381,16 +1381,13 @@ class McpApplication:
         era = resolve_protocol_era(config_value=self.server_config.protocol_era)
         self.protocol_era = era
         wire_mode = wire_mode_for_era(era)
+        http_engine = http_engine_for_era(era)
         if stateless is not None:
             effective_stateless = stateless
-        elif needs_sessionful_engine(era):
-            effective_stateless = False
-        elif needs_modern_engine(era):
-            # auto and modern share one sessionless /mcp manager.
-            # Era stays on the app; auto is not modern (wire_mode differs).
-            effective_stateless = True
+            http_engine = "sessionless" if stateless else "sessionful"
         else:
-            effective_stateless = bool(self.server_config.stateless)
+            # Era factory: modern/auto → sessionless /mcp; legacy → sessionful 1.x.
+            effective_stateless = http_engine == "sessionless"
 
         if enable_cors is None:
             env_cors = self._env_bool("ENABLE_CORS")
@@ -1407,6 +1404,7 @@ class McpApplication:
             json_response=self.server_config.json_response if json_response is None else json_response,
             protocol_era=era,
             wire_mode=wire_mode,
+            http_engine=http_engine,
         )
 
         if needs_modern_engine(era) or effective_stateless:

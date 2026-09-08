@@ -434,6 +434,8 @@ class TestNitroMcpProtocolVersionEnv:
             assert inner.state.protocol_era == "modern"
             assert inner.state.wire_mode == "reject"
             assert inner.state.stateless is True
+            assert inner.state.http_engine == "sessionless"
+            assert app.mcp_server.http_engine == "sessionless"
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
@@ -476,7 +478,53 @@ class TestNitroMcpProtocolVersionEnv:
             assert state.protocol_era == "auto"
             assert state.wire_mode == "stateless"
             assert state.stateless is True
+            assert state.http_engine == "sessionless"
             assert state.streamable_http_manager_count == 1
+            assert app.mcp_server.http_engine == "sessionless"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_legacy_era_uses_sessionful_engine(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "legacy")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="LegacyEngineHttp", controllers=[EchoController])
+            class LegacyEngineModule:
+                pass
+
+            @mcp_app(module=LegacyEngineModule, server=ServerConfig(name="legacy-engine-http"))
+            class LegacyEngineApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(LegacyEngineApp))
+            http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert app.protocol_era == "legacy"
+            assert state.http_engine == "sessionful"
+            assert state.stateless is False
+            assert state.session_manager.stateless is False
+            assert app.mcp_server.http_engine == "sessionful"
+            assert "echo" in app._tools
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

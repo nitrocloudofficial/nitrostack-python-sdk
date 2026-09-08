@@ -14,6 +14,7 @@ from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     MODERN_PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    http_engine_for_era,
     needs_modern_engine,
     needs_sessionful_engine,
     protocol_version_for_era,
@@ -190,6 +191,9 @@ class TestTypescriptCompatibleProtocolEra:
         assert needs_modern_engine("legacy") is False
         assert needs_sessionful_engine("auto") is False
         assert needs_sessionful_engine("legacy") is True
+        assert http_engine_for_era("auto") == "sessionless"
+        assert http_engine_for_era("modern") == "sessionless"
+        assert http_engine_for_era("legacy") == "sessionful"
 
     def test_config_era_used_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)

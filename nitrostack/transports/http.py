@@ -48,7 +48,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 
-from nitrostack.protocol.version import ProtocolEra, WireMode
+from nitrostack.protocol.version import HttpEngine, ProtocolEra, WireMode
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -473,6 +473,7 @@ def build_http_app(
     json_response: bool = False,
     protocol_era: ProtocolEra = "auto",
     wire_mode: WireMode = "stateless",
+    http_engine: Optional[HttpEngine] = None,
 ) -> Starlette:
     """
     Build the Starlette app exposing NitroStack's owned low-level server over
@@ -505,7 +506,18 @@ def build_http_app(
         wire_mode: Dual-spec policy for 2025 traffic (``sessionful``, ``stateless``
             fallback, or ``reject``). ``auto`` uses ``stateless``; ``modern`` uses
             ``reject``.
+        http_engine: Era factory result. ``sessionless`` for modern/auto,
+            ``sessionful`` for legacy. When omitted, follows ``stateless``.
     """
+    if http_engine is None:
+        http_engine = "sessionless" if stateless else "sessionful"
+    else:
+        stateless = http_engine == "sessionless"
+
+    server = mcp_app.mcp_server
+    if server is not None:
+        server.http_engine = http_engine
+
     security_settings = None
     if not enable_cors:
         allowed_hosts = _env_list("MCP_ALLOWED_HOSTS") or ["localhost:*", "127.0.0.1:*"]
@@ -740,6 +752,7 @@ def build_http_app(
     app.state.protocol_era = protocol_era
     app.state.wire_mode = wire_mode
     app.state.stateless = stateless
+    app.state.http_engine = http_engine
     app.state.session_manager = session_manager
     app.state.streamable_http_manager_count = 1
     return app

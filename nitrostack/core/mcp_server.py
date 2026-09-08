@@ -16,10 +16,9 @@ class NitroStackMcpServer(LowLevelServer):
     """
     Thin subclass of the official low-level MCP `Server`.
 
-    One instance is the only Streamable HTTP engine on ``/mcp``. Era ``auto``
-    and ``modern`` share that mount (2025 ``initialize`` and 2026 methods);
-    they do not get a second session manager. Era ``legacy`` is the sessionful
-    path.
+    One instance owns tool, resource, and prompt registration. The HTTP factory
+    mounts that same server on ``/mcp``: sessionless for ``auto`` / ``modern``,
+    sessionful for ``legacy``. A second session manager is not created.
 
     The base `Server.get_capabilities()` only advertises a capability when a
     handler for the corresponding request type has been registered, and it
@@ -33,6 +32,7 @@ class NitroStackMcpServer(LowLevelServer):
     def __init__(self, name: str, version: Optional[str] = None):
         super().__init__(name=name, version=version)
         self.has_task_support: bool = False
+        self.http_engine: Optional[str] = None
 
     def get_capabilities(
         self,

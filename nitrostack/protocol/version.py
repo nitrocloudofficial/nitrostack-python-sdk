@@ -18,6 +18,9 @@ ProtocolEra = Literal["legacy", "modern", "auto"]
 # ``stateless`` here is the dual-spec fallback (sessionless initialize), not
 # the 1.x ``StreamableHTTPSessionManager(stateless=True)`` flag.
 WireMode = Literal["sessionful", "stateless", "reject"]
+# Which /mcp HTTP engine the era factory mounts. Official mcp 2.x replaces
+# the sessionless 1.x manager when that dependency is installed.
+HttpEngine = Literal["sessionless", "sessionful"]
 
 _AUTO_ALIASES = frozenset({"auto", "both", "dual", "dual-spec"})
 _MODERN_ALIASES = frozenset({"modern", "latest", "2026", MODERN_PROTOCOL_VERSION})
@@ -137,3 +140,15 @@ def needs_modern_engine(era: ProtocolEra) -> bool:
 def needs_sessionful_engine(era: ProtocolEra) -> bool:
     """True only for ``legacy``. ``auto`` does not mount a second session manager."""
     return era == "legacy"
+
+
+def http_engine_for_era(era: ProtocolEra) -> HttpEngine:
+    """
+    Select the /mcp HTTP engine for an era.
+
+    ``legacy`` uses the sessionful 1.x manager. ``modern`` and ``auto`` use the
+    sessionless /mcp path (one engine; official mcp 2.x when mounted).
+    """
+    if needs_sessionful_engine(era):
+        return "sessionful"
+    return "sessionless"
