@@ -644,6 +644,28 @@ class TestDispatchPipeline:
             status, resp = await pipeline.handle_post(body, {"Mcp-Method": "initialize"})
             assert status == 200
             assert resp["error"]["code"] == -32601
+            assert resp["error"]["message"] == "Method not found: initialize"
+
+        asyncio.run(_run())
+
+    def test_modern_reject_initialized(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext(
+                    "srv",
+                    "1.0.0",
+                    MODERN_PROTOCOL_VERSION,
+                    wire_mode="reject",
+                    protocol_era="modern",
+                )
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            assert resp["error"]["code"] == -32601
+            assert resp["error"]["message"] == "Method not found: notifications/initialized"
 
         asyncio.run(_run())
 
@@ -1501,43 +1523,62 @@ class TestModernEraRejectsLegacyWire:
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
             }
+            initialize_body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                },
+            }
+            initialized_body = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
             with TestClient(http_app) as client:
-                init = client.post(
-                    "/mcp",
-                    headers=headers,
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {
-                            "protocolVersion": "2025-06-18",
-                            "capabilities": {},
-                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
-                        },
-                    },
-                )
+                init = client.post("/mcp", headers=headers, json=initialize_body)
                 initialized = client.post(
-                    "/mcp",
-                    headers=headers,
-                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    "/mcp", headers=headers, json=initialized_body
                 )
-                with_session = client.post(
+                init_with_session = client.post(
                     "/mcp",
                     headers={**headers, LEGACY_SESSION_HEADER: "forged"},
-                    json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                    json=initialize_body,
+                )
+                initialized_with_session = client.post(
+                    "/mcp",
+                    headers={**headers, LEGACY_SESSION_HEADER: "forged"},
+                    json=initialized_body,
                 )
 
-            assert init.status_code in (200, 400)
-            assert "error" in init.json()
+            assert init.status_code == 200
+            assert init.json()["error"]["code"] == -32601
+            assert init.json()["error"]["message"] == "Method not found: initialize"
             init_headers = {key.lower(): value for key, value in init.headers.items()}
             assert LEGACY_SESSION_HEADER.lower() not in init_headers
             assert not state.session_manager._server_instances
 
-            assert initialized.status_code in (200, 400)
-            assert "error" in initialized.json()
+            assert initialized.status_code == 200
+            assert initialized.json()["error"]["code"] == -32601
+            assert (
+                initialized.json()["error"]["message"]
+                == "Method not found: notifications/initialized"
+            )
+            initialized_headers = {
+                key.lower(): value for key, value in initialized.headers.items()
+            }
+            assert LEGACY_SESSION_HEADER.lower() not in initialized_headers
 
-            assert with_session.status_code == 400
-            assert with_session.json()["error"]["code"] == -32600
+            assert init_with_session.status_code == 400
+            assert init_with_session.json()["error"]["code"] == -32600
+            session_init_headers = {
+                key.lower(): value for key, value in init_with_session.headers.items()
+            }
+            assert LEGACY_SESSION_HEADER.lower() not in session_init_headers
+
+            assert initialized_with_session.status_code == 400
+            assert initialized_with_session.json()["error"]["code"] == -32600
+            assert not state.session_manager._server_instances
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
@@ -2538,7 +2579,11 @@ class TestSep2243AllModernMethods:
 
     @pytest.mark.parametrize(
         "contract",
-        MODERN_METHOD_CONTRACTS,
+        [
+            row
+            for row in MODERN_METHOD_CONTRACTS
+            if row.method not in {"initialize", "notifications/initialized"}
+        ],
         ids=lambda row: row.method,
     )
     def test_modern_missing_mcp_method_is_header_mismatch(self, contract):
@@ -2562,7 +2607,11 @@ class TestSep2243AllModernMethods:
 
     @pytest.mark.parametrize(
         "contract",
-        MODERN_METHOD_CONTRACTS,
+        [
+            row
+            for row in MODERN_METHOD_CONTRACTS
+            if row.method not in {"initialize", "notifications/initialized"}
+        ],
         ids=lambda row: row.method,
     )
     def test_modern_unsupported_protocol_version(self, contract):

@@ -155,6 +155,11 @@ def accepts_sessionless_initialize(era: ProtocolEra) -> bool:
     return era == "auto"
 
 
+def rejects_legacy_initialize(era: ProtocolEra) -> bool:
+    """True when era ``modern`` rejects 2025 ``initialize`` / ``initialized``."""
+    return era == "modern"
+
+
 def needs_modern_engine(era: ProtocolEra) -> bool:
     """True when ``/mcp`` should be the official 2026 engine (``modern`` or ``auto``)."""
     return era in ("modern", "auto")

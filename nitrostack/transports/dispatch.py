@@ -47,6 +47,7 @@ from nitrostack.protocol.version import (
     WireMode,
     accepts_sessionless_initialize,
     protocol_era_for_wire_mode,
+    rejects_legacy_initialize,
     supported_protocol_versions_for_era,
 )
 from nitrostack.runtime.stateless import (
@@ -124,6 +125,10 @@ class IngressContext:
         """True when this engine answers 2025 ``initialize`` without a session."""
         return accepts_sessionless_initialize(self.resolved_era())
 
+    def rejects_legacy_initialize(self) -> bool:
+        """True when this engine rejects 2025 ``initialize`` / ``initialized``."""
+        return rejects_legacy_initialize(self.resolved_era())
+
 
 def reject_incoming_session_id(
     request_id: Any,
@@ -146,19 +151,35 @@ def reject_incoming_session_id(
     )
 
 
+def reject_legacy_handshake(
+    request: JsonRpcRequest,
+    era: ProtocolEra,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Era ``modern`` answers ``initialize`` / ``initialized`` as method-not-found."""
+    if not rejects_legacy_initialize(era):
+        return None
+    if request.method not in LEGACY_HANDSHAKE_METHODS:
+        return None
+    return 200, MethodNotFoundError(request.method).to_response(request.id)
+
+
 def reject_legacy_wire(
     request: JsonRpcRequest,
     request_headers: dict[str, str],
-    wire_mode: WireMode,
+    era: ProtocolEra,
 ) -> Optional[tuple[int, dict[str, Any]]]:
     """
-    Era ``modern`` (``wire_mode=reject``) fails closed on 2025-shaped traffic.
+    Era ``modern`` fails closed on 2025 handshake and 2025 protocol versions.
 
     Official v2 ``legacy: 'reject'`` is not mounted yet; this is the sidecar
-    stand-in. Session-id rejection for ``auto`` lives in
-    ``reject_incoming_session_id``.
+    stand-in. Handshake methods are method-not-found before header contracts.
+    Incoming session ids are rejected earlier.
     """
-    if wire_mode != "reject":
+    handshake = reject_legacy_handshake(request, era)
+    if handshake is not None:
+        return handshake
+
+    if not rejects_legacy_initialize(era):
         return None
 
     header_version = get_header(request_headers, HEADER_MCP_PROTOCOL_VERSION)
@@ -169,9 +190,6 @@ def reject_legacy_wire(
             int(JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION),
             ERROR_CODE_MESSAGES[JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION],
         )
-
-    if request.method in LEGACY_HANDSHAKE_METHODS:
-        return 200, MethodNotFoundError(request.method).to_response(request.id)
 
     return None
 
@@ -374,6 +392,12 @@ class StatelessIngressPipeline:
         if rejected_session is not None:
             return rejected_session
 
+        rejected_handshake = reject_legacy_handshake(
+            request, self._context.resolved_era()
+        )
+        if rejected_handshake is not None:
+            return rejected_handshake
+
         required_method = reject_required_mcp_method(
             request, request_headers, self._context.wire_mode
         )
@@ -411,7 +435,7 @@ class StatelessIngressPipeline:
         if unsupported is not None:
             return unsupported
 
-        rejected = reject_legacy_wire(request, request_headers, self._context.wire_mode)
+        rejected = reject_legacy_wire(request, request_headers, self._context.resolved_era())
         if rejected is not None:
             return rejected
 
