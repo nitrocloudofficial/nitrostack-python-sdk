@@ -37,7 +37,14 @@ from nitrostack.protocol.cache_hints import (
     resolve_tool_cache_hint_meta,
 )
 from nitrostack.protocol.observability import TraceContext, extract_trace_context, trace_context_from_request_meta
-from nitrostack.protocol.meta import RequestMeta, extract_request_meta, split_params_and_meta
+from nitrostack.protocol.meta import (
+    RequestEnvelope,
+    RequestMeta,
+    bind_request_envelope,
+    envelope_identity_is_ignored,
+    extract_request_meta,
+    split_params_and_meta,
+)
 from nitrostack.protocol.mrtr import (
     InputRequest,
     InputRequiredResult,
@@ -105,6 +112,9 @@ __all__ = [
     "JsonRpcErrorCode",
     "ERROR_CODE_MESSAGES",
     "RequestMeta",
+    "RequestEnvelope",
+    "bind_request_envelope",
+    "envelope_identity_is_ignored",
     "extract_request_meta",
     "split_params_and_meta",
     "deprecated_method_message",

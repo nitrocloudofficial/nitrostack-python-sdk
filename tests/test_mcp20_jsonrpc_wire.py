@@ -21,7 +21,13 @@ from nitrostack.protocol.jsonrpc import (
     validate_header_body_name,
     validate_header_body_method,
 )
-from nitrostack.protocol.meta import extract_request_meta, split_params_and_meta
+from nitrostack.core.context import AuthContext, ExecutionContext
+from nitrostack.protocol.meta import (
+    bind_request_envelope,
+    envelope_identity_is_ignored,
+    extract_request_meta,
+    split_params_and_meta,
+)
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.transports.dispatch import IngressContext, StatelessIngressPipeline
 
@@ -74,6 +80,74 @@ class TestMetaEnvelope:
         req = parse_jsonrpc_request(body)
         assert req.params == {"name": "calc"}
         assert req.meta.protocol_version == "2026-07-28"
+
+    def test_bind_maps_trace_and_header_protocol_version(self):
+        envelope = bind_request_envelope(
+            raw_meta={"trace": {"id": "span-1"}, "protocolVersion": "2025-06-18"},
+            mcp_headers={"MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call"},
+        )
+        assert envelope.meta.trace == {"id": "span-1"}
+        assert envelope.protocol_version == "2026-07-28"
+        assert envelope.mcp_headers["Mcp-Method"] == "tools/call"
+
+    def test_unsigned_identity_stays_off_context_user(self):
+        envelope = bind_request_envelope(
+            raw_meta={"userId": "spoofed", "tenantId": "evil", "trace": {"id": "t"}},
+        )
+        assert envelope.meta.trace == {"id": "t"}
+        assert envelope.meta.raw["userId"] == "spoofed"
+        assert envelope_identity_is_ignored(envelope.meta.raw) is True
+
+        ctx = ExecutionContext(
+            request_id="env-1",
+            protocol_version=envelope.protocol_version,
+            rpc_meta=envelope.meta,
+            mcp_headers=dict(envelope.mcp_headers),
+        )
+        assert ctx.user is None
+        assert ctx.rpc_meta.raw["userId"] == "spoofed"
+
+        ctx.auth = AuthContext(subject="alice")
+        assert ctx.user == "alice"
+
+    def test_apply_request_envelope_ignores_spoofed_userid(self):
+        from types import SimpleNamespace
+
+        from mcp.shared.context import RequestContext
+        from mcp import types
+
+        from nitrostack.core.app import _apply_request_envelope
+
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta.model_validate(
+                {
+                    "trace": {"id": "span-2"},
+                    "userId": "spoofed",
+                    "protocolVersion": "2025-11-25",
+                }
+            ),
+            session=None,
+            lifespan_context=None,
+            request=SimpleNamespace(
+                headers={
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "tools/call",
+                    "Authorization": "Bearer ignore-me",
+                }
+            ),
+        )
+        ctx = ExecutionContext(request_id="env-http")
+        _apply_request_envelope(ctx, rc)
+        assert ctx.protocol_version == "2026-07-28"
+        assert ctx.rpc_meta is not None
+        assert ctx.rpc_meta.trace == {"id": "span-2"}
+        assert ctx.rpc_meta.raw["userId"] == "spoofed"
+        assert ctx.user is None
+        assert ctx.mcp_headers["MCP-Protocol-Version"] == "2026-07-28"
+        assert ctx.mcp_headers["Mcp-Method"] == "tools/call"
+        assert "Authorization" not in ctx.mcp_headers
+        assert "authorization" not in {key.lower() for key in ctx.mcp_headers}
 
 
 class TestHeaderBodyMismatch:

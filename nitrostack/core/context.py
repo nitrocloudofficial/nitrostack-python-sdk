@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol, List, Dict, Optional
 from nitrostack.core.errors import TaskCancelledError
 
 if TYPE_CHECKING:
+    from nitrostack.protocol.meta import RequestMeta
     from nitrostack.protocol.observability import TraceContext
 
 # Logger protocol used by ExecutionContext (Section 13)
@@ -187,3 +188,13 @@ class ExecutionContext:
     input_responses: Dict[str, Any] = field(default_factory=dict)
     request_state: Optional[Dict[str, Any]] = None
     trace: "TraceContext | None" = None
+    protocol_version: Optional[str] = None
+    rpc_meta: Optional["RequestMeta"] = None
+    mcp_headers: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def user(self) -> Optional[str]:
+        """Verified identity only. Unsigned ``_meta.userId`` is never used."""
+        if self.auth is None:
+            return None
+        return self.auth.subject

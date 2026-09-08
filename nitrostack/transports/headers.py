@@ -106,3 +106,14 @@ def extract_mcp_param_headers(headers: Mapping[str, str]) -> dict[str, str]:
             param_name = key[len(HEADER_MCP_PARAM_PREFIX) :]
             params[param_name] = value
     return params
+
+
+def extract_mcp_scope_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Copy MCP scoped request headers. Authorization is not included."""
+    scoped: dict[str, str] = {}
+    for name in (HEADER_MCP_PROTOCOL_VERSION, HEADER_MCP_METHOD, HEADER_MCP_NAME):
+        value = get_header(headers, name)
+        if value:
+            scoped[name] = value
+    scoped.update(extract_mcp_param_headers(headers))
+    return scoped

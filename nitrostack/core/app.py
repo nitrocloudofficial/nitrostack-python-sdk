@@ -52,7 +52,9 @@ from nitrostack.protocol.cache_hints import (
     resolve_resource_cache_hint_meta,
     resolve_tool_cache_hint_meta,
 )
+from nitrostack.protocol.meta import bind_request_envelope
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
+from nitrostack.transports.headers import extract_mcp_scope_headers
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.tasks import (
     DEFAULT_TASK_TTL_MS,
@@ -298,6 +300,9 @@ def _request_meta_from_ctx(rc: Any) -> Dict[str, Any]:
         try:
             dumped = raw_meta.model_dump(exclude_none=True)
             if isinstance(dumped, dict):
+                nested_extra = dumped.pop("__pydantic_extra__", None)
+                if isinstance(nested_extra, dict):
+                    data.update(nested_extra)
                 data.update(dumped)
         except Exception:
             pass
@@ -313,6 +318,33 @@ def _request_meta_from_ctx(rc: Any) -> Dict[str, Any]:
 
 def _trace_context_from_request_ctx(rc: Any) -> TraceContext | None:
     return extract_trace_context(_request_meta_from_ctx(rc))
+
+
+def _http_headers_from_request_ctx(rc: Any) -> Dict[str, str]:
+    if rc is None:
+        return {}
+    request = getattr(rc, "request", None)
+    if request is None:
+        return {}
+    raw = getattr(request, "headers", None)
+    if raw is None:
+        return {}
+    try:
+        return {str(key): str(value) for key, value in raw.items()}
+    except Exception:
+        return {}
+
+
+def _apply_request_envelope(ctx: ExecutionContext, rc: Any) -> None:
+    envelope = bind_request_envelope(
+        raw_meta=_request_meta_from_ctx(rc),
+        mcp_headers=extract_mcp_scope_headers(_http_headers_from_request_ctx(rc)),
+    )
+    ctx.rpc_meta = envelope.meta
+    ctx.mcp_headers = dict(envelope.mcp_headers)
+    ctx.protocol_version = envelope.protocol_version
+    if ctx.trace is None:
+        ctx.trace = extract_trace_context(envelope.meta.raw)
 
 
 def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
@@ -1049,6 +1081,7 @@ class McpApplication:
                     request_state=request_state,
                     trace=trace,
                 )
+                _apply_request_envelope(task_ctx, rc)
                 task_ctx.task = TaskContext(
                     task_id,
                     self.task_manager,
@@ -1098,6 +1131,7 @@ class McpApplication:
             request_state=request_state,
             trace=trace,
         )
+        _apply_request_envelope(ctx, rc)
         try:
             result = await run_pipeline(
                 handler=entry.method,
@@ -1147,6 +1181,7 @@ class McpApplication:
 
         cfg = entry.config
         ctx = ExecutionContext(request_id=str(uuid.uuid4()), metadata=dict(path_kwargs))
+        _apply_request_envelope(ctx, request_ctx.get(None))
         guards, middleware, interceptors, pipes, filters = self._pipeline_stages(entry.method)
 
         result = await run_pipeline(
@@ -1186,6 +1221,7 @@ class McpApplication:
         cfg = entry.config
         args_dict = dict(arguments or {})
         ctx = ExecutionContext(request_id=str(uuid.uuid4()), metadata=args_dict)
+        _apply_request_envelope(ctx, request_ctx.get(None))
         guards, middleware, interceptors, pipes, filters = self._pipeline_stages(entry.method)
 
         raw_messages = await run_pipeline(
@@ -1376,6 +1412,7 @@ class McpApplication:
                         tool_name=config.name,
                         metadata={},
                     )
+                    _apply_request_envelope(ctx, request_ctx.get(None))
                     guards, middleware, interceptors, pipes, filters = self._pipeline_stages(method)
 
                     await run_pipeline(

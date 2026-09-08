@@ -835,3 +835,80 @@ class TestHealthAdvertisesEra:
         assert body["protocolEra"] == "legacy"
         assert body["protocolVersion"] == "2025-06-18"
         assert body["statelessCapable"] is False
+
+
+class TestEnvelopeOnHandlerContext:
+    def test_tool_reads_trace_and_protocol_version_not_spoofed_user(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+        from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+
+        class EmptyInput(BaseModel):
+            pass
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EnvelopeController:
+                @tool(name="envelope", description="read envelope", input_schema=EmptyInput)
+                async def envelope(self, input: EmptyInput, context: ExecutionContext) -> dict:
+                    return {
+                        "protocolVersion": context.protocol_version,
+                        "trace": context.rpc_meta.trace if context.rpc_meta else None,
+                        "user": context.user,
+                    }
+
+            @module(name="EnvelopeHttp", controllers=[EnvelopeController])
+            class EnvelopeModule:
+                pass
+
+            @mcp_app(module=EnvelopeModule, server=ServerConfig(name="envelope-http"))
+            class EnvelopeApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(EnvelopeApp))
+            http_app = app.get_combined_app(json_response=True)
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-06-18",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "envelope",
+            }
+            with TestClient(http_app) as client:
+                response = client.post(
+                    "/mcp",
+                    headers=headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "envelope",
+                            "arguments": {},
+                            "_meta": {
+                                "trace": {"id": "http-span"},
+                                "userId": "spoofed",
+                                "protocolVersion": MODERN_PROTOCOL_VERSION,
+                            },
+                        },
+                    },
+                )
+
+            assert response.status_code == 200, response.text
+            result = response.json()["result"]
+            body = result.get("structuredContent") or json.loads(result["content"][0]["text"])
+            assert body["protocolVersion"] == "2025-06-18"
+            assert body["trace"] == {"id": "http-span"}
+            assert body["user"] is None
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
