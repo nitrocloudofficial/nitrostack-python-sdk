@@ -1417,6 +1417,7 @@ class McpApplication:
                 advertise_tasks=self._advertise_tasks_extension(),
                 advertise_app=has_widgets,
                 custom_extensions=self._custom_extensions(),
+                wire_mode=wire_mode,
             )
 
         return http_app

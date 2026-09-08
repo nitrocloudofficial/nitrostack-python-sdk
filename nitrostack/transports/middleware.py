@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from nitrostack.protocol.version import WireMode
 from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
 from nitrostack.transports.dispatch import IngressContext, StatelessIngressPipeline
@@ -85,17 +86,15 @@ class StatelessTransportMiddleware:
         send: Any,
     ) -> bool:
         headers_list = scope.get("headers") or []
-        req_headers = strip_legacy_session_headers(
-            {k.decode("latin-1"): v.decode("latin-1") for k, v in headers_list}
-        )
+        raw_headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in headers_list}
 
         assert self.pipeline is not None
-        result = await self.pipeline.handle_post(body, req_headers)
+        result = await self.pipeline.handle_post(body, raw_headers)
         if result is None:
             return False
 
         status, jsonrpc_response = result
-        origin = get_header(req_headers, "Origin")
+        origin = get_header(raw_headers, "Origin")
         cors = build_cors_headers(origin=origin)
         response_headers = build_mcp_response_headers(extra=cors)
         assert_stateless_headers(response_headers)
@@ -187,6 +186,7 @@ def wrap_stateless_transport(
     advertise_tasks: bool = True,
     advertise_app: bool = False,
     custom_extensions: Optional[dict[str, str]] = None,
+    wire_mode: WireMode = "stateless",
 ) -> ASGIApp:
     """Wrap an ASGI app with stateless HTTP middleware."""
     pipeline = StatelessIngressPipeline(
@@ -197,6 +197,7 @@ def wrap_stateless_transport(
             advertise_tasks=advertise_tasks,
             advertise_app=advertise_app,
             custom_extensions=custom_extensions,
+            wire_mode=wire_mode,
         )
     )
     return StatelessTransportMiddleware(app, pipeline=pipeline)

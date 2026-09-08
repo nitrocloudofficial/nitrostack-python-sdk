@@ -163,6 +163,74 @@ class TestDispatchPipeline:
 
         asyncio.run(_run())
 
+    def test_modern_reject_initialize(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2026-07-28",
+                        "capabilities": {},
+                        "clientInfo": {"name": "t", "version": "1"},
+                    },
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            assert resp["error"]["code"] == -32601
+
+        asyncio.run(_run())
+
+    def test_modern_reject_legacy_protocol_version(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2025-06-18"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32022
+
+        asyncio.run(_run())
+
+    def test_modern_reject_incoming_session_id(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {LEGACY_SESSION_HEADER: "session-1"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32600
+
+        asyncio.run(_run())
+
+    def test_auto_accepts_initialize(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18", "capabilities": {}},
+                }
+            ).encode()
+            assert await pipeline.handle_post(body, {}) is None
+
+        asyncio.run(_run())
+
 
 class TestTaskInterceptionDetection:
     def test_tasks_method_prefix(self):
@@ -532,6 +600,90 @@ class TestAutoEraOneMcpDualClients:
             assert call.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
             call_headers = {key.lower(): value for key, value in call.headers.items()}
             assert LEGACY_SESSION_HEADER.lower() not in call_headers
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestModernEraRejectsLegacyWire:
+    def test_modern_initialize_is_jsonrpc_error_without_session(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "modern")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="ModernRejectHttp", controllers=[EchoController])
+            class ModernRejectModule:
+                pass
+
+            @mcp_app(module=ModernRejectModule, server=ServerConfig(name="modern-reject-http"))
+            class ModernRejectApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(ModernRejectApp))
+            http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert state.wire_mode == "reject"
+
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers=headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+                initialized = client.post(
+                    "/mcp",
+                    headers=headers,
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                with_session = client.post(
+                    "/mcp",
+                    headers={**headers, LEGACY_SESSION_HEADER: "forged"},
+                    json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                )
+
+            assert init.status_code in (200, 400)
+            assert "error" in init.json()
+            init_headers = {key.lower(): value for key, value in init.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in init_headers
+            assert not state.session_manager._server_instances
+
+            assert initialized.status_code in (200, 400)
+            assert "error" in initialized.json()
+
+            assert with_session.status_code == 400
+            assert with_session.json()["error"]["code"] == -32600
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
