@@ -21,6 +21,7 @@ class RequestContext:
     """Test and in-process stand-in for the 1.x low-level request context."""
 
     request_id: Any = None
+    correlation_id: Any = None
     meta: Any = None
     session: Any = None
     lifespan_context: Any = None

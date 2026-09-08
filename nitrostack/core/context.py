@@ -118,6 +118,7 @@ class TaskContext:
         *,
         session: Any = None,
         progress_token: Any = None,
+        correlation_id: Any = None,
     ):
         self.task_id = task_id
         self.progress_message: str = ""
@@ -125,6 +126,7 @@ class TaskContext:
         self._task_manager = task_manager
         self._session = session
         self._progress_token = progress_token
+        self._correlation_id = correlation_id
         self._progress_count = 0
 
     def update_progress(self, message: str) -> None:
@@ -148,6 +150,7 @@ class TaskContext:
                     progress_token=self._progress_token,
                     progress=self._progress_count,
                     message=message,
+                    related_request_id=self._correlation_id,
                 )
             )
         except Exception:
@@ -180,6 +183,8 @@ class TaskContext:
 @dataclass
 class ExecutionContext:
     request_id: str
+    correlation_id: str | None = None
+    jsonrpc_id: Any = None
     tool_name: str | None = None
     logger: Logger = field(default_factory=lambda: FileLogger())
     metadata: dict = field(default_factory=dict)
@@ -192,6 +197,10 @@ class ExecutionContext:
     rpc_meta: Optional["RequestMeta"] = None
     mcp_headers: Dict[str, str] = field(default_factory=dict)
     mcp_param_headers: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.correlation_id:
+            self.correlation_id = self.request_id
 
     @property
     def user(self) -> Optional[str]:

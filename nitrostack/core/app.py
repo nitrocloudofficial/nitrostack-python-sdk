@@ -70,6 +70,7 @@ from nitrostack.auth.request import (
 )
 from nitrostack.protocol.meta import bind_request_envelope, flatten_request_meta_object
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
+from nitrostack.runtime.correlation import InFlightRegistry, new_correlation_id
 from nitrostack.transports.headers import (
     extract_mcp_param_headers,
     extract_mcp_scope_headers,
@@ -400,6 +401,28 @@ def _apply_request_envelope(ctx: ExecutionContext, rc: Any) -> None:
     ctx.auth = auth_context_from_request(rc)
     if ctx.trace is None:
         ctx.trace = extract_trace_context(envelope.meta.raw)
+    if ctx.jsonrpc_id is None and rc is not None:
+        ctx.jsonrpc_id = getattr(rc, "request_id", None)
+    if rc is not None and getattr(rc, "correlation_id", None) is None:
+        try:
+            rc.correlation_id = ctx.correlation_id
+        except Exception:
+            pass
+
+
+def _bind_correlation(rc: Any) -> tuple[str, Any]:
+    """Allocate a correlation id. Never reuse the client JSON-RPC ``id`` as the key."""
+    jsonrpc_id = getattr(rc, "request_id", None) if rc is not None else None
+    existing = getattr(rc, "correlation_id", None) if rc is not None else None
+    if existing:
+        return str(existing), jsonrpc_id
+    correlation_id = new_correlation_id()
+    if rc is not None:
+        try:
+            rc.correlation_id = correlation_id
+        except Exception:
+            pass
+    return correlation_id, jsonrpc_id
 
 
 def _tool_arguments_with_mcp_params(
@@ -508,6 +531,7 @@ class McpApplication:
         self._prompts: Dict[str, _PromptEntry] = {}
         self._initial_tools: List[Tuple[Any, Callable, ToolConfig]] = []
         self.task_manager = TaskManager()
+        self._in_flight = InFlightRegistry()
 
         self._bootstrap()
 
@@ -1258,10 +1282,13 @@ class McpApplication:
                 session_id=task_access.session_id if task_access else None,
             )
             task_id = task.id
+            correlation_id, jsonrpc_id = _bind_correlation(rc)
 
             async def background_execution():
                 task_ctx = ExecutionContext(
-                    request_id=str(uuid.uuid4()),
+                    request_id=correlation_id,
+                    correlation_id=correlation_id,
+                    jsonrpc_id=jsonrpc_id,
                     tool_name=cfg.name,
                     metadata={"input": input_instance, **auth_meta},
                     input_responses=input_responses,
@@ -1274,6 +1301,7 @@ class McpApplication:
                     self.task_manager,
                     session=session,
                     progress_token=progress_token,
+                    correlation_id=correlation_id,
                 )
                 try:
                     result = await run_pipeline(
@@ -1310,8 +1338,11 @@ class McpApplication:
             asyncio.create_task(background_execution())
             return types.CreateTaskResult(task=self._task_data_to_mcp_task(task))
 
+        correlation_id, jsonrpc_id = _bind_correlation(rc)
         ctx = ExecutionContext(
-            request_id=str(uuid.uuid4()),
+            request_id=correlation_id,
+            correlation_id=correlation_id,
+            jsonrpc_id=jsonrpc_id,
             tool_name=cfg.name,
             metadata={"input": input_instance, **auth_meta},
             input_responses=input_responses,
@@ -1319,6 +1350,7 @@ class McpApplication:
             trace=trace,
         )
         _apply_request_envelope(ctx, rc)
+        ticket = self._in_flight.register(correlation_id, jsonrpc_id=jsonrpc_id)
         try:
             result = await run_pipeline(
                 handler=entry.method,
@@ -1338,6 +1370,13 @@ class McpApplication:
             logger.exception("Tool %s failed", cfg.name)
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
+                isError=True,
+            )
+        finally:
+            self._in_flight.discard(correlation_id)
+        if ticket.cancel_requested.is_set():
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text="Request was cancelled.")],
                 isError=True,
             )
         return self._to_call_tool_result(result, entry.component, ctx)

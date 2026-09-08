@@ -1,5 +1,6 @@
 """Stateless runtime policies and invariants for MCP 2026-07-28."""
 
+from nitrostack.runtime.correlation import InFlightRegistry, InFlightTicket, new_correlation_id
 from nitrostack.runtime.stateless import (
     StatelessInvariants,
     assert_stateless_headers,
@@ -10,6 +11,9 @@ from nitrostack.runtime.stateless import (
 )
 
 __all__ = [
+    "InFlightRegistry",
+    "InFlightTicket",
+    "new_correlation_id",
     "StatelessInvariants",
     "assert_stateless_headers",
     "has_incoming_session_id",
