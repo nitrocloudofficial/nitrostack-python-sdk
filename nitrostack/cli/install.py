@@ -27,8 +27,35 @@ def _optional_extra_names(pyproject_text: str) -> List[str]:
     return names
 
 
+def venv_dir(root: str) -> str:
+    return os.path.join(root, ".venv")
+
+
+def venv_python(root: str) -> str:
+    if os.name == "nt":
+        return os.path.join(venv_dir(root), "Scripts", "python.exe")
+    return os.path.join(venv_dir(root), "bin", "python")
+
+
+def ensure_project_venv(root: str) -> str:
+    """Create ``<root>/.venv`` if needed and return its Python executable."""
+    python = venv_python(root)
+    if os.path.isfile(python):
+        return python
+    dest = venv_dir(root)
+    print(f"Creating virtualenv: {dest}")
+    result = subprocess.run([sys.executable, "-m", "venv", dest])
+    if result.returncode != 0 or not os.path.isfile(python):
+        raise RuntimeError(
+            f"Failed to create {dest}.\n"
+            f"Create it manually with `{sys.executable} -m venv .venv`, then retry."
+        )
+    return python
+
+
 def _run_pip(args: List[str], cwd: str) -> None:
-    cmd = [sys.executable, "-m", "pip", "install", *args]
+    python = ensure_project_venv(cwd)
+    cmd = [python, "-m", "pip", "install", *args]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
     if result.returncode != 0:
@@ -59,6 +86,7 @@ def install_dependencies(
         )
 
     print("NITROSTACK — Install" + (" (production)" if production else ""))
+    print(f"Target: {venv_dir(root)}")
 
     if os.path.isfile(pyproject):
         extras: List[str] = []

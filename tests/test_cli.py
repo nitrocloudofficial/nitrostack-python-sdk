@@ -299,13 +299,17 @@ def test_init_port_and_widget_flags_override_defaults():
 
 
 def test_init_install_dependencies_prompt_no():
+    from unittest.mock import patch
+
     tmp = tempfile.mkdtemp(prefix="nitro-cli-install-")
     original_cwd = os.getcwd()
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
         sys.stdin = io.StringIO("desc\nauthor\nn\n")
-        init_project("no-npm", template="python-starter")
+        with patch("nitrostack.cli.main.install_dependencies") as pip_install:
+            init_project("no-npm", template="python-starter")
+            pip_install.assert_not_called()
         widgets = os.path.join(tmp, "no-npm", "src", "widgets", "node_modules")
         assert not os.path.isdir(widgets)
         print("Success! Install dependencies (Y/n) respects n.")
@@ -569,11 +573,20 @@ def test_init_project_overwrite_and_install_yes_calls_npm():
         assert not os.path.exists(os.path.join("taken", "old.txt"))
 
         sys.stdin = io.StringIO("d\na\nY\n")
-        with patch("nitrostack.cli.main._run_npm") as npm:
-            init_project("installed", template="python-starter")
-            npm.assert_not_called()
+        with patch("nitrostack.cli.main.install_dependencies") as pip_install:
+            with patch("nitrostack.cli.main._run_npm") as npm:
+                init_project("installed", template="python-starter")
+                pip_install.assert_called_once()
+                assert pip_install.call_args.kwargs["cwd"] == "installed"
+                npm.assert_not_called()
         assert os.path.isfile(os.path.join("installed", "widgets", "out", "calculator-result.html"))
-        print("Success! init_project overwrite and install-yes npm path work.")
+
+        sys.stdin = io.StringIO("d\na\n\n")
+        with patch("nitrostack.cli.main.install_dependencies") as pip_install:
+            init_project("installed-enter", template="python-starter")
+            pip_install.assert_called_once()
+            assert pip_install.call_args.kwargs["cwd"] == "installed-enter"
+        print("Success! init_project overwrite and install-yes pip path work.")
     finally:
         sys.stdin = original_stdin
         os.chdir(original_cwd)

@@ -1343,22 +1343,30 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
         except Exception:
             pass
 
-    # 9. Run npm install inside widgets directory
-    widgets_dir = os.path.join(name, "src", "widgets")
-    if os.path.exists(widgets_dir) and install_deps:
-        print("Installing widget dependencies...")
+    # 9. Install Python deps (requirements.txt / pyproject.toml), then widget npm if present.
+    if install_deps:
+        print("Installing dependencies...")
         try:
-            _run_npm(["--version"], capture_output=True, check=True, text=True)
-            _run_npm(["install"], cwd=widgets_dir, check=True)
-            print("\033[32m✓\033[0m Widget dependencies installed\n")
-        except FileNotFoundError as e:
-            print(f"Warning: {e}")
-            print("Please run 'npm install' inside 'src/widgets' manually.\n")
-        except subprocess.CalledProcessError as e:
-            detail = (getattr(e, "stderr", None) or getattr(e, "stdout", None) or str(e)).strip()
-            print(f"Warning: Failed to install widget dependencies: {detail}")
-            print("Please run 'npm install' inside 'src/widgets' manually.\n")
-    elif not install_deps:
+            install_dependencies(cwd=name)
+            print("\033[32m✓\033[0m Dependencies installed")
+        except Exception as e:
+            print(f"Warning: Failed to install dependencies: {e}")
+            print("Please run 'nitrostack-py install' from the project directory.\n")
+        widgets_dir = os.path.join(name, "src", "widgets")
+        if os.path.exists(widgets_dir):
+            print("Installing widget dependencies...")
+            try:
+                _run_npm(["--version"], capture_output=True, check=True, text=True)
+                _run_npm(["install"], cwd=widgets_dir, check=True)
+                print("\033[32m✓\033[0m Widget dependencies installed\n")
+            except FileNotFoundError as e:
+                print(f"Warning: {e}")
+                print("Please run 'npm install' inside 'src/widgets' manually.\n")
+            except subprocess.CalledProcessError as e:
+                detail = (getattr(e, "stderr", None) or getattr(e, "stdout", None) or str(e)).strip()
+                print(f"Warning: Failed to install widget dependencies: {detail}")
+                print("Please run 'npm install' inside 'src/widgets' manually.\n")
+    else:
         print("\033[32m✓\033[0m Skipped dependency install")
 
     run_skills_flow(os.path.abspath(name), force=force)
@@ -1727,7 +1735,7 @@ def main():
         default=None,
         help="Template to use: python-starter, python-pizzaz, python-oauth (default: interactive prompt)",
     )
-    init_parser.add_argument("--skip-install", action="store_true", help="Skip installing widget npm dependencies")
+    init_parser.add_argument("--skip-install", action="store_true", help="Skip installing Python (and widget npm) dependencies")
     init_parser.add_argument(
         "--force",
         action="store_true",
