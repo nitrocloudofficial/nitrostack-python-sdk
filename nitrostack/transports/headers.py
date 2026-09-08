@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, Mapping, Optional
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
@@ -83,21 +84,60 @@ def scope_without_session_headers(scope: dict) -> dict:
     return copied
 
 
+def handled_protocol_version(
+    request_headers: Mapping[str, str],
+    *,
+    fallback: str,
+    supported: Optional[Collection[str]] = None,
+) -> str:
+    """Protocol version that handled the request. Unsupported client values are ignored."""
+    header = get_header(request_headers, HEADER_MCP_PROTOCOL_VERSION)
+    if isinstance(header, str) and header.strip():
+        value = header.strip()
+        if supported is None or value in supported:
+            return value
+    return fallback
+
+
 def build_mcp_response_headers(
     *,
     content_type: str = MCP_JSON_CONTENT_TYPE,
     protocol_version: str = MODERN_PROTOCOL_VERSION,
+    method: Optional[str] = None,
     extra: Optional[Mapping[str, str]] = None,
 ) -> dict[str, str]:
-    """Standard MCP 2026-07-28 response headers."""
+    """Standard MCP response headers. Echo values win over inner-app extras."""
     headers = {
         HEADER_CONTENT_TYPE: content_type,
-        HEADER_MCP_PROTOCOL_VERSION: protocol_version,
         HEADER_VARY: "Origin",
     }
     if extra:
         headers.update(extra)
+    headers[HEADER_MCP_PROTOCOL_VERSION] = protocol_version
+    if method:
+        headers[HEADER_MCP_METHOD] = method
     return strip_legacy_session_headers(headers)
+
+
+def build_mcp_echo_headers(
+    request_headers: Mapping[str, str],
+    *,
+    protocol_version: str,
+    method: Optional[str] = None,
+    supported_versions: Optional[Collection[str]] = None,
+    content_type: str = MCP_JSON_CONTENT_TYPE,
+    extra: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    """Echo the handled protocol version and method on every ``/mcp`` response."""
+    echo_method = method or get_header(request_headers, HEADER_MCP_METHOD)
+    return build_mcp_response_headers(
+        content_type=content_type,
+        protocol_version=handled_protocol_version(
+            request_headers, fallback=protocol_version, supported=supported_versions
+        ),
+        method=echo_method,
+        extra=extra,
+    )
 
 
 def build_sse_stream_headers(

@@ -26,10 +26,12 @@ from nitrostack.transports.dispatch import (
 )
 from nitrostack.transports.headers import (
     MAX_MCP_PARAM_VALUE_BYTES,
+    build_mcp_echo_headers,
     build_mcp_response_headers,
     build_sse_stream_headers,
     extract_mcp_param_headers,
     first_oversized_mcp_param,
+    handled_protocol_version,
     merge_mcp_param_headers,
     scope_without_session_headers,
     strip_legacy_session_headers,
@@ -49,6 +51,9 @@ class TestRequestHeaders:
         headers = build_mcp_response_headers()
         assert headers["MCP-Protocol-Version"] == MODERN_PROTOCOL_VERSION
         assert headers["Vary"] == "Origin"
+        assert "Mcp-Method" not in headers
+        echoed = build_mcp_response_headers(method="tools/call")
+        assert echoed["Mcp-Method"] == "tools/call"
 
     def test_strip_asgi_session_headers_from_inner_scope(self):
         headers = [
@@ -1038,7 +1043,8 @@ class TestAutoEraOneMcpDualClients:
 
             assert call.status_code == 200, call.text
             assert call.json()["result"]["content"][0]["text"] == "ok"
-            assert call.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
+            assert call.headers.get("MCP-Protocol-Version") == "2025-06-18"
+            assert call.headers.get("Mcp-Method") == "tools/call"
             call_headers = {key.lower(): value for key, value in call.headers.items()}
             assert LEGACY_SESSION_HEADER.lower() not in call_headers
         finally:
@@ -2036,6 +2042,107 @@ class TestUnsupportedProtocolVersionHttp:
             assert supported.json()["result"] == {}
             assert legacy.status_code == 200, legacy.text
             assert legacy.json()["result"] == {}
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestResponseEchoHeaders:
+    def test_echo_uses_supported_request_version(self):
+        headers = build_mcp_echo_headers(
+            {"MCP-Protocol-Version": "2025-06-18", "Mcp-Method": "tools/call"},
+            protocol_version=MODERN_PROTOCOL_VERSION,
+            supported_versions={"2026-07-28", "2025-06-18"},
+        )
+        assert headers["MCP-Protocol-Version"] == "2025-06-18"
+        assert headers["Mcp-Method"] == "tools/call"
+        assert handled_protocol_version(
+            {"MCP-Protocol-Version": "1999-01-01"},
+            fallback=MODERN_PROTOCOL_VERSION,
+            supported={"2026-07-28", "2025-06-18"},
+        ) == MODERN_PROTOCOL_VERSION
+
+    def test_http_success_and_error_echo_headers(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="EchoHeadersHttp", controllers=[EchoController])
+            class EchoHeadersModule:
+                pass
+
+            @mcp_app(module=EchoHeadersModule, server=ServerConfig(name="echo-headers"))
+            class EchoHeadersApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(EchoHeadersApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-06-18",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "echo",
+            }
+            with TestClient(http_app) as client:
+                success = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+                mismatch = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Name": "other"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+                unsupported = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "MCP-Protocol-Version": "1999-01-01",
+                    },
+                    json={"jsonrpc": "2.0", "id": 3, "method": "ping"},
+                )
+            assert success.status_code == 200, success.text
+            assert success.headers.get("MCP-Protocol-Version") == "2025-06-18"
+            assert success.headers.get("Mcp-Method") == "tools/call"
+            assert mismatch.status_code == 400
+            assert mismatch.json()["error"]["code"] == -32020
+            assert mismatch.headers.get("MCP-Protocol-Version") == "2025-06-18"
+            assert mismatch.headers.get("Mcp-Method") == "tools/call"
+            assert unsupported.status_code == 400
+            assert unsupported.json()["error"]["code"] == -32022
+            assert unsupported.headers.get("MCP-Protocol-Version") == MODERN_PROTOCOL_VERSION
+            assert unsupported.headers.get("Mcp-Method") == "ping"
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

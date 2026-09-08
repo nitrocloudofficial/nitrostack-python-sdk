@@ -312,6 +312,13 @@ class StatelessIngressPipeline:
             request, request_headers, self._context.resolved_era()
         )
 
+    def response_protocol_version(self) -> str:
+        """Advertised version used when the request does not name a supported one."""
+        return self._context.protocol_version
+
+    def response_supported_versions(self) -> frozenset[str]:
+        return supported_protocol_versions_for_era(self._context.resolved_era())
+
     async def handle_post(
         self,
         raw_body: bytes,

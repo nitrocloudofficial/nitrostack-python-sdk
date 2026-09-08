@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from nitrostack.protocol.errors import JsonRpcErrorCode
-from nitrostack.protocol.jsonrpc import jsonrpc_error
-from nitrostack.protocol.version import ProtocolEra, WireMode
+from nitrostack.protocol.jsonrpc import jsonrpc_error, jsonrpc_method_from_body
+from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION, ProtocolEra, WireMode
 from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
 from nitrostack.transports.dispatch import (
@@ -17,7 +17,7 @@ from nitrostack.transports.dispatch import (
 )
 from nitrostack.transports.headers import (
     MCP_HTTP_PATH,
-    build_mcp_response_headers,
+    build_mcp_echo_headers,
     get_header,
     scope_without_session_headers,
     strip_legacy_session_headers,
@@ -60,36 +60,49 @@ class StatelessTransportMiddleware:
             await self._send_options(scope, receive, send)
             return
 
+        buffered_body: Optional[bytes] = None
         if method == "POST" and path in self.mcp_paths and self.pipeline is not None:
-            body = await self._read_body(receive)
-            handled = await self._try_pre_dispatch(scope, body, send)
+            buffered_body = await self._read_body(receive)
+            handled = await self._try_pre_dispatch(scope, buffered_body, send)
             if handled:
                 return
             raw_headers = {
                 key.decode("latin-1"): value.decode("latin-1")
                 for key, value in (scope.get("headers") or [])
             }
-            method_rejected = self.pipeline.reject_jsonrpc_mcp_method(body, raw_headers)
+            method_rejected = self.pipeline.reject_jsonrpc_mcp_method(
+                buffered_body, raw_headers
+            )
             if method_rejected is not None:
-                await self._send_pipeline_response(scope, send, raw_headers, method_rejected)
+                await self._send_pipeline_response(
+                    scope, send, raw_headers, method_rejected, body=buffered_body
+                )
                 return
-            name_rejected = self.pipeline.reject_tools_call_mcp_name(body, raw_headers)
+            name_rejected = self.pipeline.reject_tools_call_mcp_name(
+                buffered_body, raw_headers
+            )
             if name_rejected is not None:
-                await self._send_pipeline_response(scope, send, raw_headers, name_rejected)
+                await self._send_pipeline_response(
+                    scope, send, raw_headers, name_rejected, body=buffered_body
+                )
                 return
             version_rejected = self.pipeline.reject_protocol_version_cross_check(
-                body, raw_headers
+                buffered_body, raw_headers
             )
             if version_rejected is not None:
-                await self._send_pipeline_response(scope, send, raw_headers, version_rejected)
+                await self._send_pipeline_response(
+                    scope, send, raw_headers, version_rejected, body=buffered_body
+                )
                 return
             unsupported = self.pipeline.reject_unsupported_protocol_version_header(
-                body, raw_headers
+                buffered_body, raw_headers
             )
             if unsupported is not None:
-                await self._send_pipeline_response(scope, send, raw_headers, unsupported)
+                await self._send_pipeline_response(
+                    scope, send, raw_headers, unsupported, body=buffered_body
+                )
                 return
-            receive = self._replay_receive(body, receive)
+            receive = self._replay_receive(buffered_body, receive)
 
         if path in self.mcp_paths and self.pipeline is not None:
             raw_headers = {
@@ -100,7 +113,9 @@ class StatelessTransportMiddleware:
                 await self._send_session_id_rejected(scope, send, raw_headers)
                 return
 
-        await self._forward_with_stateless_headers(scope, receive, send)
+        await self._forward_with_stateless_headers(
+            scope, receive, send, body=buffered_body
+        )
 
     async def _send_options(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         headers_list = scope.get("headers") or []
@@ -108,7 +123,7 @@ class StatelessTransportMiddleware:
             k.decode("latin-1"): v.decode("latin-1") for k, v in headers_list
         }
         cors = cors_preflight_response_headers(req_headers)
-        response_headers = build_mcp_response_headers(extra=cors)
+        response_headers = self._echo_headers(req_headers, extra=cors)
         assert_stateless_headers(response_headers)
 
         await send(
@@ -134,7 +149,7 @@ class StatelessTransportMiddleware:
         if result is None:
             return False
 
-        await self._send_pipeline_response(scope, send, raw_headers, result)
+        await self._send_pipeline_response(scope, send, raw_headers, result, body=body)
         return True
 
     async def _send_pipeline_response(
@@ -143,11 +158,13 @@ class StatelessTransportMiddleware:
         send: Any,
         raw_headers: dict[str, str],
         result: tuple[int, dict[str, Any]],
+        *,
+        body: Optional[bytes] = None,
     ) -> None:
         status, jsonrpc_response = result
         origin = get_header(raw_headers, "Origin")
         cors = build_cors_headers(origin=origin)
-        response_headers = build_mcp_response_headers(extra=cors)
+        response_headers = self._echo_headers(raw_headers, extra=cors, body=body)
         assert_stateless_headers(response_headers)
         assert self.pipeline is not None
         payload = self.pipeline.serialize_response(jsonrpc_response)
@@ -168,7 +185,7 @@ class StatelessTransportMiddleware:
     ) -> None:
         origin = get_header(raw_headers, "Origin")
         cors = build_cors_headers(origin=origin)
-        response_headers = build_mcp_response_headers(extra=cors)
+        response_headers = self._echo_headers(raw_headers, extra=cors)
         assert_stateless_headers(response_headers)
         payload = StatelessIngressPipeline.serialize_response(
             jsonrpc_error(
@@ -191,6 +208,8 @@ class StatelessTransportMiddleware:
         scope: dict[str, Any],
         receive: Any,
         send: Any,
+        *,
+        body: Optional[bytes] = None,
     ) -> None:
         async def send_wrapper(message: dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
@@ -202,12 +221,14 @@ class StatelessTransportMiddleware:
                     k.decode("latin-1"): v.decode("latin-1")
                     for k, v in (scope.get("headers") or [])
                 }
-                merged = build_mcp_response_headers(
+                merged = self._echo_headers(
+                    req_headers,
                     content_type=raw_headers.get("content-type", "application/json"),
                     extra={
                         **build_cors_headers(origin=get_header(req_headers, "Origin")),
                         **strip_legacy_session_headers(raw_headers),
                     },
+                    body=body,
                 )
                 assert_stateless_headers(merged)
                 message = {
@@ -217,6 +238,28 @@ class StatelessTransportMiddleware:
             await send(message)
 
         await self.app(scope_without_session_headers(scope), receive, send_wrapper)
+
+    def _echo_headers(
+        self,
+        request_headers: dict[str, str],
+        *,
+        extra: Optional[dict[str, str]] = None,
+        content_type: str = "application/json",
+        body: Optional[bytes] = None,
+    ) -> dict[str, str]:
+        fallback = MODERN_PROTOCOL_VERSION
+        supported = None
+        if self.pipeline is not None:
+            fallback = self.pipeline.response_protocol_version()
+            supported = self.pipeline.response_supported_versions()
+        return build_mcp_echo_headers(
+            request_headers,
+            protocol_version=fallback,
+            method=jsonrpc_method_from_body(body),
+            supported_versions=supported,
+            content_type=content_type,
+            extra=extra,
+        )
 
     @staticmethod
     async def _read_body(receive: Any) -> bytes:

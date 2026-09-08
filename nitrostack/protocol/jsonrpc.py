@@ -119,6 +119,16 @@ def parse_jsonrpc_request(raw_body: bytes) -> JsonRpcRequest:
     )
 
 
+def jsonrpc_method_from_body(raw_body: Optional[bytes]) -> Optional[str]:
+    """JSON-RPC method from a POST body, or None when the body is not a request."""
+    if not raw_body:
+        return None
+    try:
+        return parse_jsonrpc_request(raw_body).method
+    except (JsonRpcParseError, JsonRpcWireError):
+        return None
+
+
 def validate_header_body_method(header_method: Optional[str], body_method: str) -> None:
     """SEP-2243: reject when Mcp-Method header mirrors a different JSON-RPC method."""
     if header_method is None:
