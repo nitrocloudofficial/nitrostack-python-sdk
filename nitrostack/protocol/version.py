@@ -19,9 +19,9 @@ ProtocolEra = Literal["legacy", "modern", "auto"]
 # the 1.x ``StreamableHTTPSessionManager(stateless=True)`` flag.
 WireMode = Literal["sessionful", "stateless", "reject"]
 
-_AUTO_ALIASES = frozenset({"auto"})
-_MODERN_ALIASES = frozenset({"modern", "latest", MODERN_PROTOCOL_VERSION})
-_LEGACY_ALIASES = frozenset({"legacy", LEGACY_PROTOCOL_VERSION})
+_AUTO_ALIASES = frozenset({"auto", "both", "dual", "dual-spec"})
+_MODERN_ALIASES = frozenset({"modern", "latest", "2026", MODERN_PROTOCOL_VERSION})
+_LEGACY_ALIASES = frozenset({"legacy", "2025", "2025-11-25", LEGACY_PROTOCOL_VERSION})
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
 _FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
 
@@ -58,7 +58,10 @@ def resolve_protocol_era(
     3. ``ServerConfig.protocol_era`` (``config_value``)
     4. ``auto``
 
-    Unknown tokens resolve to ``auto``, matching an unknown env value.
+    Tokens (case-insensitive, trimmed): ``modern`` / ``latest`` / ``2026`` /
+    ``2026-07-28``; ``auto`` / ``both`` / ``dual`` / ``dual-spec``; ``legacy`` /
+    ``2025`` / ``2025-06-18`` / ``2025-11-25``. Unknown tokens resolve to
+    ``auto``.
 
     ``auto`` is not ``modern``. ``modern`` is stateless-only; ``auto`` is the
     dual-spec era and does not force the 1.x ``stateless=True`` transport flag.

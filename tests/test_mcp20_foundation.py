@@ -120,13 +120,24 @@ class TestTypescriptCompatibleProtocolEra:
         "raw,era",
         [
             ("auto", "auto"),
+            ("both", "auto"),
+            ("dual", "auto"),
+            ("dual-spec", "auto"),
+            ("AUTO", "auto"),
             ("2026-07-28", "modern"),
+            ("2026", "modern"),
             ("modern", "modern"),
             ("latest", "modern"),
+            ("Modern", "modern"),
             ("legacy", "legacy"),
             ("2025-06-18", "legacy"),
+            ("2025-11-25", "legacy"),
+            ("2025", "legacy"),
             ("", "auto"),
             (None, "auto"),
+            ("unknown-era", "auto"),
+            ("mcp-2026", "auto"),
+            ("2026-06-18", "auto"),
         ],
     )
     def test_resolve_protocol_era(self, raw, era, monkeypatch):
@@ -140,6 +151,11 @@ class TestTypescriptCompatibleProtocolEra:
         assert resolve_protocol_era() == "modern"
         assert stateless_for_era(resolve_protocol_era()) is True
         assert protocol_version_for_era("modern") == MODERN_PROTOCOL_VERSION
+
+    def test_unknown_env_alias_is_auto_not_modern(self, monkeypatch):
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "unknown-era")
+        assert resolve_protocol_era() == "auto"
 
     def test_legacy_era_is_sessionful(self):
         assert stateless_for_era("legacy") is False
@@ -195,8 +211,8 @@ class TestTypescriptCompatibleProtocolEra:
     def test_invalid_config_era_matches_invalid_env(self, monkeypatch):
         monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
         monkeypatch.delenv("MCP_STATELESS", raising=False)
-        assert resolve_protocol_era("not-a-real-era") == "auto"
-        assert resolve_protocol_era(config_value="not-a-real-era") == "auto"
+        assert resolve_protocol_era("unknown-era") == "auto"
+        assert resolve_protocol_era(config_value="unknown-era") == "auto"
 
     def test_server_config_protocol_era_default_is_unset(self):
         cfg = ServerConfig(name="test-server")

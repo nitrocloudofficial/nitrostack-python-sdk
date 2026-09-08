@@ -86,7 +86,8 @@ class ServerConfig:
     transport_type: Optional[Literal["stdio", "http", "dual"]] = None
     protocol_version: str = MODERN_PROTOCOL_VERSION
     # Era fallback when MCP_STATELESS and NITRO_MCP_PROTOCOL_VERSION are unset.
-    # Same tokens as the env var. None means default era (`auto`).
+    # Same tokens as the env var (modern/latest/2026/2026-07-28, auto/both/dual/
+    # dual-spec, legacy/2025/2025-06-18/2025-11-25). None means default era (`auto`).
     protocol_era: Optional[str] = None
     # Streamable HTTP options. Era resolution at `start()` / `get_combined_app()`:
     # `MCP_STATELESS`, then `NITRO_MCP_PROTOCOL_VERSION`, then `protocol_era`,
