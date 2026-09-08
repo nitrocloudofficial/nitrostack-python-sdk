@@ -76,6 +76,35 @@ def split_params_and_meta(params: dict[str, Any]) -> tuple[dict[str, Any], Reque
     return business, meta
 
 
+def _is_envelope_argument_key(key: Any) -> bool:
+    name = str(key)
+    return name == "_meta" or name.startswith(MCP_META_PREFIX)
+
+
+def strip_tool_arguments(arguments: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    """Copy ``tools/call`` arguments without protocol envelope keys.
+
+    Drops ``_meta`` and ``io.modelcontextprotocol/*`` so guards, pipes, and
+    user handlers never receive envelope slots as input. Nested user values
+    are left unchanged. The request envelope stays on ``ExecutionContext``.
+    """
+    if not arguments:
+        return {}
+    cleaned = {
+        key: value
+        for key, value in arguments.items()
+        if not _is_envelope_argument_key(key)
+    }
+    inner = cleaned.get("input")
+    if isinstance(inner, Mapping):
+        cleaned["input"] = {
+            key: value
+            for key, value in inner.items()
+            if not _is_envelope_argument_key(key)
+        }
+    return cleaned
+
+
 @dataclass(frozen=True)
 class RequestEnvelope:
     """Allowed envelope mapping for handler context. Identity is not included."""

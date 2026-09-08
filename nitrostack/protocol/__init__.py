@@ -55,6 +55,7 @@ from nitrostack.protocol.meta import (
     extract_request_meta,
     flatten_request_meta_object,
     split_params_and_meta,
+    strip_tool_arguments,
 )
 from nitrostack.protocol.mrtr import (
     InputRequest,
@@ -149,6 +150,7 @@ __all__ = [
     "extract_request_meta",
     "flatten_request_meta_object",
     "split_params_and_meta",
+    "strip_tool_arguments",
     "deprecated_method_message",
     "rejects_deprecated_method",
     "DEPRECATED_MODERN_METHODS",

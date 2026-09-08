@@ -69,7 +69,11 @@ from nitrostack.auth.request import (
     bearer_token_from_envelope_auth,
     envelope_auth_slot,
 )
-from nitrostack.protocol.meta import bind_request_envelope, flatten_request_meta_object
+from nitrostack.protocol.meta import (
+    bind_request_envelope,
+    flatten_request_meta_object,
+    strip_tool_arguments,
+)
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
 from nitrostack.runtime.correlation import InFlightRegistry, new_correlation_id
 from nitrostack.transports.headers import (
@@ -1226,7 +1230,9 @@ class McpApplication:
             )
 
         cfg = entry.config
-        tool_arguments, input_responses, request_state = split_mrtr_from_arguments(arguments or {})
+        tool_arguments, input_responses, request_state = split_mrtr_from_arguments(
+            strip_tool_arguments(arguments)
+        )
         rc = request_ctx.get(None)
         tool_arguments = _tool_arguments_with_mcp_params(
             tool_arguments,

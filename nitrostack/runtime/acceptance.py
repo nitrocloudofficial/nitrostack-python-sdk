@@ -57,6 +57,11 @@ PROTOCOL_DELIVERABLES: tuple[ProtocolDeliverable, ...] = (
         "tests/test_mcp20_deprecated.py",
     ),
     ProtocolDeliverable(
+        ProtocolArea.CORE_JSONRPC,
+        "Strip envelope keys from tool arguments before handlers",
+        "tests/test_mcp20_tool_args.py",
+    ),
+    ProtocolDeliverable(
         ProtocolArea.STATELESS_HTTP,
         "POST /mcp stateless ingress without Mcp-Session-Id",
         "tests/test_mcp20_stateless_http.py",
