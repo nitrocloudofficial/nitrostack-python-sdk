@@ -96,6 +96,31 @@ def scope_without_session_headers(scope: dict) -> dict:
     return copied
 
 
+def decode_asgi_headers(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
+    """Decode an ASGI header list to a text map."""
+    return {key.decode("latin-1"): value.decode("latin-1") for key, value in headers}
+
+
+def snapshot_validated_asgi_headers(
+    headers: list[tuple[bytes, bytes]],
+) -> tuple[tuple[bytes, bytes], ...]:
+    """Immutable header snapshot after ingress validators. Session ids are dropped."""
+    return tuple(strip_legacy_session_headers_asgi(list(headers)))
+
+
+def scope_with_header_snapshot(
+    scope: dict,
+    snapshot: tuple[tuple[bytes, bytes], ...] | list[tuple[bytes, bytes]],
+) -> dict:
+    """Copy an ASGI scope pinned to a validated header snapshot.
+
+    Replay and the inner engine read this snapshot, not a later forged header set.
+    """
+    copied = dict(scope)
+    copied["headers"] = list(snapshot)
+    return copied
+
+
 def handled_protocol_version(
     request_headers: Mapping[str, str],
     *,

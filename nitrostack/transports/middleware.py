@@ -18,8 +18,10 @@ from nitrostack.transports.dispatch import (
 from nitrostack.transports.headers import (
     MCP_HTTP_PATH,
     build_mcp_echo_headers,
+    decode_asgi_headers,
     get_header,
-    scope_without_session_headers,
+    scope_with_header_snapshot,
+    snapshot_validated_asgi_headers,
     strip_legacy_session_headers,
 )
 
@@ -63,60 +65,63 @@ class StatelessTransportMiddleware:
             return
 
         buffered_body: Optional[bytes] = None
+        header_snapshot: Optional[tuple[tuple[bytes, bytes], ...]] = None
         if method == "POST" and path in self.mcp_paths and self.pipeline is not None:
             buffered_body = await self._read_body(receive)
             handled = await self._try_pre_dispatch(scope, buffered_body, send)
             if handled:
                 return
-            raw_headers = {
-                key.decode("latin-1"): value.decode("latin-1")
-                for key, value in (scope.get("headers") or [])
-            }
-            method_rejected = self.pipeline.reject_jsonrpc_mcp_method(
-                buffered_body, raw_headers
-            )
-            if method_rejected is not None:
+            live_headers = decode_asgi_headers(list(scope.get("headers") or []))
+            rejected = self._reject_replay_headers(buffered_body, live_headers)
+            if rejected is not None:
                 await self._send_pipeline_response(
-                    scope, send, raw_headers, method_rejected, body=buffered_body
+                    scope, send, live_headers, rejected, body=buffered_body
                 )
                 return
-            name_rejected = self.pipeline.reject_tools_call_mcp_name(
-                buffered_body, raw_headers
-            )
-            if name_rejected is not None:
-                await self._send_pipeline_response(
-                    scope, send, raw_headers, name_rejected, body=buffered_body
-                )
+            if self.pipeline.forbids_incoming_session_id(live_headers):
+                await self._send_session_id_rejected(scope, send, live_headers)
                 return
-            version_rejected = self.pipeline.reject_protocol_version_cross_check(
-                buffered_body, raw_headers
-            )
-            if version_rejected is not None:
+            header_snapshot = snapshot_validated_asgi_headers(list(scope.get("headers") or []))
+            snapshot_headers = decode_asgi_headers(list(header_snapshot))
+            rejected = self._reject_replay_headers(buffered_body, snapshot_headers)
+            if rejected is not None:
                 await self._send_pipeline_response(
-                    scope, send, raw_headers, version_rejected, body=buffered_body
-                )
-                return
-            unsupported = self.pipeline.reject_unsupported_protocol_version_header(
-                buffered_body, raw_headers
-            )
-            if unsupported is not None:
-                await self._send_pipeline_response(
-                    scope, send, raw_headers, unsupported, body=buffered_body
+                    scope, send, snapshot_headers, rejected, body=buffered_body
                 )
                 return
             receive = self._replay_receive(buffered_body, receive)
+            scope = scope_with_header_snapshot(scope, header_snapshot)
 
         if path in self.mcp_paths and self.pipeline is not None:
-            raw_headers = {
-                key.decode("latin-1"): value.decode("latin-1")
-                for key, value in (scope.get("headers") or [])
-            }
+            raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
             if self.pipeline.forbids_incoming_session_id(raw_headers):
                 await self._send_session_id_rejected(scope, send, raw_headers)
                 return
 
         await self._forward_with_stateless_headers(
             scope, receive, send, body=buffered_body
+        )
+
+    def _reject_replay_headers(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Re-apply ``-32020`` / ``-32022`` on live headers and the replay snapshot."""
+        assert self.pipeline is not None
+        method_rejected = self.pipeline.reject_jsonrpc_mcp_method(raw_body, request_headers)
+        if method_rejected is not None:
+            return method_rejected
+        name_rejected = self.pipeline.reject_tools_call_mcp_name(raw_body, request_headers)
+        if name_rejected is not None:
+            return name_rejected
+        version_rejected = self.pipeline.reject_protocol_version_cross_check(
+            raw_body, request_headers
+        )
+        if version_rejected is not None:
+            return version_rejected
+        return self.pipeline.reject_unsupported_protocol_version_header(
+            raw_body, request_headers
         )
 
     async def _send_options(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
@@ -239,7 +244,14 @@ class StatelessTransportMiddleware:
                 }
             await send(message)
 
-        await self.app(scope_without_session_headers(scope), receive, send_wrapper)
+        await self.app(
+            scope_with_header_snapshot(
+                scope,
+                snapshot_validated_asgi_headers(list(scope.get("headers") or [])),
+            ),
+            receive,
+            send_wrapper,
+        )
 
     def _echo_headers(
         self,

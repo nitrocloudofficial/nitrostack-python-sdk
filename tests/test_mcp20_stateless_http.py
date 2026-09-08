@@ -39,7 +39,9 @@ from nitrostack.transports.headers import (
     first_oversized_mcp_param,
     handled_protocol_version,
     merge_mcp_param_headers,
+    scope_with_header_snapshot,
     scope_without_session_headers,
+    snapshot_validated_asgi_headers,
     strip_legacy_session_headers,
     strip_legacy_session_headers_asgi,
 )
@@ -72,6 +74,28 @@ class TestRequestHeaders:
         scope = scope_without_session_headers({"type": "http", "headers": headers})
         assert all(key.lower() != b"mcp-session-id" for key, _ in scope["headers"])
         assert scope["type"] == "http"
+
+    def test_replay_snapshot_keeps_contract_headers_and_drops_session_id(self):
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"mcp-method", b"tools/call"),
+            (b"mcp-name", b"echo"),
+            (b"mcp-protocol-version", b"2026-07-28"),
+            (b"mcp-session-id", b"forged"),
+        ]
+        snapshot = snapshot_validated_asgi_headers(headers)
+        assert all(key.lower() != b"mcp-session-id" for key, _ in snapshot)
+        by_name = {key.lower(): value for key, value in snapshot}
+        assert by_name[b"mcp-method"] == b"tools/call"
+        assert by_name[b"mcp-name"] == b"echo"
+        assert by_name[b"mcp-protocol-version"] == b"2026-07-28"
+        live = {"type": "http", "headers": list(headers)}
+        live["headers"].append((b"mcp-session-id", b"later"))
+        replayed = scope_with_header_snapshot(live, snapshot)
+        assert all(key.lower() != b"mcp-session-id" for key, _ in replayed["headers"])
+        replayed_by_name = {key.lower(): value for key, value in replayed["headers"]}
+        assert replayed_by_name[b"mcp-method"] == b"tools/call"
+        assert replayed_by_name[b"mcp-name"] == b"echo"
 
 
 class TestHeaderCompatPreservesProtocolVersion:
@@ -762,6 +786,125 @@ class TestReplayDoesNotSynthesizeDisconnect:
             assert calls["n"] == 1
 
         asyncio.run(_run())
+
+
+class TestReplayUsesHeaderSnapshot:
+    def test_tools_call_replay_keeps_name_and_method(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack.transports.middleware import wrap_stateless_transport
+
+        captured: dict[str, list] = {}
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+            captured["headers"] = list(scope.get("headers") or [])
+            await receive()
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"jsonrpc":"2.0","id":1,"result":{}}',
+                }
+            )
+
+        wrapped = wrap_stateless_transport(
+            inner,
+            server_name="srv",
+            server_version="1.0.0",
+            protocol_version=MODERN_PROTOCOL_VERSION,
+            wire_mode="stateless",
+        )
+        with TestClient(wrapped) as client:
+            response = client.post(
+                "/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "Mcp-Method": "tools/call",
+                    "Mcp-Name": "echo",
+                    "MCP-Protocol-Version": "2026-07-28",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "echo"},
+                },
+            )
+        assert response.status_code == 200
+        forwarded = {key.lower(): value for key, value in captured["headers"]}
+        assert forwarded.get(b"mcp-method") == b"tools/call"
+        assert forwarded.get(b"mcp-name") == b"echo"
+        assert forwarded.get(b"mcp-protocol-version") == b"2026-07-28"
+        assert b"mcp-session-id" not in forwarded
+
+    def test_session_id_is_rejected_before_replay(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack.transports.middleware import wrap_stateless_transport
+
+        called = {"inner": False}
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+            called["inner"] = True
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        wrapped = wrap_stateless_transport(
+            inner,
+            server_name="srv",
+            server_version="1.0.0",
+            protocol_version=MODERN_PROTOCOL_VERSION,
+            wire_mode="stateless",
+        )
+        with TestClient(wrapped) as client:
+            response = client.post(
+                "/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "Mcp-Method": "tools/call",
+                    "Mcp-Name": "echo",
+                    LEGACY_SESSION_HEADER: "forged",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "echo"},
+                },
+            )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == -32600
+        assert called["inner"] is False
 
 
 class TestOptionsScopedToMcpPath:
@@ -2003,6 +2146,9 @@ class TestSessionIdNotForwarded:
         assert response.status_code == 200
         assert "headers" in captured
         assert all(key.lower() != b"mcp-session-id" for key, _ in captured["headers"])
+        forwarded = {key.lower(): value for key, value in captured["headers"]}
+        assert forwarded.get(b"mcp-method") == b"tools/call"
+        assert forwarded.get(b"mcp-name") == b"echo"
 
     def test_forged_session_id_cannot_associate_two_modern_calls(self, monkeypatch):
         import os
