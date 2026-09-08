@@ -27,6 +27,7 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
     validate_header_body_method,
     validate_header_body_name,
+    validate_required_mcp_name,
 )
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, WireMode
 from nitrostack.runtime.stateless import (
@@ -58,6 +59,7 @@ class DispatchStage(str, Enum):
 
 
 TASK_METHOD_PREFIX = "tasks/"
+TOOLS_CALL_METHOD = "tools/call"
 LEGACY_HANDSHAKE_METHODS = frozenset({"initialize", "notifications/initialized"})
 
 
@@ -127,7 +129,26 @@ def is_task_wire_interception(method: str, params: dict[str, Any]) -> bool:
     """Ingress step 4 — route to the task subsystem when matched."""
     if method.startswith(TASK_METHOD_PREFIX):
         return True
-    return method == "tools/call" and bool(params.get("task"))
+    return method == TOOLS_CALL_METHOD and bool(params.get("task"))
+
+
+def reject_required_mcp_name(
+    request: JsonRpcRequest,
+    request_headers: dict[str, str],
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Require ``Mcp-Name`` on ``tools/call`` only. Other methods stay optional."""
+    if request.method != TOOLS_CALL_METHOD:
+        return None
+    header_name = get_header(request_headers, HEADER_MCP_NAME)
+    body_name = request.params.get("name")
+    try:
+        validate_required_mcp_name(
+            header_name,
+            body_name if isinstance(body_name, str) else None,
+        )
+    except HeaderBodyMismatchError as exc:
+        return 400, exc.to_response(request.id)
+    return None
 
 
 class StatelessIngressPipeline:
@@ -159,6 +180,18 @@ class StatelessIngressPipeline:
         """True when this engine must reject ``Mcp-Session-Id`` without forwarding."""
         return reject_incoming_session_id(None, request_headers, self._context.wire_mode) is not None
 
+    def reject_tools_call_mcp_name(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Replay-path ``Mcp-Name`` check for ``tools/call``."""
+        try:
+            request = parse_jsonrpc_request(raw_body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            return None
+        return reject_required_mcp_name(request, request_headers)
+
     async def handle_post(
         self,
         raw_body: bytes,
@@ -187,9 +220,13 @@ class StatelessIngressPipeline:
         except HeaderBodyMismatchError as exc:
             return 400, exc.to_response(request.id)
 
+        required_name = reject_required_mcp_name(request, request_headers)
+        if required_name is not None:
+            return required_name
+
         header_name = get_header(request_headers, HEADER_MCP_NAME)
         body_name = request.params.get("name") or request.params.get("uri")
-        if isinstance(body_name, str):
+        if request.method != TOOLS_CALL_METHOD and isinstance(body_name, str):
             try:
                 validate_header_body_name(header_name, body_name)
             except HeaderBodyMismatchError as exc:

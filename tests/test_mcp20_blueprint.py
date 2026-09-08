@@ -135,7 +135,7 @@ class TestStatelessHttpConformance:
         with TestClient(http_app) as client:
             resp = client.post(
                 "/mcp",
-                headers=JSON_HEADERS,
+                headers={**JSON_HEADERS, "Mcp-Name": "echo"},
                 json={
                     "jsonrpc": "2.0",
                     "id": 1,

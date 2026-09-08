@@ -132,6 +132,24 @@ def validate_header_body_name(
         )
 
 
+REQUIRED_MCP_NAME_MESSAGE = "Mcp-Name header is required for tools/call"
+
+
+def validate_required_mcp_name(
+    header_name: Optional[str],
+    body_name: Optional[str],
+) -> None:
+    """Require ``Mcp-Name`` on ``tools/call`` and match ``params.name`` exactly."""
+    header = header_name.strip() if isinstance(header_name, str) else ""
+    body = body_name.strip() if isinstance(body_name, str) else ""
+    if not header or not body:
+        raise HeaderBodyMismatchError(REQUIRED_MCP_NAME_MESSAGE)
+    if header != body:
+        raise HeaderBodyMismatchError(
+            f"Mcp-Name header '{header_name}' does not match body name '{body_name}'"
+        )
+
+
 def jsonrpc_success(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "result": result}
 

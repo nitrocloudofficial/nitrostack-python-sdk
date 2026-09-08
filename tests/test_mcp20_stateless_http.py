@@ -194,7 +194,60 @@ class TestDispatchPipeline:
                     "params": {"name": "demo"},
                 }
             ).encode()
-            assert await pipeline.handle_post(body, {}) is None
+            assert await pipeline.handle_post(body, {"Mcp-Name": "demo"}) is None
+
+        asyncio.run(_run())
+
+    def test_tools_call_requires_mcp_name(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "demo"},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 400
+            assert resp["error"]["code"] == -32020
+            assert "Mcp-Name" in resp["error"]["message"]
+
+        asyncio.run(_run())
+
+    def test_tools_call_rejects_mcp_name_mismatch(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "bar"},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {"Mcp-Name": "foo"})
+            assert status == 400
+            assert resp["error"]["code"] == -32020
+            assert "foo" in resp["error"]["message"]
+            assert "bar" in resp["error"]["message"]
+
+        asyncio.run(_run())
+
+    def test_ping_does_not_require_mcp_name(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            assert resp["result"] == {}
 
         asyncio.run(_run())
 
@@ -400,6 +453,7 @@ class TestOptionsScopedToMcpPath:
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json, text/event-stream",
+                        "Mcp-Name": "echo",
                     },
                     json={
                         "jsonrpc": "2.0",
@@ -1265,6 +1319,7 @@ class TestSessionIdNotForwarded:
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                     LEGACY_SESSION_HEADER: "forged",
+                    "Mcp-Name": "echo",
                 },
                 json={
                     "jsonrpc": "2.0",
@@ -1378,6 +1433,76 @@ class TestSessionIdNotForwarded:
                 )
             assert response.status_code == 400
             assert response.json()["error"]["code"] == -32600
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestRequiredMcpName:
+    def test_http_tools_call_missing_and_mismatch_and_match(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="RequiredNameHttp", controllers=[EchoController])
+            class RequiredNameModule:
+                pass
+
+            @mcp_app(module=RequiredNameModule, server=ServerConfig(name="required-name-http"))
+            class RequiredNameApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(RequiredNameApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            call_body = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo", "arguments": {"value": "ok"}},
+            }
+            with TestClient(http_app) as client:
+                missing = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={**call_body, "id": 1},
+                )
+                mismatch = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Name": "foo"},
+                    json={**call_body, "id": 2},
+                )
+                matched = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Name": "echo"},
+                    json={**call_body, "id": 3},
+                )
+            assert missing.status_code == 400
+            assert missing.json()["error"]["code"] == -32020
+            assert mismatch.status_code == 400
+            assert mismatch.json()["error"]["code"] == -32020
+            assert matched.status_code == 200, matched.text
+            assert matched.json()["result"]["content"][0]["text"] == "ok"
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

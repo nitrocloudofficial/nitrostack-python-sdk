@@ -65,6 +65,14 @@ class StatelessTransportMiddleware:
             handled = await self._try_pre_dispatch(scope, body, send)
             if handled:
                 return
+            raw_headers = {
+                key.decode("latin-1"): value.decode("latin-1")
+                for key, value in (scope.get("headers") or [])
+            }
+            name_rejected = self.pipeline.reject_tools_call_mcp_name(body, raw_headers)
+            if name_rejected is not None:
+                await self._send_pipeline_response(scope, send, raw_headers, name_rejected)
+                return
             receive = self._replay_receive(body, receive)
 
         if path in self.mcp_paths and self.pipeline is not None:
@@ -110,12 +118,22 @@ class StatelessTransportMiddleware:
         if result is None:
             return False
 
+        await self._send_pipeline_response(scope, send, raw_headers, result)
+        return True
+
+    async def _send_pipeline_response(
+        self,
+        scope: dict[str, Any],
+        send: Any,
+        raw_headers: dict[str, str],
+        result: tuple[int, dict[str, Any]],
+    ) -> None:
         status, jsonrpc_response = result
         origin = get_header(raw_headers, "Origin")
         cors = build_cors_headers(origin=origin)
         response_headers = build_mcp_response_headers(extra=cors)
         assert_stateless_headers(response_headers)
-
+        assert self.pipeline is not None
         payload = self.pipeline.serialize_response(jsonrpc_response)
         await send(
             {
@@ -125,7 +143,6 @@ class StatelessTransportMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": payload})
-        return True
 
     async def _send_session_id_rejected(
         self,
