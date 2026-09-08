@@ -12,6 +12,14 @@ from nitrostack.protocol.contracts import (
     build_resource_text_content,
 )
 from nitrostack.protocol.deprecated import deprecated_method_message
+from nitrostack.protocol.method_contract import (
+    MODERN_METHOD_CONTRACTS,
+    MethodContract,
+    contract_for,
+    mcp_method_is_required,
+    mcp_name_field,
+    mcp_name_is_required,
+)
 from nitrostack.protocol.discovery import (
     DISCOVER_RESULT_TYPE,
     INITIALIZE_METHOD,
@@ -126,6 +134,12 @@ __all__ = [
     "flatten_request_meta_object",
     "split_params_and_meta",
     "deprecated_method_message",
+    "MODERN_METHOD_CONTRACTS",
+    "MethodContract",
+    "contract_for",
+    "mcp_method_is_required",
+    "mcp_name_field",
+    "mcp_name_is_required",
     "DISCOVER_RESULT_TYPE",
     "INITIALIZE_METHOD",
     "SERVER_DISCOVER_METHOD",

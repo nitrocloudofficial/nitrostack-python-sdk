@@ -432,7 +432,7 @@ class TestDeprecatedMethods:
             body = json.dumps(
                 {"jsonrpc": "2.0", "id": 1, "method": "tasks/list", "params": {}}
             ).encode()
-            status, resp = await pipeline.handle_post(body, {})
+            status, resp = await pipeline.handle_post(body, {"Mcp-Method": "tasks/list"})
             assert status == 200
             assert resp["error"]["code"] == int(JsonRpcErrorCode.METHOD_NOT_FOUND)
 

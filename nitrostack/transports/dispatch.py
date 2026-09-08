@@ -34,6 +34,11 @@ from nitrostack.protocol.jsonrpc import (
     validate_required_mcp_name,
     validate_supported_protocol_version,
 )
+from nitrostack.protocol.method_contract import (
+    mcp_method_is_required,
+    mcp_name_field,
+    mcp_name_is_required,
+)
 from nitrostack.protocol.meta import envelope_protocol_version
 from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
@@ -176,26 +181,21 @@ def reject_required_mcp_name(
     request: JsonRpcRequest,
     request_headers: dict[str, str],
 ) -> Optional[tuple[int, dict[str, Any]]]:
-    """Require ``Mcp-Name`` on ``tools/call`` only. Other methods stay optional."""
-    if request.method != TOOLS_CALL_METHOD:
+    """Require ``Mcp-Name`` on name-scoped methods (``tools/call``, ``resources/read``, ``prompts/get``)."""
+    if not mcp_name_is_required(request.method):
         return None
+    field = mcp_name_field(request.method) or "name"
     header_name = get_header(request_headers, HEADER_MCP_NAME)
-    body_name = request.params.get("name")
+    body_name = request.params.get(field)
     try:
         validate_required_mcp_name(
             header_name,
             body_name if isinstance(body_name, str) else None,
+            body_label=field,
         )
     except HeaderBodyMismatchError as exc:
         return 400, exc.to_response(request.id)
     return None
-
-
-def mcp_method_is_required(method: str, wire_mode: WireMode) -> bool:
-    """``modern`` requires ``Mcp-Method`` on every JSON-RPC POST. ``auto`` requires it on ``tools/call``."""
-    if wire_mode == "reject":
-        return True
-    return method == TOOLS_CALL_METHOD
 
 
 def reject_required_mcp_method(
@@ -286,7 +286,7 @@ class StatelessIngressPipeline:
         raw_body: bytes,
         request_headers: dict[str, str],
     ) -> Optional[tuple[int, dict[str, Any]]]:
-        """Replay-path ``Mcp-Name`` check for ``tools/call``."""
+        """Replay-path ``Mcp-Name`` check for name-scoped methods."""
         try:
             request = parse_jsonrpc_request(raw_body)
         except (JsonRpcParseError, JsonRpcWireError):
@@ -385,8 +385,11 @@ class StatelessIngressPipeline:
             ).to_response(request.id)
 
         header_name = get_header(request_headers, HEADER_MCP_NAME)
-        body_name = request.params.get("name") or request.params.get("uri")
-        if request.method != TOOLS_CALL_METHOD and isinstance(body_name, str):
+        name_field = mcp_name_field(request.method)
+        body_name = request.params.get(name_field) if name_field else (
+            request.params.get("name") or request.params.get("uri")
+        )
+        if not mcp_name_is_required(request.method) and isinstance(body_name, str):
             try:
                 validate_header_body_name(header_name, body_name)
             except HeaderBodyMismatchError as exc:

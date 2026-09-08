@@ -17,6 +17,11 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
     validate_header_body_method,
 )
+from nitrostack.protocol.method_contract import (
+    MODERN_METHOD_CONTRACTS,
+    mcp_name_field,
+    mcp_name_is_required,
+)
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers, resolve_allowed_origin
 from nitrostack.transports.dispatch import (
@@ -2311,6 +2316,133 @@ class TestRequiredMcpMethod:
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+def _contract_params(method: str) -> dict:
+    if mcp_name_is_required(method):
+        field = mcp_name_field(method)
+        if field == "uri":
+            return {"uri": "mcp://demo/item"}
+        return {"name": "demo"}
+    if method.startswith("tasks/"):
+        return {"taskId": "task-1"}
+    return {}
+
+
+class TestSep2243AllModernMethods:
+    def test_table_covers_modern_surface(self):
+        methods = {row.method for row in MODERN_METHOD_CONTRACTS}
+        assert "server/discover" in methods
+        assert "resources/read" in methods
+        assert "prompts/get" in methods
+        assert "completion/complete" in methods
+        assert "tasks/get" in methods
+        assert "tools/call" in methods
+
+    @pytest.mark.parametrize(
+        "contract",
+        MODERN_METHOD_CONTRACTS,
+        ids=lambda row: row.method,
+    )
+    def test_modern_missing_mcp_method_is_header_mismatch(self, contract):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": contract.method,
+                    "params": _contract_params(contract.method),
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 400
+            assert resp["error"]["code"] == HEADER_BODY_MISMATCH
+
+        asyncio.run(_run())
+
+    @pytest.mark.parametrize(
+        "contract",
+        MODERN_METHOD_CONTRACTS,
+        ids=lambda row: row.method,
+    )
+    def test_modern_unsupported_protocol_version(self, contract):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            params = _contract_params(contract.method)
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": contract.method,
+                    "params": params,
+                }
+            ).encode()
+            headers = {
+                "Mcp-Method": contract.method,
+                "MCP-Protocol-Version": "1999-01-01",
+            }
+            if mcp_name_is_required(contract.method):
+                field = mcp_name_field(contract.method)
+                headers["Mcp-Name"] = params[field]
+            status, resp = await pipeline.handle_post(body, headers)
+            assert status == 400
+            assert resp["error"]["code"] == -32022
+
+        asyncio.run(_run())
+
+    def test_resources_read_and_prompts_get_require_mcp_name(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            read_body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "resources/read",
+                    "params": {"uri": "mcp://demo/item"},
+                }
+            ).encode()
+            prompt_body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "prompts/get",
+                    "params": {"name": "demo"},
+                }
+            ).encode()
+            read_missing = await pipeline.handle_post(
+                read_body, {"Mcp-Method": "resources/read"}
+            )
+            prompt_missing = await pipeline.handle_post(
+                prompt_body, {"Mcp-Method": "prompts/get"}
+            )
+            assert read_missing is not None
+            assert read_missing[0] == 400
+            assert read_missing[1]["error"]["code"] == HEADER_BODY_MISMATCH
+            assert prompt_missing is not None
+            assert prompt_missing[0] == 400
+            assert prompt_missing[1]["error"]["code"] == HEADER_BODY_MISMATCH
+            assert read_missing[1]["error"]["code"] == prompt_missing[1]["error"]["code"]
+
+        asyncio.run(_run())
+
+    def test_auto_discover_still_allows_missing_mcp_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}}
+            ).encode()
+            assert await pipeline.handle_post(body, {}) is None
+
+        asyncio.run(_run())
 
 
 class TestProtocolVersionCrossCheck:

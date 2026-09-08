@@ -152,7 +152,7 @@ def validate_header_body_name(
         )
 
 
-REQUIRED_MCP_NAME_MESSAGE = "Mcp-Name header is required for tools/call"
+REQUIRED_MCP_NAME_MESSAGE = "Mcp-Name header is required"
 REQUIRED_MCP_METHOD_MESSAGE = "Mcp-Method header is required"
 
 
@@ -178,13 +178,15 @@ def validate_required_header_body(
 def validate_required_mcp_name(
     header_name: Optional[str],
     body_name: Optional[str],
+    *,
+    body_label: str = "name",
 ) -> None:
-    """Require ``Mcp-Name`` on ``tools/call`` and match ``params.name`` exactly."""
+    """Require ``Mcp-Name`` and match the body name or URI exactly."""
     validate_required_header_body(
         header_name,
         body_name,
         header_name="Mcp-Name",
-        body_label="name",
+        body_label=body_label,
         required_message=REQUIRED_MCP_NAME_MESSAGE,
     )
 
