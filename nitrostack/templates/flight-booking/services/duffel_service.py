@@ -44,7 +44,7 @@ class DuffelService:
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Duffel-Version": "v1",
+            "Duffel-Version": "v2",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -151,7 +151,7 @@ class DuffelService:
         }
         if params.get("maxConnections") is not None:
             duffel_params["max_connections"] = params["maxConnections"]
-        res = self._request("POST", "/offer_requests", duffel_params)
+        res = self._request("POST", "/air/offer_requests", duffel_params)
         return {
             "id": res.get("id"),
             "offers": res.get("offers", []),
@@ -162,7 +162,7 @@ class DuffelService:
     async def get_offer(self, offer_id: str) -> Dict[str, Any]:
         if self.is_mock:
             return self._mock_offer(offer_id)
-        return self._request("GET", f"/offers/{offer_id}")
+        return self._request("GET", f"/air/offers/{offer_id}")
 
     async def get_seats_for_offer(self, offer_id: str) -> List[Dict[str, Any]]:
         if self.is_mock:
@@ -196,7 +196,7 @@ class DuffelService:
                     ],
                 }
             ]
-        res = self._request("GET", f"/seat_maps?offer_id={urllib.parse.quote(offer_id)}")
+        res = self._request("GET", f"/air/seat_maps?offer_id={urllib.parse.quote(offer_id)}")
         return res if isinstance(res, list) else []
 
     async def create_order(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -228,7 +228,7 @@ class DuffelService:
             "passengers": params["passengers"],
             "type": "hold",
         }
-        return self._request("POST", "/orders", order_payload)
+        return self._request("POST", "/air/orders", order_payload)
 
     async def get_order(self, order_id: str) -> Dict[str, Any]:
         if self.is_mock:
@@ -253,7 +253,7 @@ class DuffelService:
                 ],
                 "slices": offer["slices"],
             }
-        return self._request("GET", f"/orders/{order_id}")
+        return self._request("GET", f"/air/orders/{order_id}")
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         if self.is_mock:
@@ -263,7 +263,7 @@ class DuffelService:
                 "refund_currency": "USD",
                 "confirmed_at": "2026-06-25T12:30:00Z",
             }
-        return self._request("POST", "/order_cancellations", {"order_id": order_id})
+        return self._request("POST", "/air/order_cancellations", {"order_id": order_id})
 
     async def get_airlines(self) -> List[Dict[str, Any]]:
         if self.is_mock:
@@ -274,7 +274,7 @@ class DuffelService:
                 {"iata_code": "BA", "name": "British Airways"},
                 {"iata_code": "AI", "name": "Air India"},
             ]
-        res = self._request("GET", "/airlines")
+        res = self._request("GET", "/air/airlines")
         return res if isinstance(res, list) else []
 
     async def search_airports(self, query: str) -> List[Dict[str, Any]]:
@@ -283,8 +283,5 @@ class DuffelService:
             return search_mock_airports(query)
 
         quoted = urllib.parse.quote(query or "")
-        try:
-            res = self._request("GET", f"/air/suggestions?query={quoted}")
-        except Exception:
-            res = self._request("GET", f"/places?type=airport&query={quoted}")
+        res = self._request("GET", f"/places/suggestions?query={quoted}")
         return res if isinstance(res, list) else []

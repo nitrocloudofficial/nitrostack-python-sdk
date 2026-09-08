@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -207,6 +209,68 @@ def test_mock_duffel_search_airports_matches_query():
         assert details["slices"][0]["origin"]["iata_code"] == "DEL"
 
     asyncio.run(run())
+
+
+class _FakeDuffelResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self):
+        return json.dumps({"data": self._payload}).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_live_duffel_requests_target_v2_air_endpoints():
+    """A real key must hit Duffel v2: flight resources under /air, places under /places."""
+    sys.path.insert(0, str(ROOT / "nitrostack" / "templates" / "flight-booking"))
+    from services.duffel_service import DuffelService
+
+    os.environ["DUFFEL_API_KEY"] = "duffel_live_regression_key"
+    original_urlopen = urllib.request.urlopen
+    captured = []
+
+    def fake_urlopen(req, timeout=None):
+        captured.append(req)
+        return _FakeDuffelResponse({})
+
+    try:
+        service = DuffelService()
+        assert service.is_mock is False, "non-placeholder key must leave mock mode"
+        urllib.request.urlopen = fake_urlopen
+
+        async def run():
+            await service.get_airlines()
+            await service.search_airports("London")
+            await service.search_flights(
+                {"origin": "JFK", "destination": "LAX", "departureDate": "2026-10-15", "adults": 1}
+            )
+            await service.get_offer("off_1")
+            await service.get_seats_for_offer("off_1")
+            await service.create_order({"selectedOffers": ["off_1"], "passengers": []})
+            await service.get_order("ord_1")
+            await service.cancel_order("ord_1")
+
+        asyncio.run(run())
+    finally:
+        urllib.request.urlopen = original_urlopen
+        os.environ.pop("DUFFEL_API_KEY", None)
+
+    assert [(r.get_method(), r.full_url) for r in captured] == [
+        ("GET", "https://api.duffel.com/air/airlines"),
+        ("GET", "https://api.duffel.com/places/suggestions?query=London"),
+        ("POST", "https://api.duffel.com/air/offer_requests"),
+        ("GET", "https://api.duffel.com/air/offers/off_1"),
+        ("GET", "https://api.duffel.com/air/seat_maps?offer_id=off_1"),
+        ("POST", "https://api.duffel.com/air/orders"),
+        ("GET", "https://api.duffel.com/air/orders/ord_1"),
+        ("POST", "https://api.duffel.com/air/order_cancellations"),
+    ]
+    assert {r.get_header("Duffel-version") for r in captured} == {"v2"}
 
 
 def test_live_preview_search_flights_without_token():
