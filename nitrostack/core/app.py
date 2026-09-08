@@ -15,12 +15,12 @@ import mcp.types as types
 from mcp import MCPError
 from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.server.stdio import stdio_server
 from mcp.types import (
     CallToolRequestParams,
     GetPromptRequestParams,
     PaginatedRequestParams,
     ReadResourceRequestParams,
+    RequestParams,
     SubscribeRequestParams,
     UnsubscribeRequestParams,
 )
@@ -899,6 +899,10 @@ class McpApplication:
             finally:
                 request_ctx.reset(token)
 
+        async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
+            return self.handle_server_discover(getattr(ctx, "protocol_version", None))
+
+        server.add_request_handler("server/discover", RequestParams, _discover)
         server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
         server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)
         server.add_request_handler("resources/list", PaginatedRequestParams, _list_resources)
@@ -1799,8 +1803,9 @@ class McpApplication:
         return http_app
 
     async def _run_stdio(self) -> None:
-        async with stdio_server() as (read_stream, write_stream):
-            await self.mcp_server.run(read_stream, write_stream, self.mcp_server.create_initialization_options())
+        from nitrostack.transports.stdio import run_stdio
+
+        await run_stdio(self.mcp_server, self.protocol_era)
 
     @staticmethod
     def _env_int(name: str) -> Optional[int]:
