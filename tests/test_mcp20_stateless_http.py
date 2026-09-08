@@ -27,7 +27,9 @@ from nitrostack.transports.dispatch import (
 from nitrostack.transports.headers import (
     build_mcp_response_headers,
     build_sse_stream_headers,
+    scope_without_session_headers,
     strip_legacy_session_headers,
+    strip_legacy_session_headers_asgi,
 )
 from nitrostack.transports.sse import format_sse_message, sse_notification
 
@@ -43,6 +45,18 @@ class TestRequestHeaders:
         headers = build_mcp_response_headers()
         assert headers["MCP-Protocol-Version"] == MODERN_PROTOCOL_VERSION
         assert headers["Vary"] == "Origin"
+
+    def test_strip_asgi_session_headers_from_inner_scope(self):
+        headers = [
+            (b"content-type", b"application/json"),
+            (b"mcp-session-id", b"forged"),
+            (b"Mcp-Session-Id", b"also"),
+        ]
+        cleaned = strip_legacy_session_headers_asgi(headers)
+        assert cleaned == [(b"content-type", b"application/json")]
+        scope = scope_without_session_headers({"type": "http", "headers": headers})
+        assert all(key.lower() != b"mcp-session-id" for key, _ in scope["headers"])
+        assert scope["type"] == "http"
 
 
 class TestCors:
@@ -1200,6 +1214,170 @@ class TestIncomingSessionIdRejection:
                 )
             assert call.status_code == 200, call.text
             assert call.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestSessionIdNotForwarded:
+    def test_forwarded_scope_omits_session_header(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack.transports.middleware import wrap_stateless_transport
+
+        captured: dict[str, list] = {}
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+            captured["headers"] = list(scope.get("headers") or [])
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"jsonrpc":"2.0","id":1,"result":{}}',
+                }
+            )
+
+        wrapped = wrap_stateless_transport(
+            inner,
+            server_name="srv",
+            server_version="1.0.0",
+            protocol_version=MODERN_PROTOCOL_VERSION,
+            wire_mode="sessionful",
+        )
+        with TestClient(wrapped) as client:
+            response = client.post(
+                "/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    LEGACY_SESSION_HEADER: "forged",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "echo"},
+                },
+            )
+        assert response.status_code == 200
+        assert "headers" in captured
+        assert all(key.lower() != b"mcp-session-id" for key, _ in captured["headers"])
+
+    def test_forged_session_id_cannot_associate_two_modern_calls(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "modern")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="NoSharedSessionHttp", controllers=[EchoController])
+            class NoSharedSessionModule:
+                pass
+
+            @mcp_app(module=NoSharedSessionModule, server=ServerConfig(name="no-shared-session"))
+            class NoSharedSessionApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(NoSharedSessionApp))
+            http_app = app.get_combined_app(json_response=True)
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "echo",
+                LEGACY_SESSION_HEADER: "forged-shared",
+            }
+            body = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo", "arguments": {"value": "ok"}},
+            }
+            with TestClient(http_app) as client:
+                first = client.post("/mcp", headers=headers, json={**body, "id": 1})
+                second = client.post("/mcp", headers=headers, json={**body, "id": 2})
+            assert first.status_code == 400
+            assert second.status_code == 400
+            assert first.json()["error"]["code"] == -32600
+            assert second.json()["error"]["code"] == -32600
+            state = _http_app_state(http_app)
+            assert not getattr(state.session_manager, "_server_instances", True)
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_modern_get_mcp_rejects_session_id(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "modern")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="ModernGetSessionHttp", controllers=[EchoController])
+            class ModernGetSessionModule:
+                pass
+
+            @mcp_app(module=ModernGetSessionModule, server=ServerConfig(name="modern-get-session"))
+            class ModernGetSessionApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(ModernGetSessionApp))
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                response = client.get(
+                    "/mcp",
+                    headers={
+                        "Accept": "text/event-stream",
+                        LEGACY_SESSION_HEADER: "forged",
+                    },
+                )
+            assert response.status_code == 400
+            assert response.json()["error"]["code"] == -32600
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

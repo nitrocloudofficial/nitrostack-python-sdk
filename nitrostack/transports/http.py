@@ -54,6 +54,7 @@ from nitrostack.protocol.version import (
     WireMode,
     protocol_version_for_era,
 )
+from nitrostack.transports.headers import strip_legacy_session_headers_asgi
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -313,8 +314,9 @@ class HeaderCompatMiddleware:
     Requests that already satisfy the transport pass through untouched.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
         self.app = app
+        self.drop_session_headers = drop_session_headers
 
     @staticmethod
     def _normalize_accept(value: Optional[str]) -> Optional[str]:
@@ -338,6 +340,8 @@ class HeaderCompatMiddleware:
             return
 
         headers: List[Any] = list(scope.get("headers") or [])
+        if self.drop_session_headers:
+            headers = strip_legacy_session_headers_asgi(headers)
         raw_accept = next((value for key, value in headers if key.lower() == b"accept"), None)
         accept = self._normalize_accept(raw_accept.decode("latin-1") if raw_accept is not None else None)
 
@@ -348,6 +352,9 @@ class HeaderCompatMiddleware:
         drop_version = raw_version is not None and raw_version.decode("latin-1") not in SUPPORTED_PROTOCOL_VERSIONS
 
         if accept is None and not drop_version:
+            if self.drop_session_headers:
+                scope = dict(scope)
+                scope["headers"] = headers
             await self.app(scope, receive, send)
             return
 
@@ -555,7 +562,9 @@ def build_http_app(
 
     # Wraps only the Streamable HTTP mount, so `/mcp/health` and the legacy SSE
     # routes keep their own (correct) content negotiation.
-    mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(handle_streamable_http)
+    mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(
+        handle_streamable_http, drop_session_headers=stateless
+    )
     session_cap: Optional[SessionCapMiddleware] = None
     if max_sessions and not stateless:
         session_cap = SessionCapMiddleware(

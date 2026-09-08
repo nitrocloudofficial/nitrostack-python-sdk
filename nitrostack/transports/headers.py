@@ -66,6 +66,21 @@ def strip_legacy_session_headers(headers: dict[str, str]) -> dict[str, str]:
     }
 
 
+def strip_legacy_session_headers_asgi(
+    headers: list[tuple[bytes, bytes]],
+) -> list[tuple[bytes, bytes]]:
+    """Remove ``Mcp-Session-Id`` from an ASGI header list."""
+    target = LEGACY_SESSION_HEADER.lower().encode("latin-1")
+    return [(key, value) for key, value in headers if key.lower() != target]
+
+
+def scope_without_session_headers(scope: dict) -> dict:
+    """Copy an ASGI scope with incoming session headers removed."""
+    copied = dict(scope)
+    copied["headers"] = strip_legacy_session_headers_asgi(list(scope.get("headers") or []))
+    return copied
+
+
 def build_mcp_response_headers(
     *,
     content_type: str = MCP_JSON_CONTENT_TYPE,

@@ -19,6 +19,7 @@ from nitrostack.transports.headers import (
     MCP_HTTP_PATH,
     build_mcp_response_headers,
     get_header,
+    scope_without_session_headers,
     strip_legacy_session_headers,
 )
 
@@ -182,7 +183,7 @@ class StatelessTransportMiddleware:
                 }
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        await self.app(scope_without_session_headers(scope), receive, send_wrapper)
 
     @staticmethod
     async def _read_body(receive: Any) -> bytes:
