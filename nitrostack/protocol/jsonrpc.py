@@ -133,6 +133,26 @@ def validate_header_body_name(
 
 
 REQUIRED_MCP_NAME_MESSAGE = "Mcp-Name header is required for tools/call"
+REQUIRED_MCP_METHOD_MESSAGE = "Mcp-Method header is required"
+
+
+def validate_required_header_body(
+    header_value: Optional[str],
+    body_value: Optional[str],
+    *,
+    header_name: str,
+    body_label: str,
+    required_message: str,
+) -> None:
+    """Require a header and match it to the JSON-RPC body field exactly."""
+    header = header_value.strip() if isinstance(header_value, str) else ""
+    body = body_value.strip() if isinstance(body_value, str) else ""
+    if not header or not body:
+        raise HeaderBodyMismatchError(required_message)
+    if header != body:
+        raise HeaderBodyMismatchError(
+            f"{header_name} header '{header_value}' does not match body {body_label} '{body_value}'"
+        )
 
 
 def validate_required_mcp_name(
@@ -140,14 +160,27 @@ def validate_required_mcp_name(
     body_name: Optional[str],
 ) -> None:
     """Require ``Mcp-Name`` on ``tools/call`` and match ``params.name`` exactly."""
-    header = header_name.strip() if isinstance(header_name, str) else ""
-    body = body_name.strip() if isinstance(body_name, str) else ""
-    if not header or not body:
-        raise HeaderBodyMismatchError(REQUIRED_MCP_NAME_MESSAGE)
-    if header != body:
-        raise HeaderBodyMismatchError(
-            f"Mcp-Name header '{header_name}' does not match body name '{body_name}'"
-        )
+    validate_required_header_body(
+        header_name,
+        body_name,
+        header_name="Mcp-Name",
+        body_label="name",
+        required_message=REQUIRED_MCP_NAME_MESSAGE,
+    )
+
+
+def validate_required_mcp_method(
+    header_method: Optional[str],
+    body_method: Optional[str],
+) -> None:
+    """Require ``Mcp-Method`` and match JSON-RPC ``method`` exactly."""
+    validate_required_header_body(
+        header_method,
+        body_method,
+        header_name="Mcp-Method",
+        body_label="method",
+        required_message=REQUIRED_MCP_METHOD_MESSAGE,
+    )
 
 
 def jsonrpc_success(request_id: Any, result: Any) -> dict[str, Any]:

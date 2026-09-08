@@ -69,6 +69,10 @@ class StatelessTransportMiddleware:
                 key.decode("latin-1"): value.decode("latin-1")
                 for key, value in (scope.get("headers") or [])
             }
+            method_rejected = self.pipeline.reject_jsonrpc_mcp_method(body, raw_headers)
+            if method_rejected is not None:
+                await self._send_pipeline_response(scope, send, raw_headers, method_rejected)
+                return
             name_rejected = self.pipeline.reject_tools_call_mcp_name(body, raw_headers)
             if name_rejected is not None:
                 await self._send_pipeline_response(scope, send, raw_headers, name_rejected)

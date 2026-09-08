@@ -27,6 +27,7 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
     validate_header_body_method,
     validate_header_body_name,
+    validate_required_mcp_method,
     validate_required_mcp_name,
 )
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, WireMode
@@ -151,6 +152,30 @@ def reject_required_mcp_name(
     return None
 
 
+def mcp_method_is_required(method: str, wire_mode: WireMode) -> bool:
+    """``modern`` requires ``Mcp-Method`` on every JSON-RPC POST. ``auto`` requires it on ``tools/call``."""
+    if wire_mode == "reject":
+        return True
+    return method == TOOLS_CALL_METHOD
+
+
+def reject_required_mcp_method(
+    request: JsonRpcRequest,
+    request_headers: dict[str, str],
+    wire_mode: WireMode,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Require or optionally cross-check ``Mcp-Method`` against the JSON-RPC method."""
+    header_method = get_header(request_headers, HEADER_MCP_METHOD)
+    try:
+        if mcp_method_is_required(request.method, wire_mode):
+            validate_required_mcp_method(header_method, request.method)
+        else:
+            validate_header_body_method(header_method, request.method)
+    except HeaderBodyMismatchError as exc:
+        return 400, exc.to_response(request.id)
+    return None
+
+
 class StatelessIngressPipeline:
     """
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
@@ -192,6 +217,18 @@ class StatelessIngressPipeline:
             return None
         return reject_required_mcp_name(request, request_headers)
 
+    def reject_jsonrpc_mcp_method(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Replay-path ``Mcp-Method`` check for JSON-RPC POST."""
+        try:
+            request = parse_jsonrpc_request(raw_body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            return None
+        return reject_required_mcp_method(request, request_headers, self._context.wire_mode)
+
     async def handle_post(
         self,
         raw_body: bytes,
@@ -214,11 +251,11 @@ class StatelessIngressPipeline:
         if rejected_session is not None:
             return rejected_session
 
-        header_method = get_header(request_headers, HEADER_MCP_METHOD)
-        try:
-            validate_header_body_method(header_method, request.method)
-        except HeaderBodyMismatchError as exc:
-            return 400, exc.to_response(request.id)
+        required_method = reject_required_mcp_method(
+            request, request_headers, self._context.wire_mode
+        )
+        if required_method is not None:
+            return required_method
 
         required_name = reject_required_mcp_name(request, request_headers)
         if required_name is not None:

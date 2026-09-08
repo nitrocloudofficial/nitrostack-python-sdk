@@ -209,6 +209,25 @@ class TestHeaderBodyMismatch:
     def test_required_mcp_name_accepts_exact_match(self):
         validate_required_mcp_name("echo", "echo")
 
+    def test_required_mcp_method_rejects_missing_header(self):
+        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
+
+        with pytest.raises(HeaderBodyMismatchError) as exc:
+            validate_required_mcp_method(None, "tools/call")
+        assert int(exc.value.code) == HEADER_BODY_MISMATCH
+        assert "required" in exc.value.message
+
+    def test_required_mcp_method_rejects_mismatch(self):
+        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
+
+        with pytest.raises(HeaderBodyMismatchError):
+            validate_required_mcp_method("tools/list", "tools/call")
+
+    def test_required_mcp_method_accepts_exact_match(self):
+        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
+
+        validate_required_mcp_method("tools/call", "tools/call")
+
 
 class TestToolVsProtocolErrors:
     def test_tool_error_result_uses_is_error_flag(self):

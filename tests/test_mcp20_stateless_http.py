@@ -194,7 +194,9 @@ class TestDispatchPipeline:
                     "params": {"name": "demo"},
                 }
             ).encode()
-            assert await pipeline.handle_post(body, {"Mcp-Name": "demo"}) is None
+            assert await pipeline.handle_post(
+                body, {"Mcp-Name": "demo", "Mcp-Method": "tools/call"}
+            ) is None
 
         asyncio.run(_run())
 
@@ -211,7 +213,7 @@ class TestDispatchPipeline:
                     "params": {"name": "demo"},
                 }
             ).encode()
-            status, resp = await pipeline.handle_post(body, {})
+            status, resp = await pipeline.handle_post(body, {"Mcp-Method": "tools/call"})
             assert status == 400
             assert resp["error"]["code"] == -32020
             assert "Mcp-Name" in resp["error"]["message"]
@@ -231,7 +233,9 @@ class TestDispatchPipeline:
                     "params": {"name": "bar"},
                 }
             ).encode()
-            status, resp = await pipeline.handle_post(body, {"Mcp-Name": "foo"})
+            status, resp = await pipeline.handle_post(
+                body, {"Mcp-Name": "foo", "Mcp-Method": "tools/call"}
+            )
             assert status == 400
             assert resp["error"]["code"] == -32020
             assert "foo" in resp["error"]["message"]
@@ -268,7 +272,7 @@ class TestDispatchPipeline:
                     },
                 }
             ).encode()
-            status, resp = await pipeline.handle_post(body, {})
+            status, resp = await pipeline.handle_post(body, {"Mcp-Method": "initialize"})
             assert status == 200
             assert resp["error"]["code"] == -32601
 
@@ -281,7 +285,7 @@ class TestDispatchPipeline:
             )
             body = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}).encode()
             status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2025-06-18"}
+                body, {"MCP-Protocol-Version": "2025-06-18", "Mcp-Method": "ping"}
             )
             assert status == 400
             assert resp["error"]["code"] == -32022
@@ -453,6 +457,7 @@ class TestOptionsScopedToMcpPath:
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "tools/call",
                         "Mcp-Name": "echo",
                     },
                     json={
@@ -549,6 +554,7 @@ class TestNitroMcpProtocolVersionEnv:
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "ping",
                     },
                     json={
                         "jsonrpc": "2.0",
@@ -1151,6 +1157,7 @@ class TestIncomingSessionIdRejection:
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "ping",
                     },
                     json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
                 )
@@ -1319,6 +1326,7 @@ class TestSessionIdNotForwarded:
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                     LEGACY_SESSION_HEADER: "forged",
+                    "Mcp-Method": "tools/call",
                     "Mcp-Name": "echo",
                 },
                 json={
@@ -1475,6 +1483,7 @@ class TestRequiredMcpName:
             json_headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
+                "Mcp-Method": "tools/call",
             }
             call_body = {
                 "jsonrpc": "2.0",
@@ -1495,6 +1504,143 @@ class TestRequiredMcpName:
                 matched = client.post(
                     "/mcp",
                     headers={**json_headers, "Mcp-Name": "echo"},
+                    json={**call_body, "id": 3},
+                )
+            assert missing.status_code == 400
+            assert missing.json()["error"]["code"] == -32020
+            assert mismatch.status_code == 400
+            assert mismatch.json()["error"]["code"] == -32020
+            assert matched.status_code == 200, matched.text
+            assert matched.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestRequiredMcpMethod:
+    def test_pipeline_tools_call_requires_mcp_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "demo"},
+                }
+            ).encode()
+            missing = await pipeline.handle_post(body, {"Mcp-Name": "demo"})
+            mismatch = await pipeline.handle_post(
+                body, {"Mcp-Name": "demo", "Mcp-Method": "tools/list"}
+            )
+            matched = await pipeline.handle_post(
+                body, {"Mcp-Name": "demo", "Mcp-Method": "tools/call"}
+            )
+            assert missing is not None
+            assert missing[0] == 400
+            assert missing[1]["error"]["code"] == -32020
+            assert mismatch is not None
+            assert mismatch[0] == 400
+            assert mismatch[1]["error"]["code"] == -32020
+            assert matched is None
+
+        asyncio.run(_run())
+
+    def test_auto_initialize_does_not_require_mcp_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18", "capabilities": {}},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            assert resp["result"]["protocolVersion"] == "2025-06-18"
+
+        asyncio.run(_run())
+
+    def test_modern_ping_requires_mcp_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            missing = await pipeline.handle_post(body, {})
+            matched = await pipeline.handle_post(body, {"Mcp-Method": "ping"})
+            assert missing is not None
+            assert missing[0] == 400
+            assert missing[1]["error"]["code"] == -32020
+            assert matched is not None
+            assert matched[0] == 200
+            assert matched[1]["result"] == {}
+
+        asyncio.run(_run())
+
+    def test_http_tools_call_missing_and_mismatch_and_match(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="RequiredMethodHttp", controllers=[EchoController])
+            class RequiredMethodModule:
+                pass
+
+            @mcp_app(module=RequiredMethodModule, server=ServerConfig(name="required-method-http"))
+            class RequiredMethodApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(RequiredMethodApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Mcp-Name": "echo",
+            }
+            call_body = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo", "arguments": {"value": "ok"}},
+            }
+            with TestClient(http_app) as client:
+                missing = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={**call_body, "id": 1},
+                )
+                mismatch = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Method": "tools/list"},
+                    json={**call_body, "id": 2},
+                )
+                matched = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Method": "tools/call"},
                     json={**call_body, "id": 3},
                 )
             assert missing.status_code == 400
