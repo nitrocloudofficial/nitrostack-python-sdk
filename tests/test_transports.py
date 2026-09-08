@@ -555,10 +555,8 @@ def test_legacy_sse_messages_not_swallowed_by_streamable_http():
 
 # ---------------------------------------------------------------------------
 # 11. Client-header tolerance: `StreamableHTTPServerTransport` matches Accept
-#    media types with `startswith` (so `*/*` is rejected with 406) and rejects
-#    any MCP-Protocol-Version it doesn't know with 400. Both happen before the
-#    JSON-RPC layer, so the client just sees a stream open and close with no
-#    response on it.
+#    media types with `startswith` (so `*/*` is rejected with 406). Protocol
+#    version is left on the request so later checks see the client value.
 # ---------------------------------------------------------------------------
 
 def test_wildcard_and_missing_accept_are_honoured():
@@ -601,24 +599,42 @@ def test_wildcard_and_missing_accept_are_honoured():
     print("Success! Wildcard and absent Accept headers no longer 406 on /mcp.")
 
 
-def test_unsupported_protocol_version_header_does_not_fail_request():
-    app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+def test_header_compat_preserves_protocol_version_for_inner_app():
+    from nitrostack.transports.http import HeaderCompatMiddleware
 
-    with TestClient(http_app) as client:
-        session_id = _initialize(client)
+    captured: dict[str, list] = {}
 
-        listed = client.post(
+    async def inner(scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        captured["headers"] = list(scope.get("headers") or [])
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    wrapped = HeaderCompatMiddleware(inner)
+    with TestClient(wrapped) as client:
+        response = client.post(
             "/mcp",
-            headers={**JSON_HEADERS, "mcp-session-id": session_id, "MCP-Protocol-Version": "2026-06-18"},
+            headers={**JSON_HEADERS, "MCP-Protocol-Version": "2026-07-28"},
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        assert listed.status_code == 200, (
-            f"a newer-than-supported protocol version should not fail the request, got: {listed.text}"
-        )
-        assert "echo" in [t["name"] for t in _extract_json_rpc(listed)["result"]["tools"]]
+    assert response.status_code == 200, response.text
+    headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in captured["headers"]}
+    assert headers["mcp-protocol-version"] == "2026-07-28"
 
-    print("Success! An unknown MCP-Protocol-Version no longer turns into a 400.")
+    print("Success! HeaderCompatMiddleware keeps MCP-Protocol-Version for the inner app.")
 
 
 def test_delete_terminates_live_session_and_404s_unknown_one():
@@ -699,7 +715,7 @@ if __name__ == "__main__":
     test_mcp_path_does_not_redirect()
     test_legacy_sse_messages_not_swallowed_by_streamable_http()
     test_wildcard_and_missing_accept_are_honoured()
-    test_unsupported_protocol_version_header_does_not_fail_request()
+    test_header_compat_preserves_protocol_version_for_inner_app()
     test_delete_terminates_live_session_and_404s_unknown_one()
     test_oauth_register_returns_json_not_html()
     test_oauth_configured_skips_not_supported_stubs()

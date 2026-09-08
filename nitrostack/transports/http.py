@@ -46,7 +46,6 @@ from pydantic_core import PydanticUndefined
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 
 from nitrostack.protocol.version import (
     HttpEngine,
@@ -297,21 +296,16 @@ class ExactEndpointSlashMiddleware:
 
 class HeaderCompatMiddleware:
     """
-    Normalize `Accept` and `MCP-Protocol-Version` on the Streamable HTTP mount
-    so tolerable client quirks don't turn into a failed connection.
+    Normalize ``Accept`` on the Streamable HTTP mount so wildcard or absent
+    Accept does not 406. Session ids are stripped only when
+    ``drop_session_headers`` is set.
 
-    `StreamableHTTPServerTransport` matches Accept media types with
-    `str.startswith`, so it does not honour wildcards: a client sending
-    `Accept: */*` (or no Accept at all, which RFC 9110 also defines as
-    accepting anything) is rejected with `406` even though it accepts
-    everything the transport can send. It also rejects a request with `400` when
-    `MCP-Protocol-Version` names a version it doesn't know, which breaks a
-    client that advertises a spec release newer than the installed `mcp` SDK
-    even though the session itself negotiated a version both sides support.
+    ``MCP-Protocol-Version`` is never deleted. Duplicate casings are collapsed
+    to one ``mcp-protocol-version`` entry and the client value is kept so later
+    version checks see what the client sent.
 
-    Both rejections happen before the JSON-RPC layer, so the client sees a
-    stream that opens and closes with no response on it and no explanation.
-    Requests that already satisfy the transport pass through untouched.
+    Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
+    Sidecar version checks run on the combined app outside this mount.
     """
 
     def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
@@ -334,6 +328,21 @@ class HeaderCompatMiddleware:
             return MCP_ACCEPT
         return None
 
+    @staticmethod
+    def _canonicalize_protocol_version(headers: List[Any]) -> List[Any]:
+        """Keep the protocol version value; emit one lowercase header name."""
+        version_values: List[bytes] = []
+        kept: List[Any] = []
+        for key, value in headers:
+            if key.lower() == b"mcp-protocol-version":
+                version_values.append(value)
+            else:
+                kept.append((key, value))
+        if not version_values:
+            return headers
+        kept.append((b"mcp-protocol-version", version_values[0]))
+        return kept
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -342,41 +351,17 @@ class HeaderCompatMiddleware:
         headers: List[Any] = list(scope.get("headers") or [])
         if self.drop_session_headers:
             headers = strip_legacy_session_headers_asgi(headers)
+        headers = self._canonicalize_protocol_version(headers)
+
         raw_accept = next((value for key, value in headers if key.lower() == b"accept"), None)
         accept = self._normalize_accept(raw_accept.decode("latin-1") if raw_accept is not None else None)
-
-        raw_version = next(
-            (value for key, value in headers if key.lower() == b"mcp-protocol-version"),
-            None,
-        )
-        drop_version = raw_version is not None and raw_version.decode("latin-1") not in SUPPORTED_PROTOCOL_VERSIONS
-
-        if accept is None and not drop_version:
-            if self.drop_session_headers:
-                scope = dict(scope)
-                scope["headers"] = headers
-            await self.app(scope, receive, send)
-            return
-
-        rewritten = [
-            (key, value)
-            for key, value in headers
-            if not (key.lower() == b"accept" and accept is not None)
-            and not (key.lower() == b"mcp-protocol-version" and drop_version)
-        ]
         if accept is not None:
-            rewritten.append((b"accept", accept.encode("latin-1")))
+            headers = [(key, value) for key, value in headers if key.lower() != b"accept"]
+            headers.append((b"accept", accept.encode("latin-1")))
             logger.debug("Rewrote Accept %r -> %r for %s", raw_accept, accept, scope.get("path"))
-        if drop_version:
-            logger.debug(
-                "Dropped unsupported MCP-Protocol-Version %r for %s (supported: %s)",
-                raw_version,
-                scope.get("path"),
-                ", ".join(SUPPORTED_PROTOCOL_VERSIONS),
-            )
 
         scope = dict(scope)
-        scope["headers"] = rewritten
+        scope["headers"] = headers
         await self.app(scope, receive, send)
 
 

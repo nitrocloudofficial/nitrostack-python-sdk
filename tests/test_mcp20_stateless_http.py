@@ -59,7 +59,91 @@ class TestRequestHeaders:
         assert scope["type"] == "http"
 
 
-class TestCors:
+class TestHeaderCompatPreservesProtocolVersion:
+    def test_inner_app_sees_original_protocol_version(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack.transports.http import HeaderCompatMiddleware
+
+        captured: dict[str, list] = {}
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+            captured["headers"] = list(scope.get("headers") or [])
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        wrapped = HeaderCompatMiddleware(inner, drop_session_headers=True)
+        with TestClient(wrapped) as client:
+            response = client.post(
+                "/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "*/*",
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Session-Id": "forged",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            )
+        assert response.status_code == 200
+        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in captured["headers"]}
+        assert headers["mcp-protocol-version"] == "2026-07-28"
+        assert "mcp-session-id" not in headers
+        assert "application/json" in headers["accept"]
+        assert "text/event-stream" in headers["accept"]
+
+    def test_unknown_protocol_version_is_not_dropped(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack.transports.http import HeaderCompatMiddleware
+
+        captured: dict[str, list] = {}
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":
+                while True:
+                    message = await receive()
+                    if message["type"] == "lifespan.startup":
+                        await send({"type": "lifespan.startup.complete"})
+                    elif message["type"] == "lifespan.shutdown":
+                        await send({"type": "lifespan.shutdown.complete"})
+                        return
+            captured["headers"] = list(scope.get("headers") or [])
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        wrapped = HeaderCompatMiddleware(inner)
+        with TestClient(wrapped) as client:
+            client.post(
+                "/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "MCP-Protocol-Version": "1999-01-01",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            )
+        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in captured["headers"]}
+        assert headers["mcp-protocol-version"] == "1999-01-01"
     def test_cors_allow_methods(self):
         headers = build_cors_headers()
         assert "GET, POST, DELETE, OPTIONS" in headers["Access-Control-Allow-Methods"]
@@ -756,7 +840,8 @@ class TestAutoEraOneMcpDualClients:
                 call = client.post(
                     "/mcp",
                     headers={
-                        **modern_headers,
+                        **json_headers,
+                        "MCP-Protocol-Version": "2025-06-18",
                         "Mcp-Method": "tools/call",
                         "Mcp-Name": "echo",
                     },
@@ -1691,12 +1776,11 @@ class TestProtocolVersionCrossCheck:
                 "Accept": "application/json, text/event-stream",
                 "Mcp-Method": "tools/call",
                 "Mcp-Name": "echo",
-                "MCP-Protocol-Version": "2026-07-28",
             }
             with TestClient(http_app) as client:
                 mismatch = client.post(
                     "/mcp",
-                    headers=json_headers,
+                    headers={**json_headers, "MCP-Protocol-Version": "2026-07-28"},
                     json={
                         "jsonrpc": "2.0",
                         "id": 1,
@@ -1710,7 +1794,7 @@ class TestProtocolVersionCrossCheck:
                 )
                 header_only = client.post(
                     "/mcp",
-                    headers=json_headers,
+                    headers={**json_headers, "MCP-Protocol-Version": "2025-06-18"},
                     json={
                         "jsonrpc": "2.0",
                         "id": 2,
