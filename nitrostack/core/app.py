@@ -43,7 +43,11 @@ from nitrostack.core.pipeline import run_pipeline
 from nitrostack.core.additional_decorators import HealthCheckRegistry
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
-from nitrostack.protocol.schema import normalize_input_schema, normalize_output_schema
+from nitrostack.protocol.schema import (
+    gate_registered_schema,
+    normalize_input_schema,
+    normalize_output_schema,
+)
 from nitrostack.protocol.resources import extract_template_param_names, uri_template_to_pattern
 from nitrostack.protocol.version import (
     MODERN_PROTOCOL_VERSION,
@@ -623,6 +627,12 @@ class McpApplication:
     # ------------------------------------------------------------------
 
     def _register_tool(self, instance: Any, method: Callable, tool_config: ToolConfig) -> None:
+        gate_registered_schema(
+            tool_config.input_schema, name=f"tool {tool_config.name!r} input"
+        )
+        gate_registered_schema(
+            tool_config.output_schema, name=f"tool {tool_config.name!r} output"
+        )
         input_model = get_pydantic_model(tool_config.input_schema)
         entry = _ToolEntry(config=tool_config, input_model=input_model, instance=instance, method=method)
 
@@ -682,6 +692,11 @@ class McpApplication:
         )
 
     def _register_resource(self, instance: Any, method: Callable, resource_config: ResourceConfig) -> None:
+        gate_registered_schema(
+            getattr(resource_config, "schema", None)
+            or (resource_config.metadata or {}).get("schema"),
+            name=f"resource {resource_config.uri!r}",
+        )
         param_names = extract_template_param_names(resource_config.uri)
         entry = _ResourceEntry(config=resource_config, instance=instance, method=method, param_names=param_names)
 
@@ -692,6 +707,11 @@ class McpApplication:
             self._resources[resource_config.uri] = entry
 
     def _register_prompt(self, instance: Any, method: Callable, prompt_config: PromptConfig) -> None:
+        for argument in prompt_config.arguments or []:
+            gate_registered_schema(
+                getattr(argument, "schema", None),
+                name=f"prompt {prompt_config.name!r} argument {argument.name!r}",
+            )
         self._prompts[prompt_config.name] = _PromptEntry(config=prompt_config, instance=instance, method=method)
 
     def _register_health_resource(self) -> None:

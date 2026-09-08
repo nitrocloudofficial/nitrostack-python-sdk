@@ -66,7 +66,10 @@ from nitrostack.protocol.mrtr import (
 from nitrostack.protocol.resources import resolve_resource_uri, uri_template_to_pattern
 from nitrostack.protocol.schema import (
     JSON_SCHEMA_2020_12_URI,
+    UnsupportedJsonSchemaError,
+    assert_json_schema_2020_12,
     bound_schema_depth,
+    gate_registered_schema,
     normalize_input_schema,
     normalize_output_schema,
 )
@@ -159,7 +162,10 @@ __all__ = [
     "map_exception_to_jsonrpc",
     "JsonRpcWireError",
     "JSON_SCHEMA_2020_12_URI",
+    "UnsupportedJsonSchemaError",
+    "assert_json_schema_2020_12",
     "bound_schema_depth",
+    "gate_registered_schema",
     "normalize_input_schema",
     "normalize_output_schema",
     "resolve_resource_uri",

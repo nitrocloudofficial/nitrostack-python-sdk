@@ -19,6 +19,8 @@ from nitrostack.protocol.resources import (
 )
 from nitrostack.protocol.schema import (
     JSON_SCHEMA_2020_12_URI,
+    UnsupportedJsonSchemaError,
+    assert_json_schema_2020_12,
     bound_schema_depth,
     normalize_input_schema,
     normalize_output_schema,
@@ -61,6 +63,53 @@ class TestJsonSchema2020_12:
             max_depth=8,
         )
         assert bounded["items"] == {"type": "string", "minLength": 1}
+
+    def test_missing_schema_is_treated_as_2020_12(self):
+        assert_json_schema_2020_12({"type": "object", "properties": {}})
+        schema = normalize_input_schema({"type": "object", "properties": {"n": {"type": "integer"}}})
+        assert schema["$schema"] == JSON_SCHEMA_2020_12_URI
+
+    def test_draft_04_schema_is_rejected(self):
+        draft = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": {"n": {"type": "integer"}},
+        }
+        with pytest.raises(UnsupportedJsonSchemaError, match="draft-04"):
+            assert_json_schema_2020_12(draft, name="tool 'legacy' input")
+        with pytest.raises(UnsupportedJsonSchemaError, match="draft-04"):
+            normalize_input_schema(draft)
+
+    def test_items_tuple_list_is_rejected(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "pair": {
+                    "type": "array",
+                    "items": [{"type": "string"}, {"type": "integer"}],
+                }
+            },
+        }
+        with pytest.raises(UnsupportedJsonSchemaError, match="tuple"):
+            assert_json_schema_2020_12(schema, name="tool 'pair' input")
+        with pytest.raises(UnsupportedJsonSchemaError, match="items"):
+            bound_schema_depth(schema)
+
+    def test_prefix_items_tuple_is_allowed(self):
+        schema = {
+            "$schema": JSON_SCHEMA_2020_12_URI,
+            "type": "object",
+            "properties": {
+                "pair": {
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "integer"}],
+                    "items": False,
+                }
+            },
+        }
+        assert_json_schema_2020_12(schema)
+        bounded = bound_schema_depth(schema, max_depth=8)
+        assert bounded["properties"]["pair"]["prefixItems"][0]["type"] == "string"
 
 
 class TestResourceUriResolution:
@@ -129,3 +178,108 @@ class TestAppIntegrationSchema:
         assert schema["$schema"] == JSON_SCHEMA_2020_12_URI
         assert schema["type"] == "object"
         assert "a" in schema["properties"]
+
+    def test_draft_04_tool_fails_registration(self):
+        import asyncio
+
+        from nitrostack import injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.context import ExecutionContext
+        from nitrostack.core.di import DIContainer
+
+        draft_schema = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+        }
+
+        @injectable()
+        class DraftController:
+            @tool(name="legacy_echo", description="echo", input_schema=draft_schema)
+            async def legacy_echo(self, input, context: ExecutionContext) -> str:
+                return "ok"
+
+        @module(name="DraftSchema", controllers=[DraftController])
+        class DraftModule:
+            pass
+
+        @mcp_app(module=DraftModule, server=ServerConfig(name="draft-schema"))
+        class DraftApp:
+            pass
+
+        DIContainer.reset()
+        try:
+            with pytest.raises(UnsupportedJsonSchemaError, match="draft-04"):
+                asyncio.run(McpApplicationFactory.create(DraftApp))
+        finally:
+            DIContainer.reset()
+
+    def test_valid_2020_12_tool_registers(self):
+        import asyncio
+
+        from nitrostack import injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.context import ExecutionContext
+        from nitrostack.core.di import DIContainer
+
+        class EchoIn(BaseModel):
+            value: str = ""
+
+        @injectable()
+        class ModernController:
+            @tool(name="modern_echo", description="echo", input_schema=EchoIn)
+            async def modern_echo(self, input: EchoIn, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name="ModernSchema", controllers=[ModernController])
+        class ModernModule:
+            pass
+
+        @mcp_app(module=ModernModule, server=ServerConfig(name="modern-schema"))
+        class ModernApp:
+            pass
+
+        DIContainer.reset()
+        try:
+            app = asyncio.run(McpApplicationFactory.create(ModernApp))
+            assert "modern_echo" in app._tools
+            listed = app._tool_input_schema(app._tools["modern_echo"].input_model)
+            assert listed["$schema"] == JSON_SCHEMA_2020_12_URI
+        finally:
+            DIContainer.reset()
+
+    def test_tuple_items_tool_fails_registration(self):
+        import asyncio
+
+        from nitrostack import injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.context import ExecutionContext
+        from nitrostack.core.di import DIContainer
+
+        tuple_schema = {
+            "type": "object",
+            "properties": {
+                "pair": {"type": "array", "items": [{"type": "string"}, {"type": "number"}]}
+            },
+        }
+
+        @injectable()
+        class TupleController:
+            @tool(name="tuple_echo", description="echo", input_schema=tuple_schema)
+            async def tuple_echo(self, input, context: ExecutionContext) -> str:
+                return "ok"
+
+        @module(name="TupleSchema", controllers=[TupleController])
+        class TupleModule:
+            pass
+
+        @mcp_app(module=TupleModule, server=ServerConfig(name="tuple-schema"))
+        class TupleApp:
+            pass
+
+        DIContainer.reset()
+        try:
+            with pytest.raises(UnsupportedJsonSchemaError, match="items"):
+                asyncio.run(McpApplicationFactory.create(TupleApp))
+        finally:
+            DIContainer.reset()
