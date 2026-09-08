@@ -733,6 +733,44 @@ class TestDispatchPipeline:
 
         asyncio.run(_run())
 
+    def test_auto_acks_initialized_without_forwarding(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext(
+                    "srv",
+                    "1.0.0",
+                    MODERN_PROTOCOL_VERSION,
+                    wire_mode="stateless",
+                    protocol_era="auto",
+                )
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            ).encode()
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 202
+            assert resp == {}
+
+        asyncio.run(_run())
+
+    def test_legacy_sessionful_pipeline_forwards_initialized(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext(
+                    "srv",
+                    "1.0.0",
+                    MODERN_PROTOCOL_VERSION,
+                    wire_mode="sessionful",
+                    protocol_era="legacy",
+                )
+            )
+            body = json.dumps(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            ).encode()
+            assert await pipeline.handle_post(body, {}) is None
+
+        asyncio.run(_run())
+
 
 class TestTaskInterceptionDetection:
     def test_tasks_method_prefix(self):
@@ -1351,6 +1389,11 @@ class TestAutoEraOneMcpDualClients:
                         },
                     },
                 )
+                initialized = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
                 discover = client.post(
                     "/mcp",
                     headers={**modern_headers, "Mcp-Method": "server/discover"},
@@ -1387,6 +1430,14 @@ class TestAutoEraOneMcpDualClients:
             assert "capabilities" in init_body
             init_headers = {key.lower(): value for key, value in init.headers.items()}
             assert LEGACY_SESSION_HEADER.lower() not in init_headers
+            assert not state.session_manager._server_instances
+
+            assert initialized.status_code == 202, initialized.text
+            assert initialized.json() == {}
+            initialized_headers = {
+                key.lower(): value for key, value in initialized.headers.items()
+            }
+            assert LEGACY_SESSION_HEADER.lower() not in initialized_headers
             assert not state.session_manager._server_instances
 
             assert discover.status_code == 200, discover.text

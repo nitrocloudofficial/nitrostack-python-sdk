@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, Union
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.discovery import (
     INITIALIZE_METHOD,
+    INITIALIZED_NOTIFICATION,
     SERVER_DISCOVER_METHOD,
     build_sessionless_initialize_result,
 )
@@ -44,6 +45,7 @@ from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     ProtocolEra,
     WireMode,
+    accepts_sessionless_initialize,
     protocol_era_for_wire_mode,
     supported_protocol_versions_for_era,
 )
@@ -117,6 +119,10 @@ class IngressContext:
         if self.protocol_era is not None:
             return self.protocol_era
         return protocol_era_for_wire_mode(self.wire_mode)
+
+    def accepts_sessionless_initialize(self) -> bool:
+        """True when this engine answers 2025 ``initialize`` without a session."""
+        return accepts_sessionless_initialize(self.resolved_era())
 
 
 def reject_incoming_session_id(
@@ -420,23 +426,26 @@ class StatelessIngressPipeline:
         if request.method == PING_METHOD:
             return 200, build_ping_response(request.id)
 
-        if request.method == INITIALIZE_METHOD and self._context.wire_mode == "stateless":
-            if self._initialize_handler is not None:
-                result = self._initialize_handler(request)
-                if isinstance(result, Awaitable):
-                    result = await result
-            else:
-                requested = request.params.get("protocolVersion")
-                result = build_sessionless_initialize_result(
-                    server_name=self._context.server_name,
-                    server_version=self._context.server_version,
-                    requested_version=requested if isinstance(requested, str) else None,
-                    protocol_version=self._context.protocol_version,
-                    advertise_tasks=self._context.advertise_tasks,
-                    advertise_app=self._context.advertise_app,
-                    custom_extensions=self._context.custom_extensions,
-                )
-            return 200, jsonrpc_success(request.id, result)
+        if self._context.accepts_sessionless_initialize():
+            if request.method == INITIALIZE_METHOD:
+                if self._initialize_handler is not None:
+                    result = self._initialize_handler(request)
+                    if isinstance(result, Awaitable):
+                        result = await result
+                else:
+                    requested = request.params.get("protocolVersion")
+                    result = build_sessionless_initialize_result(
+                        server_name=self._context.server_name,
+                        server_version=self._context.server_version,
+                        requested_version=requested if isinstance(requested, str) else None,
+                        protocol_version=self._context.protocol_version,
+                        advertise_tasks=self._context.advertise_tasks,
+                        advertise_app=self._context.advertise_app,
+                        custom_extensions=self._context.custom_extensions,
+                    )
+                return 200, jsonrpc_success(request.id, result)
+            if request.method == INITIALIZED_NOTIFICATION:
+                return 202, {}
 
         if request.method == SERVER_DISCOVER_METHOD:
             if self._discover_handler is None:

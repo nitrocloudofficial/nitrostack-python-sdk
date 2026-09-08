@@ -150,6 +150,11 @@ def wire_mode_for_era(era: ProtocolEra) -> WireMode:
     return "sessionful"
 
 
+def accepts_sessionless_initialize(era: ProtocolEra) -> bool:
+    """True when era ``auto`` answers 2025 ``initialize`` without a session."""
+    return era == "auto"
+
+
 def needs_modern_engine(era: ProtocolEra) -> bool:
     """True when ``/mcp`` should be the official 2026 engine (``modern`` or ``auto``)."""
     return era in ("modern", "auto")
