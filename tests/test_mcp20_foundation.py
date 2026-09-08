@@ -25,6 +25,8 @@ from nitrostack.protocol.version import (
 from nitrostack.runtime.stateless import (
     DEFAULT_STATELESS_INVARIANTS,
     assert_stateless_headers,
+    has_incoming_session_id,
+    sessionless_rejects_incoming_session_id,
 )
 from nitrostack.tasks.store import TaskStore
 from nitrostack.tasks.types import TaskAccessContext, TERMINAL_TASK_STATUSES
@@ -82,6 +84,17 @@ class TestStatelessInvariants:
 
     def test_allows_responses_without_session_header(self):
         assert_stateless_headers({"Content-Type": "application/json"})
+
+    def test_detects_incoming_session_id(self):
+        assert has_incoming_session_id({"Mcp-Session-Id": "abc"}) is True
+        assert has_incoming_session_id({"mcp-session-id": "abc"}) is True
+        assert has_incoming_session_id({"Content-Type": "application/json"}) is False
+        assert has_incoming_session_id({"Mcp-Session-Id": "  "}) is False
+
+    def test_sessionless_engines_reject_incoming_session_id(self):
+        assert sessionless_rejects_incoming_session_id("reject") is True
+        assert sessionless_rejects_incoming_session_id("stateless") is True
+        assert sessionless_rejects_incoming_session_id("sessionful") is False
 
 
 class TestTaskStoreContract:

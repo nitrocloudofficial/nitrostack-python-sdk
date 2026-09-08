@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.jsonrpc import jsonrpc_error
 from nitrostack.protocol.version import WireMode
 from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
@@ -64,6 +66,15 @@ class StatelessTransportMiddleware:
                 return
             receive = self._replay_receive(body, receive)
 
+        if path in self.mcp_paths and self.pipeline is not None:
+            raw_headers = {
+                key.decode("latin-1"): value.decode("latin-1")
+                for key, value in (scope.get("headers") or [])
+            }
+            if self.pipeline.forbids_incoming_session_id(raw_headers):
+                await self._send_session_id_rejected(scope, send, raw_headers)
+                return
+
         await self._forward_with_stateless_headers(scope, receive, send)
 
     async def _send_options(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
@@ -114,6 +125,32 @@ class StatelessTransportMiddleware:
         )
         await send({"type": "http.response.body", "body": payload})
         return True
+
+    async def _send_session_id_rejected(
+        self,
+        scope: dict[str, Any],
+        send: Any,
+        raw_headers: dict[str, str],
+    ) -> None:
+        origin = get_header(raw_headers, "Origin")
+        cors = build_cors_headers(origin=origin)
+        response_headers = build_mcp_response_headers(extra=cors)
+        assert_stateless_headers(response_headers)
+        payload = StatelessIngressPipeline.serialize_response(
+            jsonrpc_error(
+                None,
+                int(JsonRpcErrorCode.INVALID_REQUEST),
+                "Invalid Request: Mcp-Session-Id is not supported",
+            )
+        )
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 400,
+                "headers": self._encode_headers(response_headers),
+            }
+        )
+        await send({"type": "http.response.body", "body": payload})
 
     async def _forward_with_stateless_headers(
         self,

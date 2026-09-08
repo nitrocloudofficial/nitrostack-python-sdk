@@ -235,6 +235,42 @@ class TestDispatchPipeline:
 
         asyncio.run(_run())
 
+    def test_auto_reject_incoming_session_id(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "echo"},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(
+                body, {LEGACY_SESSION_HEADER: "session-1"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32600
+            assert resp["id"] == 4
+
+        asyncio.run(_run())
+
+    def test_legacy_sessionful_pipeline_keeps_session_id(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="sessionful")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 5, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {LEGACY_SESSION_HEADER: "session-1"}
+            )
+            assert status == 200
+            assert resp["result"] == {}
+
+        asyncio.run(_run())
+
     def test_auto_accepts_initialize(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
@@ -983,6 +1019,187 @@ class TestAuthFromEnvelopeAndHeaders:
             result = response.json()["result"]
             body = result.get("structuredContent") or json.loads(result["content"][0]["text"])
             assert body["user"] == "alice"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestIncomingSessionIdRejection:
+    def _echo_app(self, monkeypatch, era_value: str):
+        import os
+
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", era_value)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+
+        @injectable()
+        class EchoController:
+            @tool(name="echo", description="echo", input_schema=EchoInput)
+            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name="SessionRejectHttp", controllers=[EchoController])
+        class SessionRejectModule:
+            pass
+
+        @mcp_app(module=SessionRejectModule, server=ServerConfig(name="session-reject-http"))
+        class SessionRejectApp:
+            pass
+
+        return asyncio.run(McpApplicationFactory.create(SessionRejectApp))
+
+    def test_modern_post_with_session_id_is_rejected(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "modern")
+            http_app = app.get_combined_app(json_response=True)
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                LEGACY_SESSION_HEADER: "forged",
+            }
+            with TestClient(http_app) as client:
+                rejected = client.post(
+                    "/mcp",
+                    headers=headers,
+                    json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                )
+                allowed = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                )
+            assert rejected.status_code == 400
+            assert rejected.json()["error"]["code"] == -32600
+            assert allowed.status_code == 200
+            assert allowed.json()["result"] == {}
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_auto_post_with_session_id_is_rejected(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "auto")
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                rejected = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                        LEGACY_SESSION_HEADER: "forged",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+                allowed = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+            assert rejected.status_code == 400
+            assert rejected.json()["error"]["code"] == -32600
+            assert allowed.status_code == 200
+            assert allowed.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_legacy_post_accepts_session_id_after_initialize(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "legacy")
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+                session_id = init.headers.get("mcp-session-id") or init.headers.get(
+                    "Mcp-Session-Id"
+                )
+                assert init.status_code == 200, init.text
+                assert session_id
+                client.post(
+                    "/mcp",
+                    headers={**json_headers, LEGACY_SESSION_HEADER: session_id},
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                call = client.post(
+                    "/mcp",
+                    headers={
+                        **json_headers,
+                        LEGACY_SESSION_HEADER: session_id,
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+            assert call.status_code == 200, call.text
+            assert call.json()["result"]["content"][0]["text"] == "ok"
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

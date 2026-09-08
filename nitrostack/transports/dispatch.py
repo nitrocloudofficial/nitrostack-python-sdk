@@ -8,7 +8,6 @@ from enum import Enum
 from collections.abc import Awaitable
 from typing import Any, Callable, Optional, Union
 
-from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.discovery import (
     INITIALIZE_METHOD,
@@ -30,6 +29,10 @@ from nitrostack.protocol.jsonrpc import (
     validate_header_body_name,
 )
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, WireMode
+from nitrostack.runtime.stateless import (
+    has_incoming_session_id,
+    sessionless_rejects_incoming_session_id,
+)
 from nitrostack.transports.headers import (
     HEADER_MCP_METHOD,
     HEADER_MCP_NAME,
@@ -69,6 +72,27 @@ class IngressContext:
     wire_mode: WireMode = "stateless"
 
 
+def reject_incoming_session_id(
+    request_id: Any,
+    request_headers: dict[str, str],
+    wire_mode: WireMode,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """
+    Reject client ``Mcp-Session-Id`` on sessionless engines (``modern`` / ``auto``).
+
+    ``legacy`` (``wire_mode=sessionful``) keeps session headers.
+    """
+    if not sessionless_rejects_incoming_session_id(wire_mode):
+        return None
+    if not has_incoming_session_id(request_headers):
+        return None
+    return 400, jsonrpc_error(
+        request_id,
+        int(JsonRpcErrorCode.INVALID_REQUEST),
+        "Invalid Request: Mcp-Session-Id is not supported",
+    )
+
+
 def reject_legacy_wire(
     request: JsonRpcRequest,
     request_headers: dict[str, str],
@@ -78,17 +102,11 @@ def reject_legacy_wire(
     Era ``modern`` (``wire_mode=reject``) fails closed on 2025-shaped traffic.
 
     Official v2 ``legacy: 'reject'`` is not mounted yet; this is the sidecar
-    stand-in. ``auto`` keeps ``wire_mode=stateless`` and does not use this path.
+    stand-in. Session-id rejection for ``auto`` lives in
+    ``reject_incoming_session_id``.
     """
     if wire_mode != "reject":
         return None
-
-    if get_header(request_headers, LEGACY_SESSION_HEADER):
-        return 400, jsonrpc_error(
-            request.id,
-            int(JsonRpcErrorCode.INVALID_REQUEST),
-            "Invalid Request: Mcp-Session-Id is not supported",
-        )
 
     header_version = get_header(request_headers, HEADER_MCP_PROTOCOL_VERSION)
     body_version = request.params.get("protocolVersion")
@@ -137,6 +155,10 @@ class StatelessIngressPipeline:
         self._discover_handler = discover_handler
         self._initialize_handler = initialize_handler
 
+    def forbids_incoming_session_id(self, request_headers: dict[str, str]) -> bool:
+        """True when this engine must reject ``Mcp-Session-Id`` without forwarding."""
+        return reject_incoming_session_id(None, request_headers, self._context.wire_mode) is not None
+
     async def handle_post(
         self,
         raw_body: bytes,
@@ -152,6 +174,12 @@ class StatelessIngressPipeline:
             return 400, exc.to_response(None)
         except JsonRpcWireError as exc:
             return 400, exc.to_response(None)
+
+        rejected_session = reject_incoming_session_id(
+            request.id, request_headers, self._context.wire_mode
+        )
+        if rejected_session is not None:
+            return rejected_session
 
         header_method = get_header(request_headers, HEADER_MCP_METHOD)
         try:
