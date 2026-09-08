@@ -233,8 +233,8 @@ The SDK reads standard settings from the environment or `.env` files:
 | `MCP_MAX_SESSIONS` | Cap on concurrent Streamable HTTP sessions; new sessions beyond the cap get an HTTP `429`. Unset = unlimited. |
 | `MCP_SESSION_TIMEOUT_MS` | Idle timeout (ms) for stateful HTTP sessions; sessions with no activity for this long are terminated automatically. Unset = no timeout. |
 | `MCP_GRACEFUL_SHUTDOWN_TIMEOUT_MS` | How long (ms) the HTTP transport waits for in-flight requests to finish when shutting down (default: `10000`). |
-| `NITRO_MCP_PROTOCOL_VERSION` | Protocol era: `auto` (default when unset), `modern` / `2026-07-28` / `latest`, or `legacy` / `2025-06-18`. `auto` is dual-spec and is not the same as `modern`. |
-| `MCP_STATELESS` | Explicit override: `true` forces `modern` (stateless HTTP), `false` forces `legacy` (sessionful). Wins over `NITRO_MCP_PROTOCOL_VERSION`. |
+| `NITRO_MCP_PROTOCOL_VERSION` | Protocol era: `auto` (default when unset), `modern` / `2026-07-28` / `latest`, or `legacy` / `2025-06-18`. `auto` is dual-spec and is not the same as `modern`. Wins over `ServerConfig.protocol_era`. |
+| `MCP_STATELESS` | Explicit override: `true` forces `modern` (stateless HTTP), `false` forces `legacy` (sessionful). Wins over `NITRO_MCP_PROTOCOL_VERSION` and `ServerConfig.protocol_era`. |
 | `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | Comma-separated allow-lists for DNS-rebinding protection, used only when CORS is disabled. |
 | `NITROSTACK_LOG_FILE` | Destination file for logs (default: `nitrostack.log`). |
 | `NITROSTACK_LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
@@ -260,6 +260,8 @@ Example:
 ```python
 server = ServerConfig(name="my-server", transport_type="http", max_sessions=100, session_timeout_ms=1_800_000)
 ```
+
+`ServerConfig.protocol_era` is used only when `MCP_STATELESS` and `NITRO_MCP_PROTOCOL_VERSION` are both unset. Unknown tokens become `auto`, same as an unknown env value.
 
 ---
 

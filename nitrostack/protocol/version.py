@@ -39,16 +39,26 @@ def _parse_bool_token(raw: Optional[str]) -> Optional[bool]:
     return None
 
 
+def _era_token(raw: Optional[str]) -> str:
+    return (raw or "").strip().lower()
+
+
 def resolve_protocol_era(
     raw: Optional[str] = None,
     *,
     stateless_override: Optional[str] = None,
+    config_value: Optional[str] = None,
 ) -> ProtocolEra:
     """
     Resolve the active protocol era.
 
-    Precedence: ``MCP_STATELESS`` (explicit boolean) then
-    ``NITRO_MCP_PROTOCOL_VERSION``. Unset values default to ``auto``.
+    Precedence:
+    1. ``MCP_STATELESS`` (explicit boolean)
+    2. ``NITRO_MCP_PROTOCOL_VERSION`` (or the ``raw`` argument)
+    3. ``ServerConfig.protocol_era`` (``config_value``)
+    4. ``auto``
+
+    Unknown tokens resolve to ``auto``, matching an unknown env value.
 
     ``auto`` is not ``modern``. ``modern`` is stateless-only; ``auto`` is the
     dual-spec era and does not force the 1.x ``stateless=True`` transport flag.
@@ -64,7 +74,12 @@ def resolve_protocol_era(
     if flag is False:
         return "legacy"
 
-    value = (raw if raw is not None else os.environ.get(PROTOCOL_ERA_ENV) or "").strip().lower()
+    if raw is not None:
+        value = _era_token(raw)
+    else:
+        value = _era_token(os.environ.get(PROTOCOL_ERA_ENV))
+        if not value:
+            value = _era_token(config_value)
     if not value or value in _AUTO_ALIASES:
         return "auto"
     if value in _MODERN_ALIASES:

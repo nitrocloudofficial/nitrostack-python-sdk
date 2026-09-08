@@ -175,6 +175,34 @@ class TestTypescriptCompatibleProtocolEra:
         assert needs_sessionful_engine("auto") is False
         assert needs_sessionful_engine("legacy") is True
 
+    def test_config_era_used_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        assert resolve_protocol_era(config_value="legacy") == "legacy"
+        assert resolve_protocol_era(config_value="modern") == "modern"
+        assert resolve_protocol_era(config_value="2026-07-28") == "modern"
+
+    def test_env_wins_over_config_era(self, monkeypatch):
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        assert resolve_protocol_era(config_value="legacy") == "auto"
+
+    def test_stateless_override_wins_over_config_era(self, monkeypatch):
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.setenv("MCP_STATELESS", "true")
+        assert resolve_protocol_era(config_value="legacy") == "modern"
+
+    def test_invalid_config_era_matches_invalid_env(self, monkeypatch):
+        monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        assert resolve_protocol_era("not-a-real-era") == "auto"
+        assert resolve_protocol_era(config_value="not-a-real-era") == "auto"
+
+    def test_server_config_protocol_era_default_is_unset(self):
+        cfg = ServerConfig(name="test-server")
+        assert cfg.protocol_era is None
+        assert resolve_protocol_era(config_value=cfg.protocol_era) == "auto"
+
 
 class TestTypescriptCompatibleHost:
     def test_host_defaults_to_all_interfaces(self, monkeypatch):

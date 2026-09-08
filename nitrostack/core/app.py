@@ -85,9 +85,13 @@ class ServerConfig:
     version: str = "1.0.0"
     transport_type: Optional[Literal["stdio", "http", "dual"]] = None
     protocol_version: str = MODERN_PROTOCOL_VERSION
-    # Streamable HTTP options. Env at `start()` / `get_combined_app()`:
-    # `MCP_STATELESS`, `NITRO_MCP_PROTOCOL_VERSION`, `ENABLE_CORS`,
-    # `MCP_MAX_SESSIONS`, `MCP_SESSION_TIMEOUT_MS`, `MCP_TRANSPORT_TYPE`.
+    # Era fallback when MCP_STATELESS and NITRO_MCP_PROTOCOL_VERSION are unset.
+    # Same tokens as the env var. None means default era (`auto`).
+    protocol_era: Optional[str] = None
+    # Streamable HTTP options. Era resolution at `start()` / `get_combined_app()`:
+    # `MCP_STATELESS`, then `NITRO_MCP_PROTOCOL_VERSION`, then `protocol_era`,
+    # then `auto`. Also: `ENABLE_CORS`, `MCP_MAX_SESSIONS`,
+    # `MCP_SESSION_TIMEOUT_MS`, `MCP_TRANSPORT_TYPE`.
     # `MCP_STATELESS` wins over the protocol-era mapping. Unset era is `auto`
     # and does not force this flag; only `modern` sets stateless HTTP.
     stateless: bool = False
@@ -376,7 +380,9 @@ class McpApplication:
             raise ValueError("Invalid application class. Must be decorated with @mcp_app or @module.")
 
         self.mcp_server: Optional[NitroStackMcpServer] = None
-        self.protocol_era: ProtocolEra = resolve_protocol_era()
+        self.protocol_era: ProtocolEra = resolve_protocol_era(
+            config_value=self.server_config.protocol_era
+        )
 
         # nitrostack owns these registries directly (no FastMCP-managed tool/resource
         # manager in between) so that any number of low-level `Server` instances can be
@@ -1366,12 +1372,12 @@ class McpApplication:
         for the full behavior (session cap, CORS, DNS-rebinding protection).
 
         Any argument left as ``None`` falls back to env
-        (``NITRO_MCP_PROTOCOL_VERSION``, ``ENABLE_CORS``, ``MCP_STATELESS``)
-        then this app's ``ServerConfig``. Unset protocol era is ``auto``.
+        (``MCP_STATELESS``, ``NITRO_MCP_PROTOCOL_VERSION``, ``ENABLE_CORS``)
+        then this app's ``ServerConfig.protocol_era``. Unset protocol era is ``auto``.
         """
         from nitrostack.transports.http import build_http_app
 
-        era = resolve_protocol_era()
+        era = resolve_protocol_era(config_value=self.server_config.protocol_era)
         self.protocol_era = era
         wire_mode = wire_mode_for_era(era)
         if stateless is not None:
