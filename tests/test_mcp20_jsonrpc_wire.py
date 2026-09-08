@@ -127,14 +127,14 @@ class TestMetaEnvelope:
     def test_apply_request_envelope_ignores_spoofed_userid(self):
         from types import SimpleNamespace
 
-        from mcp.shared.context import RequestContext
+        from nitrostack.runtime.request_ctx import RequestContext, RequestParamsMeta
         from mcp import types
 
         from nitrostack.core.app import _apply_request_envelope
 
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta.model_validate(
+            meta=RequestParamsMeta.model_validate(
                 {
                     "trace": {"id": "span-2"},
                     "userId": "spoofed",
@@ -166,7 +166,7 @@ class TestMetaEnvelope:
     def test_apply_request_envelope_sets_verified_jwt_user(self):
         from types import SimpleNamespace
 
-        from mcp.shared.context import RequestContext
+        from nitrostack.runtime.request_ctx import RequestContext, RequestParamsMeta
         from mcp import types
 
         from nitrostack.auth.jwt import JWTService
@@ -180,7 +180,7 @@ class TestMetaEnvelope:
             token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
             rc = RequestContext(
                 request_id="1",
-                meta=types.RequestParams.Meta.model_validate({"userId": "eve"}),
+                meta=RequestParamsMeta.model_validate({"userId": "eve"}),
                 session=None,
                 lifespan_context=None,
                 request=SimpleNamespace(headers={"authorization": f"Bearer {token}"}),

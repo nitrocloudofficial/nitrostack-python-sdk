@@ -34,8 +34,7 @@ from nitrostack.core.task import (
 )
 from nitrostack.tasks.types import utc_now
 import mcp.types as types
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.server.experimental.request_context import Experimental
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +499,7 @@ async def _mcp_task_flow():
         request_ctx.reset(token)
 
     assert isinstance(response.root, types.CreateTaskResult)
-    task_id = response.root.task.taskId
+    task_id = response.root.task.task_id
 
     get_req = types.GetTaskRequest(
         method="tasks/get",
@@ -544,7 +543,7 @@ async def _mcp_task_flow():
     finally:
         request_ctx.reset(token)
 
-    task_id_cancel = resp_cancel.root.task.taskId
+    task_id_cancel = resp_cancel.root.task.task_id
     cancel_req = types.CancelTaskRequest(
         method="tasks/cancel",
         params=types.CancelTaskRequestParams(taskId=task_id_cancel),

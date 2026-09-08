@@ -18,8 +18,7 @@ from pydantic import BaseModel
 from starlette.testclient import TestClient
 
 import mcp.types as types
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.server.experimental.request_context import Experimental
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 from nitrostack import injectable, module, tool, ExecutionContext, DIContainer
 from nitrostack.core.app import McpApplication, McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.transports.http import build_http_app
@@ -386,7 +385,7 @@ async def _test_progress_notifications_pushed():
         request_ctx.reset(token)
 
     assert isinstance(response.root, types.CreateTaskResult)
-    task_id = response.root.task.taskId
+    task_id = response.root.task.task_id
 
     # Wait for the background task to finish (it does 3 quick progress updates).
     get_handler = app.mcp_server.request_handlers[types.GetTaskRequest]

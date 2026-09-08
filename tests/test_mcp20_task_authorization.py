@@ -6,9 +6,8 @@ import sys
 
 import mcp.types as types
 import pytest
-from mcp.shared.exceptions import McpError
-from mcp.server.experimental.request_context import Experimental
-from mcp.server.lowlevel.server import request_ctx, RequestContext
+from mcp import MCPError as McpError
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -184,7 +183,7 @@ class TestWireHandlersAntiEnumeration:
             missing_token = request_ctx.set(
                 RequestContext(
                     request_id="1",
-                    meta=types.RequestParams.Meta(__pydantic_extra__={"tenantId": "acme", "userId": "alice"}),
+                    meta=RequestParamsMeta(__pydantic_extra__={"tenantId": "acme", "userId": "alice"}),
                     session=None,
                     lifespan_context=None,
                 )
@@ -203,7 +202,7 @@ class TestWireHandlersAntiEnumeration:
             forbidden_token = request_ctx.set(
                 RequestContext(
                     request_id="2",
-                    meta=types.RequestParams.Meta(__pydantic_extra__={"tenantId": "evil", "userId": "bob"}),
+                    meta=RequestParamsMeta(__pydantic_extra__={"tenantId": "evil", "userId": "bob"}),
                     session=None,
                     lifespan_context=None,
                 )
@@ -231,7 +230,7 @@ class TestExtractTaskAccessContext:
     def test_ignores_spoofed_meta_identity(self):
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta(
+            meta=RequestParamsMeta(
                 __pydantic_extra__={"userId": "u1", "tenantId": "t1", "sessionId": "s1"}
             ),
             session=None,
@@ -253,7 +252,7 @@ class TestExtractTaskAccessContext:
         token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta(
+            meta=RequestParamsMeta(
                 __pydantic_extra__={"userId": "eve", "tenantId": "evil"}
             ),
             session=None,
@@ -295,7 +294,7 @@ class TestExtractTaskAccessContext:
         envelope_token = jwt.create_token({"sub": "mallory", "tenant_id": "evil"})
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta.model_validate(
+            meta=RequestParamsMeta.model_validate(
                 {
                     "userId": "eve",
                     "tenantId": "evil",
@@ -322,7 +321,7 @@ class TestExtractTaskAccessContext:
         token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta.model_validate(
+            meta=RequestParamsMeta.model_validate(
                 {
                     "userId": "eve",
                     "io.modelcontextprotocol/auth": {"authorization": f"Bearer {token}"},
@@ -339,7 +338,7 @@ class TestExtractTaskAccessContext:
     def test_unsigned_envelope_auth_identity_is_ignored(self):
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta.model_validate(
+            meta=RequestParamsMeta.model_validate(
                 {
                     "io.modelcontextprotocol/auth": {
                         "userId": "eve",
@@ -365,7 +364,7 @@ class TestExtractTaskAccessContext:
         envelope_token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
         rc = RequestContext(
             request_id="1",
-            meta=types.RequestParams.Meta.model_validate(
+            meta=RequestParamsMeta.model_validate(
                 {"io.modelcontextprotocol/auth": {"authorization": f"Bearer {envelope_token}"}}
             ),
             session=None,

@@ -145,9 +145,9 @@ def test_pizzaz_resources_and_tool_call():
                 )
             )
             result = resp.root
-            assert result.structuredContent is not None
-            assert len(result.structuredContent["shops"]) == 2
-            assert result.structuredContent["totalShops"] == 2
+            assert result.structured_content is not None
+            assert len(result.structured_content["shops"]) == 2
+            assert result.structured_content["totalShops"] == 2
             assert result.meta["ui"]["resourceUri"] == "ui://widget/pizza-list.html"
             assert result.meta["openai/outputTemplate"] == "ui://widget/pizza-list.html"
             embedded = next(b for b in result.content if getattr(b, "type", None) == "resource")

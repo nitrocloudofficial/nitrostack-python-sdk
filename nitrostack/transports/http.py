@@ -530,9 +530,11 @@ def build_http_app(
             allowed_hosts=allowed_hosts,
             allowed_origins=allowed_origins,
         )
+    else:
+        security_settings = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
-    # One manager on /mcp. auto/modern are sessionless; legacy is sessionful.
-    # A second StreamableHTTPSessionManager is not the dual-spec design.
+    # Official mcp 2.x owns /mcp (streamable HTTP, both protocol eras).
+    # One manager only; auto/modern are sessionless and legacy is sessionful.
     session_manager = StreamableHTTPSessionManager(
         app=mcp_app.mcp_server,
         stateless=stateless,
@@ -656,7 +658,9 @@ def build_http_app(
         except Exception as exc:
             logger.exception("Widget preview tool call failed for %s", name)
             return JSONResponse({"error": str(exc)}, status_code=400)
-        structured = getattr(result, "structuredContent", None)
+        structured = getattr(result, "structured_content", None)
+        if structured is None:
+            structured = getattr(result, "structuredContent", None)
         try:
             html = entry.component.html_with_data(structured)
         except Exception as exc:
@@ -676,7 +680,7 @@ def build_http_app(
                 "structuredContent": structured,
                 "html": html,
                 "resourceUri": entry.component.resource_uri,
-                "isError": bool(getattr(result, "isError", False)),
+                "isError": bool(getattr(result, "is_error", None) if getattr(result, "is_error", None) is not None else getattr(result, "isError", False)),
             }
         )
 

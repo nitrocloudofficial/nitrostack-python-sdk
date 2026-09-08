@@ -122,7 +122,12 @@ def test_http_guard_pipe_task_progress_and_completion():
         )
         assert created.status_code == 200, created.text
         created_body = created.json()["result"]
-        task_id = created_body.get("task", {}).get("taskId") or created_body.get("taskId")
+        structured = created_body.get("structuredContent") or {}
+        task_id = (
+            created_body.get("task", {}).get("taskId")
+            or created_body.get("taskId")
+            or (structured.get("task") or {}).get("taskId")
+        )
         assert task_id, created_body
 
         status = None

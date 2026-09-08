@@ -115,8 +115,8 @@ class TestMrtrToolExecution:
             app = await McpApplicationFactory.create(MrtrApp)
 
             first = await app._call_tool("delete_database", {"amount": 0})
-            assert first.structuredContent["resultType"] == "input_required"
-            assert first.structuredContent["inputRequests"][0]["id"] == "confirm_delete"
+            assert first.structured_content["resultType"] == "input_required"
+            assert first.structured_content["inputRequests"][0]["id"] == "confirm_delete"
 
             second = await app._call_tool(
                 "delete_database",
@@ -126,7 +126,7 @@ class TestMrtrToolExecution:
                     "requestState": {"step": 1, "db": "prod_users"},
                 },
             )
-            assert second.structuredContent["status"] == "dropped"
+            assert second.structured_content["status"] == "dropped"
 
         asyncio.run(_run())
 

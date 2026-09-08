@@ -218,7 +218,7 @@ class TestAppIntegration:
             pass
 
         async def _run():
-            from mcp.server.lowlevel.server import request_ctx, RequestContext
+            from nitrostack.runtime.request_ctx import RequestContext, RequestParamsMeta, request_ctx
 
             harness = await NitroTestingModule.create(TraceModule)
             handler = harness.app.mcp_server.request_handlers[types.CallToolRequest]

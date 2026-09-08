@@ -236,7 +236,7 @@ def test_listed_tools_expose_top_level_fields_not_input_wrap():
     }
     assert set(tools) >= set(expected)
     for name, fields in expected.items():
-        schema = tools[name].inputSchema
+        schema = tools[name].input_schema
         _assert_inspector_schema(schema, fields)
         properties = schema.get("properties") or {}
         if fields:

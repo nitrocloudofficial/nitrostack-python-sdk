@@ -12,10 +12,18 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Pattern, Set, Tuple, Type
 
 import mcp.types as types
-from mcp.shared.exceptions import McpError
-from mcp.server.lowlevel.server import request_ctx
+from mcp import MCPError
+from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
+from mcp.types import (
+    CallToolRequestParams,
+    GetPromptRequestParams,
+    PaginatedRequestParams,
+    ReadResourceRequestParams,
+    SubscribeRequestParams,
+    UnsubscribeRequestParams,
+)
 from pydantic import BaseModel, create_model
 
 from nitrostack.core.context import ExecutionContext, TaskContext
@@ -69,6 +77,7 @@ from nitrostack.protocol.tasks import (
     task_support_forbidden_message,
     task_support_required_message,
 )
+from nitrostack.runtime.request_ctx import ServerResult, request_ctx
 from nitrostack.tasks.authorization import extract_task_access_context
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
@@ -77,6 +86,23 @@ from nitrostack.widgets.route_templates import build_missing_widget
 
 DEFAULT_HTTP_PORT = 3000
 logger = logging.getLogger(__name__)
+
+
+def _iso_timestamp(value: Any) -> str:
+    """Official Task timestamps are ISO-8601 strings."""
+    if hasattr(value, "isoformat"):
+        text = value.isoformat()
+        if text.endswith("+00:00"):
+            return text[:-6] + "Z"
+        return text
+    return str(value)
+
+
+class GetTaskResult(types.GetTaskResult):
+    """Official GetTaskResult plus NitroStack-owned ``result`` / ``error`` slots."""
+
+    result: Any = None
+    error: Any = None
 
 
 def resolve_http_port() -> int:
@@ -313,13 +339,42 @@ def _trace_context_from_request_ctx(rc: Any) -> TraceContext | None:
     return extract_trace_context(_request_meta_from_ctx(rc))
 
 
+def _read_contents_to_result(uri: str, items: List[ReadResourceContents]) -> types.ReadResourceResult:
+    import base64
+
+    contents: List[Any] = []
+    for item in items:
+        mime = item.mime_type or "text/plain"
+        extra = {"_meta": item.meta} if getattr(item, "meta", None) else {}
+        if isinstance(item.content, bytes):
+            contents.append(
+                types.BlobResourceContents(
+                    uri=uri,
+                    mimeType=mime,
+                    blob=base64.b64encode(item.content).decode("ascii"),
+                    **extra,
+                )
+            )
+        else:
+            contents.append(
+                types.TextResourceContents(
+                    uri=uri, mimeType=mime, text=str(item.content), **extra
+                )
+            )
+    return types.ReadResourceResult(contents=contents)
+
+
 def _http_headers_from_request_ctx(rc: Any) -> Dict[str, str]:
     if rc is None:
         return {}
     request = getattr(rc, "request", None)
-    if request is None:
-        return {}
-    raw = getattr(request, "headers", None)
+    raw = getattr(request, "headers", None) if request is not None else None
+    if raw is None:
+        session = getattr(rc, "session", None)
+        transport = getattr(session, "transport", None) if session is not None else None
+        raw = getattr(transport, "headers", None) if transport is not None else None
+    if raw is None:
+        raw = getattr(rc, "headers", None)
     if raw is None:
         return {}
     try:
@@ -716,51 +771,131 @@ class McpApplication:
         return build_list_endpoint_cache_hint_meta()
 
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
-        @server.list_tools()
-        async def _list_tools() -> types.ListToolsResult:
+        async def _list_tools(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListToolsResult(
                 tools=[self._build_tool_definition(entry) for entry in self._tools.values()],
                 _meta=self._list_endpoint_cache_meta(),
             )
 
-        @server.call_tool(validate_input=False)
-        async def _call_tool(name: str, arguments: Optional[Dict[str, Any]]):
-            return await self._call_tool(name, arguments or {})
+        async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                result = await self._call_tool(
+                    params.name, params.arguments or {}, task=params.task
+                )
+                if isinstance(result, types.CreateTaskResult):
+                    task = result.task
+                    return types.CallToolResult(
+                        content=[types.TextContent(type="text", text=task.task_id)],
+                        structuredContent={
+                            "resultType": "task",
+                            "task": task.model_dump(by_alias=True),
+                        },
+                        isError=False,
+                    )
+                return result
+            finally:
+                request_ctx.reset(token)
 
-        @server.list_resources()
-        async def _list_resources() -> types.ListResourcesResult:
+        async def _list_resources(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListResourcesResult(
                 resources=[self._build_resource_definition(entry) for entry in self._resources.values()],
                 _meta=self._list_endpoint_cache_meta(),
             )
 
-        @server.list_resource_templates()
-        async def _list_resource_templates() -> List[types.ResourceTemplate]:
-            return [self._build_resource_template_definition(entry) for entry in self._resource_templates]
+        async def _list_resource_templates(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
+            return types.ListResourceTemplatesResult(
+                resource_templates=[
+                    self._build_resource_template_definition(entry) for entry in self._resource_templates
+                ],
+            )
 
-        @server.read_resource()
-        async def _read_resource(uri: Any):
-            return await self._read_resource(str(uri))
+        async def _read_resource(ctx: ServerRequestContext, params: ReadResourceRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                uri = str(params.uri)
+                return _read_contents_to_result(uri, await self._read_resource(uri))
+            finally:
+                request_ctx.reset(token)
 
-        @server.subscribe_resource()
-        async def _subscribe_resource(uri: Any) -> None:
-            if str(uri) not in self._resources:
-                raise ResourceNotFoundError(str(uri))
+        async def _subscribe_resource(_ctx: ServerRequestContext, params: SubscribeRequestParams):
+            if str(params.uri) not in self._resources:
+                raise ResourceNotFoundError(str(params.uri))
+            return types.EmptyResult()
 
-        @server.unsubscribe_resource()
-        async def _unsubscribe_resource(uri: Any) -> None:
-            return None
+        async def _unsubscribe_resource(_ctx: ServerRequestContext, _params: UnsubscribeRequestParams):
+            return types.EmptyResult()
 
-        @server.list_prompts()
-        async def _list_prompts() -> types.ListPromptsResult:
+        async def _list_prompts(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListPromptsResult(
                 prompts=[self._build_prompt_definition(entry) for entry in self._prompts.values()],
                 _meta=self._list_endpoint_cache_meta(),
             )
 
-        @server.get_prompt()
-        async def _get_prompt(name: str, arguments: Optional[Dict[str, str]]) -> types.GetPromptResult:
-            return await self._get_prompt(name, arguments or {})
+        async def _get_prompt(ctx: ServerRequestContext, params: GetPromptRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                arguments = params.arguments or {}
+                return await self._get_prompt(
+                    params.name,
+                    {str(key): str(value) for key, value in arguments.items()},
+                )
+            finally:
+                request_ctx.reset(token)
+
+        server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
+        server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)
+        server.add_request_handler("resources/list", PaginatedRequestParams, _list_resources)
+        server.add_request_handler(
+            "resources/templates/list", PaginatedRequestParams, _list_resource_templates
+        )
+        server.add_request_handler("resources/read", ReadResourceRequestParams, _read_resource)
+        server.add_request_handler("resources/subscribe", SubscribeRequestParams, _subscribe_resource)
+        server.add_request_handler("resources/unsubscribe", UnsubscribeRequestParams, _unsubscribe_resource)
+        server.add_request_handler("prompts/list", PaginatedRequestParams, _list_prompts)
+        server.add_request_handler("prompts/get", GetPromptRequestParams, _get_prompt)
+
+        async def handle_list_tools(req=None):
+            return ServerResult(await _list_tools(None, None))
+
+        async def handle_call_tool(req=None):
+            params = getattr(req, "params", None) if req is not None else None
+            name = getattr(params, "name", "") if params is not None else ""
+            arguments = (getattr(params, "arguments", None) or {}) if params is not None else {}
+            task = getattr(params, "task", None) if params is not None else None
+            return ServerResult(await self._call_tool(name, arguments, task=task))
+
+        async def handle_list_resources(req=None):
+            return ServerResult(await _list_resources(None, None))
+
+        async def handle_list_resource_templates(req=None):
+            return ServerResult(await _list_resource_templates(None, None))
+
+        async def handle_read_resource(req):
+            params = getattr(req, "params", req)
+            uri = str(params.uri)
+            return ServerResult(_read_contents_to_result(uri, await self._read_resource(uri)))
+
+        async def handle_list_prompts(req=None):
+            return ServerResult(await _list_prompts(None, None))
+
+        async def handle_get_prompt(req):
+            params = getattr(req, "params", req)
+            arguments = getattr(params, "arguments", None) or {}
+            return ServerResult(
+                await self._get_prompt(
+                    params.name,
+                    {str(key): str(value) for key, value in arguments.items()},
+                )
+            )
+
+        server.request_handlers[types.ListToolsRequest] = handle_list_tools
+        server.request_handlers[types.CallToolRequest] = handle_call_tool
+        server.request_handlers[types.ListResourcesRequest] = handle_list_resources
+        server.request_handlers[types.ListResourceTemplatesRequest] = handle_list_resource_templates
+        server.request_handlers[types.ReadResourceRequest] = handle_read_resource
+        server.request_handlers[types.ListPromptsRequest] = handle_list_prompts
+        server.request_handlers[types.GetPromptRequest] = handle_get_prompt
 
         self._register_task_handlers(server)
         self._register_initialized_handler(server)
@@ -1030,7 +1165,7 @@ class McpApplication:
         )
         return content
 
-    async def _call_tool(self, name: str, arguments: Dict[str, Any]):
+    async def _call_tool(self, name: str, arguments: Dict[str, Any], task: Any = None):
         entry = self._tools.get(name)
         if entry is None:
             return types.CallToolResult(
@@ -1053,35 +1188,40 @@ class McpApplication:
         input_instance = parse_tool_input(entry.input_model, tool_arguments)
         guards, middleware, interceptors, pipes, filters = self._pipeline_stages(entry.method)
 
-        # Detect task-augmented invocation via the request context's public
-        # `experimental.task_metadata` field (populated by the low-level server
-        # from `req.params.task`) rather than reaching into private state.
-        task_metadata = None
+        # Task metadata: explicit ``params.task``, then the 1.x experimental
+        # slot, then the official request context ``params`` mapping.
+        task_metadata = task
         session = None
         progress_token = None
         if rc is not None:
-            if getattr(rc, "experimental", None) is not None:
+            if task_metadata is None and getattr(rc, "experimental", None) is not None:
                 task_metadata = rc.experimental.task_metadata
-            if getattr(rc, "meta", None) is not None:
-                progress_token = getattr(rc.meta, "progressToken", None)
+            params = getattr(rc, "params", None)
+            if task_metadata is None:
+                task_metadata = getattr(params, "task", None)
+            if task_metadata is None and isinstance(params, Mapping):
+                task_metadata = params.get("task")
+            meta = getattr(rc, "meta", None)
+            if isinstance(meta, Mapping):
+                progress_token = meta.get("progress_token") or meta.get("progressToken")
+            elif meta is not None:
+                progress_token = getattr(meta, "progress_token", None) or getattr(
+                    meta, "progressToken", None
+                )
             session = getattr(rc, "session", None)
         auth_meta = _auth_metadata_from_request_ctx(rc)
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
         if cfg.task_support == "forbidden" and task_metadata is not None:
-            raise McpError(
-                types.ErrorData(
-                    code=types.METHOD_NOT_FOUND,
-                    message=task_support_forbidden_message(cfg.name),
-                )
+            raise MCPError(
+                types.METHOD_NOT_FOUND,
+                task_support_forbidden_message(cfg.name),
             )
         if cfg.task_support == "required" and task_metadata is None:
-            raise McpError(
-                types.ErrorData(
-                    code=types.INVALID_REQUEST,
-                    message=task_support_required_message(cfg.name),
-                )
+            raise MCPError(
+                types.INVALID_REQUEST,
+                task_support_required_message(cfg.name),
             )
 
         if is_task:
@@ -1291,18 +1431,13 @@ class McpApplication:
     def _task_data_to_mcp_task(self, task) -> types.Task:
         """Map TaskData to MCP Task. EXPIRED is not an MCP wire status — surface as error."""
         if task.status == TaskStatus.EXPIRED:
-            raise McpError(
-                types.ErrorData(
-                    code=types.INVALID_PARAMS,
-                    message=f"Task {task.id} has expired",
-                )
-            )
+            raise MCPError(types.INVALID_PARAMS, f"Task {task.id} has expired")
         return types.Task(
             taskId=task.id,
             status=task.status.value,
             statusMessage=task.progress or "",
-            createdAt=task.created_at,
-            lastUpdatedAt=task.last_updated_at or task.created_at,
+            createdAt=_iso_timestamp(task.created_at),
+            lastUpdatedAt=_iso_timestamp(task.last_updated_at or task.created_at),
             ttl=task.ttl if task.ttl is not None else 0,
             pollInterval=task.poll_interval,
         )
@@ -1317,13 +1452,13 @@ class McpApplication:
     def _build_get_task_result(self, task) -> types.GetTaskResult:
         mcp_task = self._task_data_to_mcp_task(task)
         payload: Dict[str, Any] = {
-            "taskId": mcp_task.taskId,
+            "taskId": mcp_task.task_id,
             "status": mcp_task.status,
-            "statusMessage": mcp_task.statusMessage,
-            "createdAt": mcp_task.createdAt,
-            "lastUpdatedAt": mcp_task.lastUpdatedAt,
+            "statusMessage": mcp_task.status_message,
+            "createdAt": mcp_task.created_at,
+            "lastUpdatedAt": mcp_task.last_updated_at,
             "ttl": mcp_task.ttl,
-            "pollInterval": mcp_task.pollInterval,
+            "pollInterval": mcp_task.poll_interval,
         }
         if task.status == TaskStatus.COMPLETED and task.result is not None:
             payload["result"] = self._serialize_task_result_payload(task.result)
@@ -1331,7 +1466,7 @@ class McpApplication:
             payload["error"] = {"message": str(task.error)}
         elif task.status == TaskStatus.INPUT_REQUIRED and task.result is not None:
             payload["result"] = task.result
-        return types.GetTaskResult(**payload)
+        return GetTaskResult(**payload)
 
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
         modern_protocol = self.server_config.protocol_version == MODERN_PROTOCOL_VERSION
@@ -1339,12 +1474,11 @@ class McpApplication:
         async def handle_list_tasks(req):
             if modern_protocol:
                 message = deprecated_method_message("tasks/list")
-                raise McpError(
-                    types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
-                )
+                raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             tasks_list = []
             access = extract_task_access_context(request_ctx.get(None))
-            cursor = getattr(req.params, "cursor", None)
+            params = getattr(req, "params", req)
+            cursor = getattr(params, "cursor", None) if params is not None else None
             tasks_page, next_cursor = await self.task_manager.list_tasks_page(
                 access_context=access,
                 cursor=cursor,
@@ -1356,59 +1490,50 @@ class McpApplication:
             return types.ListTasksResult(tasks=tasks_list, nextCursor=next_cursor)
 
         async def handle_get_task(req):
-            task_id = req.params.taskId
+            params = getattr(req, "params", req)
+            task_id = getattr(params, "task_id", None) or getattr(params, "taskId", None)
             access = extract_task_access_context(request_ctx.get(None))
             try:
                 t = await self.task_manager.get_task(task_id, access_context=access)
             except TaskNotFoundError:
-                raise McpError(
-                    types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
-                )
+                raise MCPError(types.INVALID_PARAMS, f"Task {task_id} not found")
             return self._build_get_task_result(t)
 
         async def handle_cancel_task(req):
-            task_id = req.params.taskId
+            params = getattr(req, "params", req)
+            task_id = getattr(params, "task_id", None) or getattr(params, "taskId", None)
             access = extract_task_access_context(request_ctx.get(None))
             try:
                 await self.task_manager.cancel_task(task_id, access_context=access)
                 t = await self.task_manager.get_task(task_id, access_context=access)
             except TaskNotFoundError:
-                raise McpError(
-                    types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
-                )
+                raise MCPError(types.INVALID_PARAMS, f"Task {task_id} not found")
             except TaskExpiredError:
-                raise McpError(
-                    types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} has expired")
-                )
+                raise MCPError(types.INVALID_PARAMS, f"Task {task_id} has expired")
             except TaskAlreadyTerminalError as e:
-                raise McpError(
-                    types.ErrorData(code=types.INVALID_PARAMS, message=str(e))
-                )
+                raise MCPError(types.INVALID_PARAMS, str(e))
             mcp_task = self._task_data_to_mcp_task(t)
             return types.CancelTaskResult(
-                taskId=mcp_task.taskId,
+                taskId=mcp_task.task_id,
                 status=mcp_task.status,
-                statusMessage=mcp_task.statusMessage,
-                createdAt=mcp_task.createdAt,
-                lastUpdatedAt=mcp_task.lastUpdatedAt,
+                statusMessage=mcp_task.status_message,
+                createdAt=mcp_task.created_at,
+                lastUpdatedAt=mcp_task.last_updated_at,
                 ttl=mcp_task.ttl,
-                pollInterval=mcp_task.pollInterval,
+                pollInterval=mcp_task.poll_interval,
             )
 
         async def handle_get_task_payload(req):
             if modern_protocol:
                 message = deprecated_method_message("tasks/result")
-                raise McpError(
-                    types.ErrorData(code=types.METHOD_NOT_FOUND, message=message or "Not supported")
-                )
-            task_id = req.params.taskId
+                raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
+            params = getattr(req, "params", req)
+            task_id = getattr(params, "task_id", None) or getattr(params, "taskId", None)
             access = extract_task_access_context(request_ctx.get(None))
             try:
                 t = await self.task_manager.wait_until_done(task_id, access_context=access)
             except TaskNotFoundError:
-                raise McpError(
-                    types.ErrorData(code=types.INVALID_PARAMS, message=f"Task {task_id} not found")
-                )
+                raise MCPError(types.INVALID_PARAMS, f"Task {task_id} not found")
             if t.status == TaskStatus.COMPLETED:
                 return t.result
             if t.status == TaskStatus.CANCELLED:
@@ -1426,6 +1551,38 @@ class McpApplication:
                 isError=True,
             )
 
+        async def on_list_tasks(ctx: ServerRequestContext, params: Optional[PaginatedRequestParams]):
+            token = request_ctx.set(ctx)
+            try:
+                return await handle_list_tasks(types.ListTasksRequest(params=params))
+            finally:
+                request_ctx.reset(token)
+
+        async def on_get_task(ctx: ServerRequestContext, params: types.GetTaskRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                return await handle_get_task(types.GetTaskRequest(params=params))
+            finally:
+                request_ctx.reset(token)
+
+        async def on_cancel_task(ctx: ServerRequestContext, params: types.CancelTaskRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                return await handle_cancel_task(types.CancelTaskRequest(params=params))
+            finally:
+                request_ctx.reset(token)
+
+        async def on_get_task_payload(ctx: ServerRequestContext, params: types.GetTaskPayloadRequestParams):
+            token = request_ctx.set(ctx)
+            try:
+                return await handle_get_task_payload(types.GetTaskPayloadRequest(params=params))
+            finally:
+                request_ctx.reset(token)
+
+        server.add_request_handler("tasks/list", PaginatedRequestParams, on_list_tasks)
+        server.add_request_handler("tasks/get", types.GetTaskRequestParams, on_get_task)
+        server.add_request_handler("tasks/cancel", types.CancelTaskRequestParams, on_cancel_task)
+        server.add_request_handler("tasks/result", types.GetTaskPayloadRequestParams, on_get_task_payload)
         server.request_handlers[types.ListTasksRequest] = handle_list_tasks
         server.request_handlers[types.GetTaskRequest] = handle_get_task
         server.request_handlers[types.CancelTaskRequest] = handle_cancel_task
@@ -1468,6 +1625,16 @@ class McpApplication:
                     sys.stderr.write(f"Error executing initial tool '{config.name}': {e}\n")
                     sys.stderr.flush()
 
+        async def on_initialized(ctx: ServerRequestContext, _params: Optional[types.NotificationParams]):
+            token = request_ctx.set(ctx)
+            try:
+                await handle_initialized(types.InitializedNotification())
+            finally:
+                request_ctx.reset(token)
+
+        server.add_notification_handler(
+            "notifications/initialized", types.NotificationParams, on_initialized
+        )
         server.notification_handlers[types.InitializedNotification] = handle_initialized
 
     # ------------------------------------------------------------------
@@ -1506,8 +1673,6 @@ class McpApplication:
             env_cors = self._env_bool("ENABLE_CORS")
             enable_cors = True if env_cors is None else env_cors
 
-        protocol_version = protocol_version_for_era(era, self.server_config.protocol_version)
-
         http_app = build_http_app(
             self,
             max_sessions=max_sessions if max_sessions is not None else self.server_config.max_sessions,
@@ -1523,15 +1688,12 @@ class McpApplication:
         if http_engine == "sessionless":
             from nitrostack.transports.middleware import wrap_stateless_transport
 
-            has_widgets = any(
-                getattr(entry, "component", None) is not None
-                for entry in getattr(self, "_tools", {}).values()
-            )
-            def _discover(_request: Any) -> Dict[str, Any]:
-                return self.handle_server_discover(protocol_version=protocol_version)
+            def _discover_handler(_request):
+                return self.handle_server_discover()
 
-            def _initialize(request: Any) -> Dict[str, Any]:
-                requested = getattr(request, "params", {}).get("protocolVersion")
+            def _initialize_handler(request):
+                params = getattr(request, "params", None) or {}
+                requested = params.get("protocolVersion") if isinstance(params, dict) else None
                 return self.handle_sessionless_initialize(
                     requested if isinstance(requested, str) else None
                 )
@@ -1540,15 +1702,18 @@ class McpApplication:
                 http_app,
                 server_name=self.server_config.name,
                 server_version=self.server_config.version,
-                protocol_version=protocol_version,
+                protocol_version=protocol_version_for_era(era, self.server_config.protocol_version),
                 advertise_tasks=self._advertise_tasks_extension(),
-                advertise_app=has_widgets,
+                advertise_app=any(
+                    getattr(entry, "component", None) is not None
+                    for entry in getattr(self, "_tools", {}).values()
+                ),
                 custom_extensions=self._custom_extensions(),
                 wire_mode=wire_mode,
                 protocol_era=era,
                 enable_cors=enable_cors,
-                discover_handler=_discover,
-                initialize_handler=_initialize,
+                discover_handler=_discover_handler,
+                initialize_handler=_initialize_handler,
             )
 
         return http_app

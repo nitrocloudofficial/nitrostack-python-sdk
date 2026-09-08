@@ -5,7 +5,7 @@ import os
 import sys
 
 import mcp.types as types
-from mcp.shared.exceptions import McpError
+from mcp import MCPError as McpError
 import pytest
 from pydantic import BaseModel, Field
 
@@ -23,8 +23,7 @@ from nitrostack.protocol.tasks import (
     build_task_create_jsonrpc_result,
     ttl_ms_to_seconds,
 )
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.server.experimental.request_context import Experimental
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 
 
 class EchoInput(BaseModel):

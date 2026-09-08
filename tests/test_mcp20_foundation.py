@@ -365,3 +365,77 @@ class TestTrustedReverseProxy:
         url = "https://app.nitrostack.io/oauth/client-metadata.json"
         assert request_host_for_cimd(headers, peer="10.0.0.5") == "app.nitrostack.io"
         assert cimd_host_matches_request(url, headers, peer="10.0.0.5") is True
+
+
+class TestOfficialMcpV2:
+    def test_mcpserver_import_and_fastmcp_gone(self):
+        from mcp.server import MCPServer
+
+        assert MCPServer is not None
+        with pytest.raises(ModuleNotFoundError):
+            from mcp.server.fastmcp import FastMCP
+
+    def test_tools_call_uses_v2_not_sidecar(self, monkeypatch):
+        import asyncio
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> dict:
+                    return {"value": input.value}
+
+            @module(name="V2Wire", controllers=[EchoController])
+            class V2Module:
+                pass
+
+            @mcp_app(module=V2Module, server=ServerConfig(name="v2-wire"))
+            class V2App:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(V2App))
+            http_app = app.get_combined_app(json_response=True)
+
+            with TestClient(http_app) as client:
+                resp = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "echo",
+                        "MCP-Protocol-Version": "2026-07-28",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "echo",
+                            "arguments": {"value": "v2"},
+                            "_meta": {
+                                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                                "io.modelcontextprotocol/clientCapabilities": {},
+                            },
+                        },
+                    },
+                )
+            assert resp.status_code == 200, resp.text
+            result = resp.json()["result"]
+            payload = result.get("structuredContent") or {}
+            assert payload.get("value") == "v2"
+        finally:
+            DIContainer.reset()

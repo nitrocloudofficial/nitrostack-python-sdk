@@ -10,9 +10,8 @@ from unittest.mock import patch
 
 import mcp.types as types
 import pytest
-from mcp.server.experimental.request_context import Experimental
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.shared.exceptions import McpError
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
+from mcp import MCPError as McpError
 from pydantic import BaseModel, Field
 from starlette.testclient import TestClient
 
@@ -239,7 +238,7 @@ class TestTaskSubsystemConformance:
                 snapshot = await get_handler(
                     types.GetTaskRequest(
                         method="tasks/get",
-                        params=types.GetTaskRequestParams(taskId=created.task.taskId),
+                        params=types.GetTaskRequestParams(taskId=created.task.task_id),
                     )
                 )
                 assert snapshot.status in ("working", "completed")

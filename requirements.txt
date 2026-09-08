@@ -1,4 +1,4 @@
-mcp>=1.10.0,<2.0.0
+mcp>=2,<3
 pydantic>=2.0.0
 starlette>=0.30.0
 uvicorn>=0.20.0

@@ -11,8 +11,7 @@ from pathlib import Path
 
 import mcp.types as types
 import pytest
-from mcp.server.experimental.request_context import Experimental
-from mcp.server.lowlevel.server import request_ctx, RequestContext
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -156,7 +155,7 @@ class TestAcceptanceTaskConformance:
             class CancelApp:
                 pass
 
-            from mcp.shared.exceptions import McpError
+            from mcp import MCPError as McpError
 
             app = await McpApplicationFactory.create(CancelApp)
             app.task_manager = manager

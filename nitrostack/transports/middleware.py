@@ -310,6 +310,155 @@ class StatelessTransportMiddleware:
         return [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in headers.items()]
 
 
+class SessionlessHttpGuard:
+    """
+    Transport invariants official mcp 2.x does not own on sessionless ``/mcp``.
+
+    Does not parse or answer ``tools/call``. Forwards those to the v2 app.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        protocol_era: ProtocolEra = "auto",
+        enable_cors: bool = True,
+        discover_handler: Optional[DiscoverHandler] = None,
+    ) -> None:
+        self.app = app
+        self.protocol_era = protocol_era
+        self.enable_cors = enable_cors
+        self.discover_handler = discover_handler
+        wire_mode: WireMode = "reject" if protocol_era == "modern" else "stateless"
+        self._sender = StatelessTransportMiddleware(
+            app,
+            pipeline=StatelessIngressPipeline(
+                IngressContext(
+                    server_name="",
+                    server_version="",
+                    protocol_version=MODERN_PROTOCOL_VERSION,
+                    wire_mode=wire_mode,
+                    protocol_era=protocol_era,
+                ),
+                discover_handler=discover_handler,
+            ),
+            enable_cors=enable_cors,
+        )
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        method = scope.get("method", "").upper()
+        path = scope.get("path", "")
+        if method == "OPTIONS" and path in MCP_POST_PATHS and self.enable_cors:
+            await self._sender._send_options(scope, receive, send)
+            return
+        raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
+        from nitrostack.runtime.stateless import has_incoming_session_id
+        from nitrostack.transports.dispatch import (
+            is_header_only_ping,
+            reject_legacy_handshake,
+        )
+
+        if path in MCP_POST_PATHS and has_incoming_session_id(raw_headers):
+            await self._sender._send_session_id_rejected(scope, send, raw_headers)
+            return
+        if method != "POST" or path not in MCP_POST_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        body = await StatelessTransportMiddleware._read_body(receive)
+        if is_header_only_ping(body, raw_headers):
+            from nitrostack.protocol.jsonrpc import build_ping_response
+
+            await self._sender._send_pipeline_response(
+                scope, send, raw_headers, (200, build_ping_response(None)), body=body
+            )
+            return
+
+        from nitrostack.protocol.jsonrpc import (
+            JsonRpcParseError,
+            JsonRpcWireError,
+            parse_jsonrpc_request,
+            validate_header_body_method,
+        )
+        from nitrostack.transports.headers import HEADER_MCP_METHOD, get_header
+
+        try:
+            request = parse_jsonrpc_request(body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            await self.app(
+                scope,
+                StatelessTransportMiddleware._replay_receive(body, receive),
+                send,
+            )
+            return
+
+        rejected = reject_legacy_handshake(request, self.protocol_era)
+        if rejected is not None:
+            await self._sender._send_pipeline_response(
+                scope, send, raw_headers, rejected, body=body
+            )
+            return
+
+        header_method = get_header(raw_headers, HEADER_MCP_METHOD)
+        if header_method is not None:
+            try:
+                validate_header_body_method(header_method, request.method)
+            except Exception as exc:
+                from nitrostack.protocol.jsonrpc import map_exception_to_jsonrpc
+
+                await self._sender._send_pipeline_response(
+                    scope,
+                    send,
+                    raw_headers,
+                    (400, map_exception_to_jsonrpc(exc, request.id)),
+                    body=body,
+                )
+                return
+
+        if request.method == "server/discover" and self.discover_handler is not None:
+            from nitrostack.protocol.jsonrpc import jsonrpc_success
+
+            await self._sender._send_pipeline_response(
+                scope,
+                send,
+                raw_headers,
+                (200, jsonrpc_success(request.id, self.discover_handler())),
+                body=body,
+            )
+            return
+
+        await self._sender._forward_with_stateless_headers(
+            scope,
+            StatelessTransportMiddleware._replay_receive(body, receive),
+            send,
+            body=body,
+        )
+
+
+def wrap_sessionless_http(
+    app: ASGIApp,
+    *,
+    protocol_era: ProtocolEra = "auto",
+    enable_cors: bool = True,
+    discover_handler: Optional[DiscoverHandler] = None,
+) -> ASGIApp:
+    """Sessionless transport guard; official mcp 2.x still owns ``tools/call``."""
+    return SessionlessHttpGuard(
+        app,
+        protocol_era=protocol_era,
+        enable_cors=enable_cors,
+        discover_handler=discover_handler,
+    )
+
+
+def wrap_modern_handshake_reject(app: ASGIApp, *, enable_cors: bool = True) -> ASGIApp:
+    """Reject 2025 ``initialize`` on era ``modern``; leave the v2 app otherwise."""
+    return wrap_sessionless_http(app, protocol_era="modern", enable_cors=enable_cors)
+
+
 def wrap_stateless_transport(
     app: ASGIApp,
     *,
