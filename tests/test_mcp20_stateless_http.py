@@ -248,7 +248,12 @@ class TestDispatchPipeline:
                     "params": {"protocolVersion": "2025-06-18", "capabilities": {}},
                 }
             ).encode()
-            assert await pipeline.handle_post(body, {}) is None
+            status, resp = await pipeline.handle_post(body, {})
+            assert status == 200
+            result = resp["result"]
+            assert result["protocolVersion"] == "2025-06-18"
+            assert result["serverInfo"]["name"] == "srv"
+            assert "capabilities" in result
 
         asyncio.run(_run())
 
@@ -654,7 +659,13 @@ class TestAutoEraOneMcpDualClients:
                 )
 
             assert init.status_code == 200, init.text
-            assert "result" in init.json()
+            init_body = init.json()["result"]
+            expected_init = app.handle_sessionless_initialize("2025-06-18")
+            assert init_body == expected_init
+            assert app.mcp_server.handle_sessionless_initialize("2025-06-18") == expected_init
+            assert init_body["protocolVersion"] == "2025-06-18"
+            assert "serverInfo" in init_body
+            assert "capabilities" in init_body
             init_headers = {key.lower(): value for key, value in init.headers.items()}
             assert LEGACY_SESSION_HEADER.lower() not in init_headers
             assert not state.session_manager._server_instances

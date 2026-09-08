@@ -12,7 +12,13 @@ from nitrostack.protocol.contracts import (
     build_resource_text_content,
 )
 from nitrostack.protocol.deprecated import deprecated_method_message
-from nitrostack.protocol.discovery import DISCOVER_RESULT_TYPE, SERVER_DISCOVER_METHOD, build_discover_result
+from nitrostack.protocol.discovery import (
+    DISCOVER_RESULT_TYPE,
+    INITIALIZE_METHOD,
+    SERVER_DISCOVER_METHOD,
+    build_discover_result,
+    build_sessionless_initialize_result,
+)
 from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.extensions import MCPExtensionId
 from nitrostack.protocol.jsonrpc import (
@@ -103,7 +109,9 @@ __all__ = [
     "split_params_and_meta",
     "deprecated_method_message",
     "DISCOVER_RESULT_TYPE",
+    "INITIALIZE_METHOD",
     "SERVER_DISCOVER_METHOD",
+    "build_sessionless_initialize_result",
     "build_discover_result",
     "parse_jsonrpc_request",
     "build_ping_response",

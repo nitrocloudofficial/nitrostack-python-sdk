@@ -10,7 +10,11 @@ from typing import Any, Callable, Optional, Union
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.deprecated import deprecated_method_message
-from nitrostack.protocol.discovery import SERVER_DISCOVER_METHOD
+from nitrostack.protocol.discovery import (
+    INITIALIZE_METHOD,
+    SERVER_DISCOVER_METHOD,
+    build_sessionless_initialize_result,
+)
 from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import (
     HeaderBodyMismatchError,
@@ -36,6 +40,7 @@ from nitrostack.transports.headers import (
 TaskDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
 RegistryDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
 DiscoverHandler = Callable[[JsonRpcRequest], Union[Awaitable[dict[str, Any]], dict[str, Any]]]
+InitializeHandler = Callable[[JsonRpcRequest], Union[Awaitable[dict[str, Any]], dict[str, Any]]]
 
 
 class DispatchStage(str, Enum):
@@ -124,11 +129,13 @@ class StatelessIngressPipeline:
         task_handler: Optional[TaskDispatchHandler] = None,
         registry_handler: Optional[RegistryDispatchHandler] = None,
         discover_handler: Optional[DiscoverHandler] = None,
+        initialize_handler: Optional[InitializeHandler] = None,
     ) -> None:
         self._context = context
         self._task_handler = task_handler
         self._registry_handler = registry_handler
         self._discover_handler = discover_handler
+        self._initialize_handler = initialize_handler
 
     async def handle_post(
         self,
@@ -174,6 +181,24 @@ class StatelessIngressPipeline:
 
         if request.method == "ping":
             return 200, build_ping_response(request.id)
+
+        if request.method == INITIALIZE_METHOD and self._context.wire_mode == "stateless":
+            if self._initialize_handler is not None:
+                result = self._initialize_handler(request)
+                if isinstance(result, Awaitable):
+                    result = await result
+            else:
+                requested = request.params.get("protocolVersion")
+                result = build_sessionless_initialize_result(
+                    server_name=self._context.server_name,
+                    server_version=self._context.server_version,
+                    requested_version=requested if isinstance(requested, str) else None,
+                    protocol_version=self._context.protocol_version,
+                    advertise_tasks=self._context.advertise_tasks,
+                    advertise_app=self._context.advertise_app,
+                    custom_extensions=self._context.custom_extensions,
+                )
+            return 200, jsonrpc_success(request.id, result)
 
         if request.method == SERVER_DISCOVER_METHOD:
             if self._discover_handler is None:

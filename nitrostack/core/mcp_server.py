@@ -34,12 +34,19 @@ class NitroStackMcpServer(LowLevelServer):
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
         self.discover_handler: Optional[Callable[[], dict[str, Any]]] = None
+        self.initialize_handler: Optional[Callable[[Optional[str]], dict[str, Any]]] = None
 
     def handle_server_discover(self) -> dict[str, Any]:
         """Answer ``server/discover`` from this server instance."""
         if self.discover_handler is None:
             raise RuntimeError("server/discover is not configured on this server")
         return self.discover_handler()
+
+    def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> dict[str, Any]:
+        """Answer sessionless ``initialize`` from this server instance."""
+        if self.initialize_handler is None:
+            raise RuntimeError("sessionless initialize is not configured on this server")
+        return self.initialize_handler(requested_version)
 
     def get_capabilities(
         self,

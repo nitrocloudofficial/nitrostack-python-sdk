@@ -8,13 +8,21 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-SERVER_DISCOVER_METHOD = "server/discover"
-
 from nitrostack.protocol.cache_hints import DEFAULT_LIST_CACHE_TTL_MS, build_list_endpoint_cache_hint_meta
 from nitrostack.protocol.extensions import MCPExtensionId
-from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+from nitrostack.protocol.version import (
+    LEGACY_PROTOCOL_VERSION,
+    MODERN_PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+)
 
+SERVER_DISCOVER_METHOD = "server/discover"
 DISCOVER_RESULT_TYPE = "complete"
+INITIALIZE_METHOD = "initialize"
+INITIALIZED_NOTIFICATION = "notifications/initialized"
+_SESSIONLESS_INITIALIZE_VERSIONS = frozenset(
+    {LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION, "2025-11-25"}
+)
 
 
 def build_discover_result(
@@ -60,4 +68,37 @@ def build_discover_result(
         "ttlMs": ttl_ms,
         "cacheScope": cache_scope,
         "_meta": build_list_endpoint_cache_hint_meta(ttl_ms=ttl_ms, cache_scope=cache_scope),
+    }
+
+
+def build_sessionless_initialize_result(
+    *,
+    server_name: str,
+    server_version: str,
+    requested_version: Optional[str] = None,
+    protocol_version: str = MODERN_PROTOCOL_VERSION,
+    advertise_tasks: bool = True,
+    advertise_app: bool = False,
+    custom_extensions: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """
+    Initialize-shaped result for era ``auto`` with no session.
+
+    Official v2 ``legacy: 'stateless'`` is not mounted yet. This adapter
+    answers 2025 ``initialize`` on the same engine as ``server/discover``.
+    """
+    requested = (requested_version or "").strip()
+    negotiated = requested if requested in _SESSIONLESS_INITIALIZE_VERSIONS else protocol_version
+    discovered = build_discover_result(
+        server_name=server_name,
+        server_version=server_version,
+        protocol_version=protocol_version,
+        advertise_tasks=advertise_tasks,
+        advertise_app=advertise_app,
+        custom_extensions=custom_extensions,
+    )
+    return {
+        "protocolVersion": negotiated,
+        "capabilities": discovered["capabilities"],
+        "serverInfo": discovered["serverInfo"],
     }

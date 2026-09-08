@@ -635,6 +635,28 @@ class McpApplication:
             custom_extensions=self._custom_extensions(),
         )
 
+    def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
+        """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
+        from nitrostack.protocol.discovery import build_sessionless_initialize_result
+
+        has_widgets = any(
+            getattr(entry, "component", None) is not None
+            for entry in getattr(self, "_tools", {}).values()
+        )
+        version = protocol_version_for_era(
+            getattr(self, "protocol_era", None),
+            self.server_config.protocol_version,
+        )
+        return build_sessionless_initialize_result(
+            server_name=self.server_config.name,
+            server_version=self.server_config.version,
+            requested_version=requested_version,
+            protocol_version=version,
+            advertise_tasks=self._advertise_tasks_extension(),
+            advertise_app=has_widgets,
+            custom_extensions=self._custom_extensions(),
+        )
+
     def _list_endpoint_cache_meta(self) -> Dict[str, Any]:
         return build_list_endpoint_cache_hint_meta()
 
@@ -688,6 +710,7 @@ class McpApplication:
         self._register_task_handlers(server)
         self._register_initialized_handler(server)
         server.discover_handler = self.handle_server_discover
+        server.initialize_handler = self.handle_sessionless_initialize
 
     def create_configured_mcp_server(self) -> NitroStackMcpServer:
         """
@@ -1439,6 +1462,12 @@ class McpApplication:
             def _discover(_request: Any) -> Dict[str, Any]:
                 return self.handle_server_discover(protocol_version=protocol_version)
 
+            def _initialize(request: Any) -> Dict[str, Any]:
+                requested = getattr(request, "params", {}).get("protocolVersion")
+                return self.handle_sessionless_initialize(
+                    requested if isinstance(requested, str) else None
+                )
+
             http_app = wrap_stateless_transport(
                 http_app,
                 server_name=self.server_config.name,
@@ -1449,6 +1478,7 @@ class McpApplication:
                 custom_extensions=self._custom_extensions(),
                 wire_mode=wire_mode,
                 discover_handler=_discover,
+                initialize_handler=_initialize,
             )
 
         return http_app

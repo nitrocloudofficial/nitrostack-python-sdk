@@ -7,7 +7,12 @@ from typing import Any, Callable, Optional
 from nitrostack.protocol.version import WireMode
 from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers
-from nitrostack.transports.dispatch import DiscoverHandler, IngressContext, StatelessIngressPipeline
+from nitrostack.transports.dispatch import (
+    DiscoverHandler,
+    IngressContext,
+    InitializeHandler,
+    StatelessIngressPipeline,
+)
 from nitrostack.transports.headers import (
     MCP_HTTP_PATH,
     build_mcp_response_headers,
@@ -188,6 +193,7 @@ def wrap_stateless_transport(
     custom_extensions: Optional[dict[str, str]] = None,
     wire_mode: WireMode = "stateless",
     discover_handler: Optional[DiscoverHandler] = None,
+    initialize_handler: Optional[InitializeHandler] = None,
 ) -> ASGIApp:
     """Wrap an ASGI app with stateless HTTP middleware."""
     pipeline = StatelessIngressPipeline(
@@ -201,5 +207,6 @@ def wrap_stateless_transport(
             wire_mode=wire_mode,
         ),
         discover_handler=discover_handler,
+        initialize_handler=initialize_handler,
     )
     return StatelessTransportMiddleware(app, pipeline=pipeline)
