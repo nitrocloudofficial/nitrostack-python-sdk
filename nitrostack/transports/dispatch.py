@@ -27,9 +27,11 @@ from nitrostack.protocol.jsonrpc import (
     parse_jsonrpc_request,
     validate_header_body_method,
     validate_header_body_name,
+    validate_protocol_version_header_meta,
     validate_required_mcp_method,
     validate_required_mcp_name,
 )
+from nitrostack.protocol.meta import envelope_protocol_version
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, WireMode
 from nitrostack.runtime.stateless import (
     has_incoming_session_id,
@@ -176,6 +178,20 @@ def reject_required_mcp_method(
     return None
 
 
+def reject_protocol_version_mismatch(
+    request: JsonRpcRequest,
+    request_headers: dict[str, str],
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """Reject when header and ``_meta.mcp.protocolVersion`` both exist and differ."""
+    header_version = get_header(request_headers, HEADER_MCP_PROTOCOL_VERSION)
+    meta_version = envelope_protocol_version(request.meta)
+    try:
+        validate_protocol_version_header_meta(header_version, meta_version)
+    except HeaderBodyMismatchError as exc:
+        return 400, exc.to_response(request.id)
+    return None
+
+
 class StatelessIngressPipeline:
     """
     Deterministic JSON-RPC pre-dispatch for stateless POST /mcp.
@@ -229,6 +245,18 @@ class StatelessIngressPipeline:
             return None
         return reject_required_mcp_method(request, request_headers, self._context.wire_mode)
 
+    def reject_protocol_version_cross_check(
+        self,
+        raw_body: bytes,
+        request_headers: dict[str, str],
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Replay-path header vs envelope protocol version check."""
+        try:
+            request = parse_jsonrpc_request(raw_body)
+        except (JsonRpcParseError, JsonRpcWireError):
+            return None
+        return reject_protocol_version_mismatch(request, request_headers)
+
     async def handle_post(
         self,
         raw_body: bytes,
@@ -268,6 +296,10 @@ class StatelessIngressPipeline:
                 validate_header_body_name(header_name, body_name)
             except HeaderBodyMismatchError as exc:
                 return 400, exc.to_response(request.id)
+
+        version_mismatch = reject_protocol_version_mismatch(request, request_headers)
+        if version_mismatch is not None:
+            return version_mismatch
 
         rejected = reject_legacy_wire(request, request_headers, self._context.wire_mode)
         if rejected is not None:

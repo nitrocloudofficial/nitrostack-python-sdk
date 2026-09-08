@@ -41,6 +41,11 @@ def extract_request_meta(params: dict[str, Any]) -> RequestMeta:
         return RequestMeta()
 
     protocol_version = _meta_get(raw, "protocolVersion", f"{MCP_META_PREFIX}protocolVersion")
+    if not isinstance(protocol_version, str):
+        mcp = raw.get("mcp")
+        if isinstance(mcp, dict):
+            nested = mcp.get("protocolVersion")
+            protocol_version = nested if isinstance(nested, str) else None
     client_info = _meta_get(raw, "clientInfo", f"{MCP_META_PREFIX}clientInfo")
     client_capabilities = _meta_get(
         raw, "clientCapabilities", f"{MCP_META_PREFIX}clientCapabilities"
@@ -107,6 +112,18 @@ def bind_request_envelope(
 def envelope_identity_is_ignored(raw_meta: dict[str, Any]) -> bool:
     """True when the envelope contains unsigned identity keys."""
     return any(str(key).lower() in _IDENTITY_META_KEYS for key in raw_meta)
+
+
+def envelope_protocol_version(meta: RequestMeta) -> Optional[str]:
+    """Protocol version from ``_meta.mcp.protocolVersion``, then other envelope keys."""
+    mcp = meta.raw.get("mcp") if meta.raw else None
+    if isinstance(mcp, dict):
+        nested = mcp.get("protocolVersion")
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+    if isinstance(meta.protocol_version, str) and meta.protocol_version.strip():
+        return meta.protocol_version.strip()
+    return None
 
 
 def flatten_request_meta_object(raw_meta: Any) -> dict[str, Any]:

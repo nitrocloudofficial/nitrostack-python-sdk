@@ -26,6 +26,7 @@ from nitrostack.core.context import AuthContext, ExecutionContext
 from nitrostack.protocol.meta import (
     bind_request_envelope,
     envelope_identity_is_ignored,
+    envelope_protocol_version,
     extract_request_meta,
     split_params_and_meta,
 )
@@ -65,6 +66,13 @@ class TestMetaEnvelope:
         )
         assert meta.traceparent == "00-bare"
         assert meta.client_info == {"name": "x"}
+
+    def test_extracts_nested_mcp_protocol_version(self):
+        meta = extract_request_meta(
+            {"_meta": {"mcp": {"protocolVersion": "2025-06-18"}, "trace": {"id": "t"}}}
+        )
+        assert meta.protocol_version == "2025-06-18"
+        assert envelope_protocol_version(meta) == "2025-06-18"
 
     def test_parse_request_strips_meta(self):
         body = json.dumps(
@@ -227,6 +235,76 @@ class TestHeaderBodyMismatch:
         from nitrostack.protocol.jsonrpc import validate_required_mcp_method
 
         validate_required_mcp_method("tools/call", "tools/call")
+
+    def test_protocol_version_header_meta_mismatch(self):
+        from nitrostack.protocol.jsonrpc import validate_protocol_version_header_meta
+
+        with pytest.raises(HeaderBodyMismatchError) as exc:
+            validate_protocol_version_header_meta("2026-07-28", "2025-06-18")
+        assert int(exc.value.code) == HEADER_BODY_MISMATCH
+
+    def test_protocol_version_header_only_is_allowed(self):
+        from nitrostack.protocol.jsonrpc import validate_protocol_version_header_meta
+
+        validate_protocol_version_header_meta("2026-07-28", None)
+        validate_protocol_version_header_meta(None, "2025-06-18")
+        validate_protocol_version_header_meta("2026-07-28", "2026-07-28")
+
+    def test_pipeline_rejects_header_and_meta_mismatch(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "ping",
+                    "params": {"_meta": {"mcp": {"protocolVersion": "2025-06-18"}}},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2026-07-28"}
+            )
+            assert status == 400
+            assert resp["error"]["code"] == HEADER_BODY_MISMATCH
+
+        asyncio.run(_run())
+
+    def test_pipeline_header_only_proceeds(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2026-07-28"}
+            )
+            assert status == 200
+            assert resp["result"] == {}
+
+        asyncio.run(_run())
+
+    def test_pipeline_ignores_unrelated_meta_keys(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "ping",
+                    "params": {"_meta": {"trace": {"id": "span"}, "userId": "eve"}},
+                }
+            ).encode()
+            status, resp = await pipeline.handle_post(
+                body, {"MCP-Protocol-Version": "2026-07-28"}
+            )
+            assert status == 200
+            assert resp["result"] == {}
+
+        asyncio.run(_run())
 
 
 class TestToolVsProtocolErrors:

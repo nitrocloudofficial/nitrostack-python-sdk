@@ -183,6 +183,20 @@ def validate_required_mcp_method(
     )
 
 
+def validate_protocol_version_header_meta(
+    header_version: Optional[str],
+    meta_version: Optional[str],
+) -> None:
+    """Reject when header and envelope protocol versions are both set and differ."""
+    header = header_version.strip() if isinstance(header_version, str) else ""
+    meta = meta_version.strip() if isinstance(meta_version, str) else ""
+    if header and meta and header != meta:
+        raise HeaderBodyMismatchError(
+            f"MCP-Protocol-Version header '{header_version}' does not match "
+            f"envelope protocol version '{meta_version}'"
+        )
+
+
 def jsonrpc_success(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "result": result}
 

@@ -957,7 +957,6 @@ class TestEnvelopeOnHandlerContext:
         from nitrostack import ExecutionContext, injectable, module, tool
         from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
         from nitrostack.core.di import DIContainer
-        from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
 
         class EmptyInput(BaseModel):
             pass
@@ -1007,7 +1006,6 @@ class TestEnvelopeOnHandlerContext:
                             "_meta": {
                                 "trace": {"id": "http-span"},
                                 "userId": "spoofed",
-                                "protocolVersion": MODERN_PROTOCOL_VERSION,
                             },
                         },
                     },
@@ -1649,6 +1647,81 @@ class TestRequiredMcpMethod:
             assert mismatch.json()["error"]["code"] == -32020
             assert matched.status_code == 200, matched.text
             assert matched.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestProtocolVersionCrossCheck:
+    def test_http_mismatch_is_rejected_and_header_only_succeeds(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="VersionCrossCheckHttp", controllers=[EchoController])
+            class VersionCrossCheckModule:
+                pass
+
+            @mcp_app(module=VersionCrossCheckModule, server=ServerConfig(name="version-cross-check"))
+            class VersionCrossCheckApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(VersionCrossCheckApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "echo",
+                "MCP-Protocol-Version": "2026-07-28",
+            }
+            with TestClient(http_app) as client:
+                mismatch = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "echo",
+                            "arguments": {"value": "ok"},
+                            "_meta": {"mcp": {"protocolVersion": "2025-06-18"}},
+                        },
+                    },
+                )
+                header_only = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+            assert mismatch.status_code == 400
+            assert mismatch.json()["error"]["code"] == -32020
+            assert header_only.status_code == 200, header_only.text
+            assert header_only.json()["result"]["content"][0]["text"] == "ok"
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

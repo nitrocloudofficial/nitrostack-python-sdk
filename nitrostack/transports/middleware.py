@@ -77,6 +77,12 @@ class StatelessTransportMiddleware:
             if name_rejected is not None:
                 await self._send_pipeline_response(scope, send, raw_headers, name_rejected)
                 return
+            version_rejected = self.pipeline.reject_protocol_version_cross_check(
+                body, raw_headers
+            )
+            if version_rejected is not None:
+                await self._send_pipeline_response(scope, send, raw_headers, version_rejected)
+                return
             receive = self._replay_receive(body, receive)
 
         if path in self.mcp_paths and self.pipeline is not None:
