@@ -43,10 +43,12 @@ class StatelessTransportMiddleware:
         *,
         pipeline: Optional[StatelessIngressPipeline] = None,
         mcp_paths: tuple[str, ...] = MCP_POST_PATHS,
+        enable_cors: bool = True,
     ) -> None:
         self.app = app
         self.pipeline = pipeline
         self.mcp_paths = mcp_paths
+        self.enable_cors = enable_cors
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -56,7 +58,7 @@ class StatelessTransportMiddleware:
         method = scope.get("method", "GET").upper()
         path = scope.get("path", "")
 
-        if method == "OPTIONS" and path in self.mcp_paths:
+        if method == "OPTIONS" and path in self.mcp_paths and self.enable_cors:
             await self._send_options(scope, receive, send)
             return
 
@@ -307,6 +309,7 @@ def wrap_stateless_transport(
     custom_extensions: Optional[dict[str, str]] = None,
     wire_mode: WireMode = "stateless",
     protocol_era: Optional[ProtocolEra] = None,
+    enable_cors: bool = True,
     discover_handler: Optional[DiscoverHandler] = None,
     initialize_handler: Optional[InitializeHandler] = None,
 ) -> ASGIApp:
@@ -325,4 +328,4 @@ def wrap_stateless_transport(
         discover_handler=discover_handler,
         initialize_handler=initialize_handler,
     )
-    return StatelessTransportMiddleware(app, pipeline=pipeline)
+    return StatelessTransportMiddleware(app, pipeline=pipeline, enable_cors=enable_cors)

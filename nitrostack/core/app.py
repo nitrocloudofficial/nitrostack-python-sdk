@@ -1551,6 +1551,7 @@ class McpApplication:
                 custom_extensions=self._custom_extensions(),
                 wire_mode=wire_mode,
                 protocol_era=era,
+                enable_cors=enable_cors,
                 discover_handler=_discover,
                 initialize_handler=_initialize,
             )

@@ -714,6 +714,22 @@ class TestOptionsScopedToMcpPath:
             with TestClient(http_app) as client:
                 mcp_opt = client.options("/mcp")
                 health_opt = client.options("/mcp/health")
+                bare_health = client.options("/health")
+                oauth_opt = client.options("/oauth/v2/register")
+                health_preflight = client.options(
+                    "/mcp/health",
+                    headers={
+                        "Origin": "https://app.example.com",
+                        "Access-Control-Request-Method": "GET",
+                    },
+                )
+                oauth_preflight = client.options(
+                    "/oauth/v2/register",
+                    headers={
+                        "Origin": "https://app.example.com",
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
                 call = client.post(
                     "/mcp",
                     headers={
@@ -730,9 +746,49 @@ class TestOptionsScopedToMcpPath:
                     },
                 )
             assert mcp_opt.status_code == 204
+            assert "Access-Control-Allow-Origin" in mcp_opt.headers
             assert health_opt.status_code != 204
+            assert bare_health.status_code != 204
+            assert oauth_opt.status_code != 204
+            assert health_preflight.status_code != 204
+            assert oauth_preflight.status_code != 204
             assert call.status_code == 200
             assert call.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+
+    def test_options_mcp_is_not_sidecar_204_when_cors_off(self):
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+        from pydantic import BaseModel, Field
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                    return input.value
+
+            @module(name="OptionsCorsOffHttp", controllers=[EchoController])
+            class OptionsCorsOffModule:
+                pass
+
+            @mcp_app(module=OptionsCorsOffModule, server=ServerConfig(name="options-cors-off"))
+            class OptionsCorsOffApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(OptionsCorsOffApp))
+            http_app = app.get_combined_app(stateless=True, json_response=True, enable_cors=False)
+            with TestClient(http_app) as client:
+                mcp_opt = client.options("/mcp")
+            assert mcp_opt.status_code != 204
         finally:
             DIContainer.reset()
 
