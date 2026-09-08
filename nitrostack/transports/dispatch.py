@@ -17,6 +17,7 @@ from nitrostack.protocol.discovery import (
 from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.jsonrpc import (
     HeaderBodyMismatchError,
+    InvalidRequestError,
     JsonRpcParseError,
     JsonRpcRequest,
     JsonRpcWireError,
@@ -51,6 +52,7 @@ from nitrostack.transports.headers import (
     HEADER_MCP_METHOD,
     HEADER_MCP_NAME,
     HEADER_MCP_PROTOCOL_VERSION,
+    first_oversized_mcp_param,
     get_header,
 )
 
@@ -341,6 +343,12 @@ class StatelessIngressPipeline:
         required_name = reject_required_mcp_name(request, request_headers)
         if required_name is not None:
             return required_name
+
+        oversized = first_oversized_mcp_param(request_headers)
+        if oversized is not None:
+            return 400, InvalidRequestError(
+                "Mcp-Param header exceeds the maximum size"
+            ).to_response(request.id)
 
         header_name = get_header(request_headers, HEADER_MCP_NAME)
         body_name = request.params.get("name") or request.params.get("uri")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
@@ -13,6 +13,8 @@ HEADER_MCP_PROTOCOL_VERSION = "MCP-Protocol-Version"
 HEADER_MCP_METHOD = "Mcp-Method"
 HEADER_MCP_NAME = "Mcp-Name"
 HEADER_MCP_PARAM_PREFIX = "Mcp-Param-"
+MAX_MCP_PARAM_VALUE_BYTES = 4096
+_MCP_PARAM_RESERVED = frozenset({"name", "method", "uri"})
 HEADER_AUTHORIZATION = "Authorization"
 HEADER_LAST_EVENT_ID = "Last-Event-ID"
 
@@ -113,14 +115,59 @@ def build_sse_stream_headers(
 
 
 def extract_mcp_param_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """Extract Mcp-Param-* mirrored parameters from request headers."""
+    """Extract ``Mcp-Param-*`` values keyed by the header suffix."""
     params: dict[str, str] = {}
     prefix = HEADER_MCP_PARAM_PREFIX.lower()
     for key, value in headers.items():
-        if key.lower().startswith(prefix):
-            param_name = key[len(HEADER_MCP_PARAM_PREFIX) :]
+        lower = key.lower()
+        if not lower.startswith(prefix):
+            continue
+        param_name = key[len(prefix) :]
+        if param_name:
             params[param_name] = value
     return params
+
+
+def first_oversized_mcp_param(headers: Mapping[str, str]) -> Optional[str]:
+    """Return the first ``Mcp-Param-*`` suffix whose value exceeds the size cap."""
+    for name, value in extract_mcp_param_headers(headers).items():
+        if len(str(value).encode("utf-8")) > MAX_MCP_PARAM_VALUE_BYTES:
+            return name
+    return None
+
+
+def merge_mcp_param_headers(
+    arguments: Mapping[str, Any],
+    param_headers: Mapping[str, str],
+    *,
+    allowed_fields: Optional[set[str]] = None,
+    reserved: frozenset[str] = _MCP_PARAM_RESERVED,
+) -> dict[str, Any]:
+    """
+    Copy ``arguments`` and fill missing keys from ``Mcp-Param-*``.
+
+    Existing JSON-RPC values win. ``name`` / ``method`` / ``uri`` are never
+    taken from headers. When ``allowed_fields`` is set, unknown suffixes are
+    ignored (schema-declared params only).
+    """
+    merged = dict(arguments)
+    reserved_lower = {item.lower() for item in reserved}
+    field_map = (
+        {field.lower(): field for field in allowed_fields}
+        if allowed_fields is not None
+        else None
+    )
+    for raw_name, value in param_headers.items():
+        if not raw_name or raw_name.lower() in reserved_lower:
+            continue
+        dest = field_map.get(raw_name.lower()) if field_map is not None else raw_name
+        if dest is None:
+            continue
+        current = merged.get(dest)
+        if dest in merged and current is not None and current != "":
+            continue
+        merged[dest] = value
+    return merged
 
 
 def extract_mcp_scope_headers(headers: Mapping[str, str]) -> dict[str, str]:
@@ -130,5 +177,8 @@ def extract_mcp_scope_headers(headers: Mapping[str, str]) -> dict[str, str]:
         value = get_header(headers, name)
         if value:
             scoped[name] = value
-    scoped.update(extract_mcp_param_headers(headers))
+    prefix = HEADER_MCP_PARAM_PREFIX.lower()
+    for key, value in headers.items():
+        if key.lower().startswith(prefix) and key.lower() != prefix:
+            scoped[key] = value
     return scoped

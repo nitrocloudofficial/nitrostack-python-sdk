@@ -191,6 +191,7 @@ class ExecutionContext:
     protocol_version: Optional[str] = None
     rpc_meta: Optional["RequestMeta"] = None
     mcp_headers: Dict[str, str] = field(default_factory=dict)
+    mcp_param_headers: Dict[str, str] = field(default_factory=dict)
 
     @property
     def user(self) -> Optional[str]:

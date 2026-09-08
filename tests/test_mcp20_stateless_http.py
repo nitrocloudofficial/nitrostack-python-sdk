@@ -25,8 +25,12 @@ from nitrostack.transports.dispatch import (
     is_task_wire_interception,
 )
 from nitrostack.transports.headers import (
+    MAX_MCP_PARAM_VALUE_BYTES,
     build_mcp_response_headers,
     build_sse_stream_headers,
+    extract_mcp_param_headers,
+    first_oversized_mcp_param,
+    merge_mcp_param_headers,
     scope_without_session_headers,
     strip_legacy_session_headers,
     strip_legacy_session_headers_asgi,
@@ -144,6 +148,165 @@ class TestHeaderCompatPreservesProtocolVersion:
             )
         headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in captured["headers"]}
         assert headers["mcp-protocol-version"] == "1999-01-01"
+
+
+class TestMcpParamHeaderMirroring:
+    def test_extract_is_case_insensitive(self):
+        params = extract_mcp_param_headers(
+            {"Mcp-Param-City": "Boston", "mcp-param-limit": "10", "Mcp-Name": "echo"}
+        )
+        assert params["City"] == "Boston"
+        assert params["limit"] == "10"
+        assert "Name" not in params
+
+    def test_merge_fills_missing_and_keeps_body(self):
+        merged = merge_mcp_param_headers(
+            {"value": "body", "extra": ""},
+            {"value": "header", "extra": "from-header", "unknown": "x"},
+            allowed_fields={"value", "extra"},
+        )
+        assert merged["value"] == "body"
+        assert merged["extra"] == "from-header"
+        assert "unknown" not in merged
+
+    def test_merge_does_not_override_name(self):
+        merged = merge_mcp_param_headers(
+            {"name": "echo", "value": ""},
+            {"name": "other", "value": "ok"},
+            allowed_fields={"name", "value"},
+        )
+        assert merged["name"] == "echo"
+        assert merged["value"] == "ok"
+
+    def test_oversized_param_is_detected(self):
+        huge = "x" * (MAX_MCP_PARAM_VALUE_BYTES + 1)
+        assert first_oversized_mcp_param({"Mcp-Param-City": huge}) == "City"
+        assert first_oversized_mcp_param({"Mcp-Param-City": "Boston"}) is None
+
+    def test_pipeline_name_check_uses_body_not_mirrored_params(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "echo", "arguments": {}},
+                }
+            ).encode()
+            result = await pipeline.handle_post(
+                body,
+                {
+                    "Mcp-Method": "tools/call",
+                    "Mcp-Name": "echo",
+                    "Mcp-Param-Name": "other",
+                },
+            )
+            assert result is None
+
+        asyncio.run(_run())
+
+    def test_pipeline_rejects_oversized_param(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+            status, resp = await pipeline.handle_post(
+                body,
+                {"Mcp-Param-City": "x" * (MAX_MCP_PARAM_VALUE_BYTES + 1)},
+            )
+            assert status == 400
+            assert resp["error"]["code"] == -32600
+
+        asyncio.run(_run())
+
+    def test_http_header_fills_missing_tool_argument(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel, Field
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        try:
+            @injectable()
+            class EchoController:
+                @tool(name="echo", description="echo", input_schema=EchoInput)
+                async def echo(self, input: EchoInput, context: ExecutionContext) -> dict:
+                    return {
+                        "value": input.value,
+                        "mirrored": context.mcp_param_headers,
+                    }
+
+            @module(name="McpParamHttp", controllers=[EchoController])
+            class McpParamModule:
+                pass
+
+            @mcp_app(module=McpParamModule, server=ServerConfig(name="mcp-param-http"))
+            class McpParamApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(McpParamApp))
+            http_app = app.get_combined_app(json_response=True)
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "echo",
+                "MCP-Protocol-Version": "2025-06-18",
+            }
+            with TestClient(http_app) as client:
+                filled = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Param-value": "from-header"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {}},
+                    },
+                )
+                kept = client.post(
+                    "/mcp",
+                    headers={**json_headers, "Mcp-Param-value": "from-header"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "from-body"}},
+                    },
+                )
+            assert filled.status_code == 200, filled.text
+            filled_body = filled.json()["result"]
+            filled_payload = filled_body.get("structuredContent") or json.loads(
+                filled_body["content"][0]["text"]
+            )
+            assert filled_payload["value"] == "from-header"
+            assert filled_payload["mirrored"]["value"] == "from-header"
+            assert kept.status_code == 200, kept.text
+            kept_body = kept.json()["result"]
+            kept_payload = kept_body.get("structuredContent") or json.loads(
+                kept_body["content"][0]["text"]
+            )
+            assert kept_payload["value"] == "from-body"
+            assert kept_payload["mirrored"]["value"] == "from-header"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestCors:
     def test_cors_allow_methods(self):
         headers = build_cors_headers()
         assert "GET, POST, DELETE, OPTIONS" in headers["Access-Control-Allow-Methods"]

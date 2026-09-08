@@ -9,7 +9,7 @@ import datetime
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Pattern, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Pattern, Set, Tuple, Type
 
 import mcp.types as types
 from mcp.shared.exceptions import McpError
@@ -59,7 +59,11 @@ from nitrostack.auth.request import (
 )
 from nitrostack.protocol.meta import bind_request_envelope, flatten_request_meta_object
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
-from nitrostack.transports.headers import extract_mcp_scope_headers
+from nitrostack.transports.headers import (
+    extract_mcp_param_headers,
+    extract_mcp_scope_headers,
+    merge_mcp_param_headers,
+)
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.tasks import (
     DEFAULT_TASK_TTL_MS,
@@ -326,16 +330,41 @@ def _http_headers_from_request_ctx(rc: Any) -> Dict[str, str]:
 
 
 def _apply_request_envelope(ctx: ExecutionContext, rc: Any) -> None:
+    http_headers = _http_headers_from_request_ctx(rc)
     envelope = bind_request_envelope(
         raw_meta=_request_meta_from_ctx(rc),
-        mcp_headers=extract_mcp_scope_headers(_http_headers_from_request_ctx(rc)),
+        mcp_headers=extract_mcp_scope_headers(http_headers),
     )
     ctx.rpc_meta = envelope.meta
     ctx.mcp_headers = dict(envelope.mcp_headers)
+    ctx.mcp_param_headers = extract_mcp_param_headers(http_headers)
     ctx.protocol_version = envelope.protocol_version
     ctx.auth = auth_context_from_request(rc)
     if ctx.trace is None:
         ctx.trace = extract_trace_context(envelope.meta.raw)
+
+
+def _tool_arguments_with_mcp_params(
+    arguments: Dict[str, Any],
+    param_headers: Mapping[str, str],
+    input_model: Type[BaseModel],
+) -> Dict[str, Any]:
+    """Fill missing tool fields from ``Mcp-Param-*``. Does not rewrite ``name``."""
+    payload = dict(arguments or {})
+    inner = payload.get("input")
+    looks_wrapped = (
+        isinstance(inner, dict)
+        and set(payload.keys()) <= {"input"}
+        and "input" not in input_model.model_fields
+    )
+    allowed = set(input_model.model_fields)
+    if looks_wrapped:
+        return {
+            "input": merge_mcp_param_headers(
+                inner, param_headers, allowed_fields=allowed
+            )
+        }
+    return merge_mcp_param_headers(payload, param_headers, allowed_fields=allowed)
 
 
 def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
@@ -1012,6 +1041,12 @@ class McpApplication:
 
         cfg = entry.config
         tool_arguments, input_responses, request_state = split_mrtr_from_arguments(arguments or {})
+        rc = request_ctx.get(None)
+        tool_arguments = _tool_arguments_with_mcp_params(
+            tool_arguments,
+            extract_mcp_param_headers(_http_headers_from_request_ctx(rc)),
+            entry.input_model,
+        )
         # Pydantic validates after accepting either Inspector top-level fields
         # or the older `{input: {...}}` wrap. Low-level jsonschema is off
         # (`validate_input=False`) so the wrap is not rejected against the
@@ -1025,7 +1060,6 @@ class McpApplication:
         task_metadata = None
         session = None
         progress_token = None
-        rc = request_ctx.get(None)
         if rc is not None:
             if getattr(rc, "experimental", None) is not None:
                 task_metadata = rc.experimental.task_metadata
@@ -1215,8 +1249,15 @@ class McpApplication:
 
         cfg = entry.config
         args_dict = dict(arguments or {})
+        rc = request_ctx.get(None)
+        allowed = {arg.name for arg in cfg.arguments} if cfg.arguments else None
+        args_dict = merge_mcp_param_headers(
+            args_dict,
+            extract_mcp_param_headers(_http_headers_from_request_ctx(rc)),
+            allowed_fields=allowed,
+        )
         ctx = ExecutionContext(request_id=str(uuid.uuid4()), metadata=args_dict)
-        _apply_request_envelope(ctx, request_ctx.get(None))
+        _apply_request_envelope(ctx, rc)
         guards, middleware, interceptors, pipes, filters = self._pipeline_stages(entry.method)
 
         raw_messages = await run_pipeline(
