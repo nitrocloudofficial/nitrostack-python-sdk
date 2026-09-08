@@ -16,6 +16,7 @@ from nitrostack.protocol.version import (
     SUPPORTED_PROTOCOL_VERSIONS,
     accepts_sessionless_initialize,
     http_engine_for_era,
+    resolve_http_engine,
     rejects_legacy_initialize,
     needs_modern_engine,
     needs_sessionful_engine,
@@ -237,6 +238,10 @@ class TestTypescriptCompatibleProtocolEra:
         assert http_engine_for_era("auto") == "sessionless"
         assert http_engine_for_era("modern") == "sessionless"
         assert http_engine_for_era("legacy") == "sessionful"
+        assert resolve_http_engine("auto", stateless=False) == "sessionless"
+        assert resolve_http_engine("modern", http_engine="sessionful") == "sessionless"
+        assert resolve_http_engine("legacy") == "sessionful"
+        assert resolve_http_engine("legacy", stateless=True) == "sessionless"
         assert accepts_sessionless_initialize("auto") is True
         assert accepts_sessionless_initialize("modern") is False
         assert accepts_sessionless_initialize("legacy") is False

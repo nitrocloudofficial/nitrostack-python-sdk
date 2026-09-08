@@ -97,6 +97,11 @@ async def _build_app() -> McpApplication:
     return await McpApplicationFactory.create(_TestApp)
 
 
+def _sessionful_http(app, **kwargs):
+    kwargs.setdefault("enable_cors", True)
+    return build_http_app(app, protocol_era="legacy", wire_mode="sessionful", **kwargs)
+
+
 def _initialize(client: TestClient) -> str:
     resp = client.post("/mcp", headers=JSON_HEADERS, json=INITIALIZE_BODY)
     assert resp.status_code == 200, resp.text
@@ -150,7 +155,7 @@ def _extract_json_rpc(resp) -> dict:
 
 def test_http_health_and_cors():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         health = client.get("/mcp/health")
@@ -200,7 +205,7 @@ def test_http_health_and_cors():
 
 def test_http_tool_call_parity():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)
@@ -235,7 +240,7 @@ def test_http_tool_call_parity():
 
 def test_session_isolation_and_termination():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_a = _initialize(client)
@@ -264,7 +269,7 @@ def test_session_isolation_and_termination():
 
 def test_max_sessions_cap():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True, max_sessions=1)
+    http_app = _sessionful_http(app, max_sessions=1)
 
     with TestClient(http_app) as client:
         _initialize(client)  # first session: at capacity now
@@ -312,7 +317,7 @@ def test_stateless_mode_skips_handshake():
 
 def test_di_singletons_shared_across_transports():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)
@@ -417,7 +422,7 @@ def test_progress_notifications_pushed():
 
 async def _test_dual_mode_coordinated_shutdown():
     app = await _build_app()
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
     port = _free_port()
 
     stdio_started = asyncio.Event()
@@ -482,7 +487,7 @@ def test_dual_mode_coordinated_shutdown():
 
 def test_mcp_path_does_not_redirect():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app, follow_redirects=False) as client:
         init = client.post("/mcp", headers=JSON_HEADERS, json=INITIALIZE_BODY)
@@ -528,7 +533,7 @@ def test_mcp_path_does_not_redirect():
 
 def test_legacy_sse_messages_not_swallowed_by_streamable_http():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         # Trailing-slash path reaches SseServerTransport. Unknown session → 404
@@ -565,7 +570,7 @@ def test_legacy_sse_messages_not_swallowed_by_streamable_http():
 
 def test_wildcard_and_missing_accept_are_honoured():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         init = client.post(
@@ -643,7 +648,7 @@ def test_header_compat_preserves_protocol_version_for_inner_app():
 
 def test_delete_terminates_live_session_and_404s_unknown_one():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)

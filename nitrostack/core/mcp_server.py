@@ -33,6 +33,7 @@ class NitroStackMcpServer(LowLevelServer):
         super().__init__(name=name, version=version)
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
+        self.sessionful: bool = False
         self.discover_handler: Optional[Callable[[], dict[str, Any]]] = None
         self.initialize_handler: Optional[Callable[[Optional[str]], dict[str, Any]]] = None
 

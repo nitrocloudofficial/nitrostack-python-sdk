@@ -180,3 +180,23 @@ def http_engine_for_era(era: ProtocolEra) -> HttpEngine:
     if needs_sessionful_engine(era):
         return "sessionful"
     return "sessionless"
+
+
+def resolve_http_engine(
+    era: ProtocolEra,
+    *,
+    http_engine: Optional[HttpEngine] = None,
+    stateless: Optional[bool] = None,
+) -> HttpEngine:
+    """
+    Sessionful 1.x is mounted only when era is ``legacy``.
+
+    ``auto`` and ``modern`` stay sessionless even if a caller passes
+    ``stateless=False`` or ``http_engine='sessionful'``. ``legacy`` is
+    sessionful unless ``stateless`` is True.
+    """
+    if not needs_sessionful_engine(era):
+        return "sessionless"
+    if stateless is True or http_engine == "sessionless":
+        return "sessionless"
+    return "sessionful"

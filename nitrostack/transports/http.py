@@ -52,6 +52,7 @@ from nitrostack.protocol.version import (
     ProtocolEra,
     WireMode,
     protocol_version_for_era,
+    resolve_http_engine,
 )
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.transports.headers import (
@@ -507,16 +508,18 @@ def build_http_app(
             fallback, or ``reject``). ``auto`` uses ``stateless``; ``modern`` uses
             ``reject``.
         http_engine: Era factory result. ``sessionless`` for modern/auto,
-            ``sessionful`` for legacy. When omitted, follows ``stateless``.
+            ``sessionful`` only for legacy. ``auto`` / ``modern`` never start
+            a sessionful manager, even if ``stateless=False``.
     """
-    if http_engine is None:
-        http_engine = "sessionless" if stateless else "sessionful"
-    else:
-        stateless = http_engine == "sessionless"
+    http_engine = resolve_http_engine(
+        protocol_era, http_engine=http_engine, stateless=stateless
+    )
+    stateless = http_engine == "sessionless"
 
     server = mcp_app.mcp_server
     if server is not None:
         server.http_engine = http_engine
+        server.sessionful = http_engine == "sessionful"
 
     security_settings = None
     if not enable_cors:
@@ -778,6 +781,7 @@ def build_http_app(
     app.state.wire_mode = wire_mode
     app.state.stateless = stateless
     app.state.http_engine = http_engine
+    app.state.sessionful = http_engine == "sessionful"
     app.state.session_manager = session_manager
     app.state.streamable_http_manager_count = 1
     return app

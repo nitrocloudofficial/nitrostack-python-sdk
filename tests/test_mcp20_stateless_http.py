@@ -1325,9 +1325,11 @@ class TestNitroMcpProtocolVersionEnv:
             state = _http_app_state(http_app)
             assert app.protocol_era == "legacy"
             assert state.http_engine == "sessionful"
+            assert state.sessionful is True
             assert state.stateless is False
             assert state.session_manager.stateless is False
             assert app.mcp_server.http_engine == "sessionful"
+            assert app.mcp_server.sessionful is True
             assert "echo" in app._tools
         finally:
             DIContainer.reset()
@@ -1344,6 +1346,185 @@ def _http_app_state(asgi):
             return state
         current = getattr(current, "app", None)
     raise AssertionError("HTTP app is missing protocol era state")
+
+
+class TestEraSessionfulCoexistence:
+    def _echo_app(self, monkeypatch, era_value: str):
+        from pydantic import BaseModel, Field
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EchoInput(BaseModel):
+            value: str = Field(default="")
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", era_value)
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+
+        @injectable()
+        class EchoController:
+            @tool(name="echo", description="echo", input_schema=EchoInput)
+            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
+                return input.value
+
+        @module(name=f"EraCoexist{era_value.title()}", controllers=[EchoController])
+        class EraModule:
+            pass
+
+        @mcp_app(module=EraModule, server=ServerConfig(name=f"era-coexist-{era_value}"))
+        class EraApp:
+            pass
+
+        return asyncio.run(McpApplicationFactory.create(EraApp))
+
+    def test_auto_stateless_false_does_not_start_sessionful_manager(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "auto")
+            http_app = app.get_combined_app(json_response=True, stateless=False)
+            state = _http_app_state(http_app)
+            assert state.http_engine == "sessionless"
+            assert state.sessionful is False
+            assert state.session_manager.stateless is True
+            assert state.streamable_http_manager_count == 1
+            assert app.mcp_server.sessionful is False
+            assert "echo" in app._tools
+
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+            assert init.status_code == 200, init.text
+            assert "result" in init.json()
+            init_headers = {key.lower(): value for key, value in init.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in init_headers
+            assert not state.session_manager._server_instances
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_modern_stateless_false_still_rejects_initialize(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "modern")
+            http_app = app.get_combined_app(json_response=True, stateless=False)
+            state = _http_app_state(http_app)
+            assert state.http_engine == "sessionless"
+            assert state.sessionful is False
+            assert "echo" in app._tools
+
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+            assert init.status_code == 200
+            assert init.json()["error"]["code"] == -32601
+            init_headers = {key.lower(): value for key, value in init.headers.items()}
+            assert LEGACY_SESSION_HEADER.lower() not in init_headers
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+    def test_legacy_initialize_creates_session_without_modern_headers(self, monkeypatch):
+        import os
+
+        from starlette.testclient import TestClient
+
+        from nitrostack.core.di import DIContainer
+
+        try:
+            app = self._echo_app(monkeypatch, "legacy")
+            http_app = app.get_combined_app(json_response=True)
+            state = _http_app_state(http_app)
+            assert state.http_engine == "sessionful"
+            assert state.sessionful is True
+            assert state.streamable_http_manager_count == 1
+            assert "echo" in app._tools
+
+            json_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            with TestClient(http_app) as client:
+                init = client.post(
+                    "/mcp",
+                    headers=json_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "legacy-client", "version": "1.0"},
+                        },
+                    },
+                )
+                session_id = init.headers.get("mcp-session-id") or init.headers.get(
+                    "Mcp-Session-Id"
+                )
+                assert init.status_code == 200, init.text
+                assert session_id
+                client.post(
+                    "/mcp",
+                    headers={**json_headers, LEGACY_SESSION_HEADER: session_id},
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                call = client.post(
+                    "/mcp",
+                    headers={**json_headers, LEGACY_SESSION_HEADER: session_id},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "echo", "arguments": {"value": "ok"}},
+                    },
+                )
+            assert call.status_code == 200, call.text
+            assert call.json()["result"]["content"][0]["text"] == "ok"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
 
 
 class TestAutoEraOneMcpDualClients:
