@@ -912,3 +912,77 @@ class TestEnvelopeOnHandlerContext:
         finally:
             DIContainer.reset()
             os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)
+
+
+class TestAuthFromEnvelopeAndHeaders:
+    def test_tool_user_comes_from_header_jwt_not_unsigned_meta(self, monkeypatch):
+        import os
+
+        from pydantic import BaseModel
+        from starlette.testclient import TestClient
+
+        from nitrostack import ExecutionContext, injectable, module, tool
+        from nitrostack.auth.jwt import JWTService
+        from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+        from nitrostack.core.di import DIContainer
+
+        class EmptyInput(BaseModel):
+            pass
+
+        monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "auto")
+        monkeypatch.delenv("MCP_STATELESS", raising=False)
+        DIContainer.reset()
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+        try:
+            @injectable()
+            class AuthController:
+                @tool(name="whoami", description="identity", input_schema=EmptyInput)
+                async def whoami(self, input: EmptyInput, context: ExecutionContext) -> dict:
+                    return {"user": context.user}
+
+            @module(name="AuthHttp", controllers=[AuthController])
+            class AuthModule:
+                pass
+
+            @mcp_app(module=AuthModule, server=ServerConfig(name="auth-http"))
+            class AuthApp:
+                pass
+
+            app = asyncio.run(McpApplicationFactory.create(AuthApp))
+            http_app = app.get_combined_app(json_response=True)
+            with TestClient(http_app) as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "MCP-Protocol-Version": "2025-06-18",
+                        "Mcp-Method": "tools/call",
+                        "Mcp-Name": "whoami",
+                        "Authorization": f"Bearer {token}",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "whoami",
+                            "arguments": {},
+                            "_meta": {
+                                "userId": "eve",
+                                "tenantId": "evil",
+                                "io.modelcontextprotocol/auth": {"userId": "mallory"},
+                            },
+                        },
+                    },
+                )
+
+            assert response.status_code == 200, response.text
+            result = response.json()["result"]
+            body = result.get("structuredContent") or json.loads(result["content"][0]["text"])
+            assert body["user"] == "alice"
+        finally:
+            DIContainer.reset()
+            os.environ.pop("NITRO_MCP_PROTOCOL_VERSION", None)

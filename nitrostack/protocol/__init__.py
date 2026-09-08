@@ -43,6 +43,7 @@ from nitrostack.protocol.meta import (
     bind_request_envelope,
     envelope_identity_is_ignored,
     extract_request_meta,
+    flatten_request_meta_object,
     split_params_and_meta,
 )
 from nitrostack.protocol.mrtr import (
@@ -116,6 +117,7 @@ __all__ = [
     "bind_request_envelope",
     "envelope_identity_is_ignored",
     "extract_request_meta",
+    "flatten_request_meta_object",
     "split_params_and_meta",
     "deprecated_method_message",
     "DISCOVER_RESULT_TYPE",

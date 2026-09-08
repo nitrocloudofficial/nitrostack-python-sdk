@@ -149,6 +149,37 @@ class TestMetaEnvelope:
         assert "Authorization" not in ctx.mcp_headers
         assert "authorization" not in {key.lower() for key in ctx.mcp_headers}
 
+    def test_apply_request_envelope_sets_verified_jwt_user(self):
+        from types import SimpleNamespace
+
+        from mcp.shared.context import RequestContext
+        from mcp import types
+
+        from nitrostack.auth.jwt import JWTService
+        from nitrostack.core.app import _apply_request_envelope
+        from nitrostack.core.di import DIContainer
+
+        DIContainer.reset()
+        try:
+            jwt = JWTService()
+            DIContainer.get_instance().register_value(JWTService, jwt)
+            token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+            rc = RequestContext(
+                request_id="1",
+                meta=types.RequestParams.Meta.model_validate({"userId": "eve"}),
+                session=None,
+                lifespan_context=None,
+                request=SimpleNamespace(headers={"authorization": f"Bearer {token}"}),
+            )
+            ctx = ExecutionContext(request_id="env-jwt")
+            _apply_request_envelope(ctx, rc)
+            assert ctx.user == "alice"
+            assert ctx.auth is not None
+            assert ctx.auth.claims["tenant_id"] == "acme"
+            assert ctx.rpc_meta.raw["userId"] == "eve"
+        finally:
+            DIContainer.reset()
+
 
 class TestHeaderBodyMismatch:
     def test_mcp_method_mismatch(self):

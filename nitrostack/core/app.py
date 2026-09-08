@@ -52,7 +52,12 @@ from nitrostack.protocol.cache_hints import (
     resolve_resource_cache_hint_meta,
     resolve_tool_cache_hint_meta,
 )
-from nitrostack.protocol.meta import bind_request_envelope
+from nitrostack.auth.request import (
+    auth_context_from_request,
+    bearer_token_from_envelope_auth,
+    envelope_auth_slot,
+)
+from nitrostack.protocol.meta import bind_request_envelope, flatten_request_meta_object
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
 from nitrostack.transports.headers import extract_mcp_scope_headers
 from nitrostack.protocol.deprecated import deprecated_method_message
@@ -289,30 +294,15 @@ def _request_meta_from_ctx(rc: Any) -> Dict[str, Any]:
         return {}
 
     raw_meta = getattr(rc, "meta", None)
-    data: Dict[str, Any] = {}
     if raw_meta is None:
+        return {}
+    data = flatten_request_meta_object(raw_meta)
+    if data:
         return data
-
-    extra_fields = getattr(raw_meta, "model_extra", None) or getattr(raw_meta, "__pydantic_extra__", None)
-    if isinstance(extra_fields, dict):
-        data.update(extra_fields)
-    if hasattr(raw_meta, "model_dump"):
-        try:
-            dumped = raw_meta.model_dump(exclude_none=True)
-            if isinstance(dumped, dict):
-                nested_extra = dumped.pop("__pydantic_extra__", None)
-                if isinstance(nested_extra, dict):
-                    data.update(nested_extra)
-                data.update(dumped)
-        except Exception:
-            pass
-    elif isinstance(raw_meta, dict):
-        data.update(raw_meta)
-    else:
-        for key in _AUTH_META_KEYS:
-            value = getattr(raw_meta, key, None)
-            if value is not None:
-                data[key] = value
+    for key in _AUTH_META_KEYS:
+        value = getattr(raw_meta, key, None)
+        if value is not None:
+            data[key] = value
     return data
 
 
@@ -343,6 +333,7 @@ def _apply_request_envelope(ctx: ExecutionContext, rc: Any) -> None:
     ctx.rpc_meta = envelope.meta
     ctx.mcp_headers = dict(envelope.mcp_headers)
     ctx.protocol_version = envelope.protocol_version
+    ctx.auth = auth_context_from_request(rc)
     if ctx.trace is None:
         ctx.trace = extract_trace_context(envelope.meta.raw)
 
@@ -385,6 +376,10 @@ def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
             header_key = headers.get("x-api-key") or headers.get("X-API-Key")
             if isinstance(header_key, str) and header_key.strip():
                 extra["x-api-key"] = header_key
+
+    envelope_token = bearer_token_from_envelope_auth(envelope_auth_slot(data))
+    if envelope_token:
+        extra["authorization"] = f"Bearer {envelope_token}"
 
     request = getattr(rc, "request", None)
     headers_obj = getattr(request, "headers", None) if request is not None else None

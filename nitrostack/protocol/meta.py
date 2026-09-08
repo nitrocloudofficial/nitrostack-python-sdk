@@ -24,6 +24,7 @@ class RequestMeta:
     tracestate: Optional[str] = None
     baggage: Optional[str] = None
     trace: Optional[dict[str, Any]] = None
+    auth: Optional[Any] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -48,6 +49,7 @@ def extract_request_meta(params: dict[str, Any]) -> RequestMeta:
     tracestate = _meta_get(raw, "tracestate", f"{MCP_META_PREFIX}tracestate")
     baggage = _meta_get(raw, "baggage", f"{MCP_META_PREFIX}baggage")
     trace = _meta_get(raw, "trace", f"{MCP_META_PREFIX}trace")
+    auth = _meta_get(raw, "auth", f"{MCP_META_PREFIX}auth")
 
     return RequestMeta(
         protocol_version=protocol_version if isinstance(protocol_version, str) else None,
@@ -57,6 +59,7 @@ def extract_request_meta(params: dict[str, Any]) -> RequestMeta:
         tracestate=tracestate if isinstance(tracestate, str) else None,
         baggage=baggage if isinstance(baggage, str) else None,
         trace=trace if isinstance(trace, dict) else None,
+        auth=auth,
         raw=dict(raw),
     )
 
@@ -104,3 +107,26 @@ def bind_request_envelope(
 def envelope_identity_is_ignored(raw_meta: dict[str, Any]) -> bool:
     """True when the envelope contains unsigned identity keys."""
     return any(str(key).lower() in _IDENTITY_META_KEYS for key in raw_meta)
+
+
+def flatten_request_meta_object(raw_meta: Any) -> dict[str, Any]:
+    """Flatten an MCP ``_meta`` object, including Pydantic extras."""
+    if raw_meta is None:
+        return {}
+    data: dict[str, Any] = {}
+    extra = getattr(raw_meta, "model_extra", None) or getattr(raw_meta, "__pydantic_extra__", None)
+    if isinstance(extra, dict):
+        data.update(extra)
+    if hasattr(raw_meta, "model_dump"):
+        try:
+            dumped = raw_meta.model_dump(exclude_none=True)
+            if isinstance(dumped, dict):
+                nested_extra = dumped.pop("__pydantic_extra__", None)
+                if isinstance(nested_extra, dict):
+                    data.update(nested_extra)
+                data.update(dumped)
+        except Exception:
+            pass
+    elif isinstance(raw_meta, dict):
+        data.update(raw_meta)
+    return data

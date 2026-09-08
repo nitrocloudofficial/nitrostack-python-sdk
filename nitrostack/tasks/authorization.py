@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
+from nitrostack.auth.request import (
+    authorization_token_from_request,
+    tenant_from_claims,
+    verify_bearer_payload,
+)
 from nitrostack.core.errors import TaskNotFoundError
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData
 
@@ -76,72 +81,13 @@ def list_task_wire_data_for_context(
     return page, next_cursor
 
 
-def _meta_dict(raw_meta: Any) -> dict[str, Any]:
-    if raw_meta is None:
-        return {}
-    data: dict[str, Any] = {}
-    extra = getattr(raw_meta, "model_extra", None) or getattr(raw_meta, "__pydantic_extra__", None)
-    if isinstance(extra, dict):
-        data.update(extra)
-    if hasattr(raw_meta, "model_dump"):
-        try:
-            dumped = raw_meta.model_dump(exclude_none=True)
-            if isinstance(dumped, dict):
-                nested_extra = dumped.pop("__pydantic_extra__", None)
-                if isinstance(nested_extra, dict):
-                    data.update(nested_extra)
-                data.update(dumped)
-        except Exception:
-            pass
-    elif isinstance(raw_meta, dict):
-        data.update(raw_meta)
-    else:
-        for key in ("authorization", "Authorization", "headers"):
-            value = getattr(raw_meta, key, None)
-            if value is not None:
-                data[key] = value
-    return data
-
-
 def _tenant_from_claims(claims: dict[str, Any]) -> Optional[str]:
-    for key in ("tenant_id", "tenantId", "org_id", "orgId"):
-        value = claims.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return None
-
-
-def _bearer_token_from_header(value: Any) -> Optional[str]:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    if stripped.startswith("Bearer "):
-        token = stripped[len("Bearer ") :].strip()
-        return token or None
-    return None
+    return tenant_from_claims(claims)
 
 
 def _authorization_from_request_context(rc: Any) -> Optional[str]:
-    """Prefer transport headers; fall back to a Bearer token in ``_meta`` only."""
-    request = getattr(rc, "request", None)
-    headers_obj = getattr(request, "headers", None) if request is not None else None
-    if headers_obj is not None:
-        try:
-            header = headers_obj.get("authorization") or headers_obj.get("Authorization")
-            token = _bearer_token_from_header(header)
-            if token:
-                return token
-        except Exception:
-            pass
-
-    meta = _meta_dict(getattr(rc, "meta", None))
-    token = _bearer_token_from_header(meta.get("authorization") or meta.get("Authorization"))
-    if token:
-        return token
-    headers = meta.get("headers")
-    if isinstance(headers, dict):
-        return _bearer_token_from_header(headers.get("authorization") or headers.get("Authorization"))
-    return None
+    """HTTP Authorization, then envelope auth, then ``_meta`` Bearer."""
+    return authorization_token_from_request(rc)
 
 
 def _session_id_from_request_context(rc: Any) -> Optional[str]:
@@ -158,10 +104,11 @@ def extract_task_access_context(rc: Any) -> Optional[TaskAccessContext]:
     """
     Build ``TaskAccessContext`` from an MCP request context.
 
-    Identity comes from a verified JWT (HTTP ``Authorization`` or a Bearer
-    token in ``_meta``), never from unsigned ``userId`` / ``tenantId`` fields.
-    If a Bearer token is present and verification fails, returns an empty
-    context so scoped tasks are denied.
+    Identity comes from a verified JWT: HTTP ``Authorization``, then the
+    spec envelope auth slot, then a Bearer token in ``_meta``. Unsigned
+    ``userId`` / ``tenantId`` fields are never used. If a Bearer token is
+    present and verification fails, returns an empty context so scoped
+    tasks are denied.
 
     ``None`` is reserved for callers with no request context (internal path).
     """
@@ -174,17 +121,13 @@ def extract_task_access_context(rc: Any) -> Optional[TaskAccessContext]:
     token = _authorization_from_request_context(rc)
 
     if token:
-        try:
-            from nitrostack.auth.jwt import JWTService
-            from nitrostack.core.di import DIContainer
-
-            payload = DIContainer.get_instance().resolve(JWTService).verify_token(token)
-            subject = payload.get("sub")
-            if isinstance(subject, str) and subject.strip():
-                user_id = subject
-            tenant_id = _tenant_from_claims(payload)
-        except Exception:
+        payload = verify_bearer_payload(token)
+        if payload is None:
             return TaskAccessContext()
+        subject = payload.get("sub")
+        if isinstance(subject, str) and subject.strip():
+            user_id = subject
+        tenant_id = _tenant_from_claims(payload)
 
     return TaskAccessContext(
         user_id=str(user_id) if user_id else None,

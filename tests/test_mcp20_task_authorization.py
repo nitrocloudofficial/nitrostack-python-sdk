@@ -283,3 +283,96 @@ class TestExtractTaskAccessContext:
         assert ctx is not None
         assert ctx.user_id is None
         assert ctx.tenant_id is None
+
+    def test_header_jwt_wins_over_envelope_auth_and_unsigned_identity(self):
+        from types import SimpleNamespace
+
+        from nitrostack.auth.jwt import JWTService
+
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        header_token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+        envelope_token = jwt.create_token({"sub": "mallory", "tenant_id": "evil"})
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta.model_validate(
+                {
+                    "userId": "eve",
+                    "tenantId": "evil",
+                    "io.modelcontextprotocol/auth": {
+                        "authorization": f"Bearer {envelope_token}",
+                        "userId": "mallory",
+                    },
+                }
+            ),
+            session=None,
+            lifespan_context=None,
+            request=SimpleNamespace(headers={"authorization": f"Bearer {header_token}"}),
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id == "alice"
+        assert ctx.tenant_id == "acme"
+
+    def test_envelope_auth_token_used_when_header_absent(self):
+        from nitrostack.auth.jwt import JWTService
+
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta.model_validate(
+                {
+                    "userId": "eve",
+                    "io.modelcontextprotocol/auth": {"authorization": f"Bearer {token}"},
+                }
+            ),
+            session=None,
+            lifespan_context=None,
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id == "alice"
+        assert ctx.tenant_id == "acme"
+
+    def test_unsigned_envelope_auth_identity_is_ignored(self):
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta.model_validate(
+                {
+                    "io.modelcontextprotocol/auth": {
+                        "userId": "eve",
+                        "tenantId": "evil",
+                    }
+                }
+            ),
+            session=None,
+            lifespan_context=None,
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id is None
+        assert ctx.tenant_id is None
+
+    def test_failed_header_jwt_does_not_use_envelope_token(self):
+        from types import SimpleNamespace
+
+        from nitrostack.auth.jwt import JWTService
+
+        jwt = JWTService()
+        DIContainer.get_instance().register_value(JWTService, jwt)
+        envelope_token = jwt.create_token({"sub": "alice", "tenant_id": "acme"})
+        rc = RequestContext(
+            request_id="1",
+            meta=types.RequestParams.Meta.model_validate(
+                {"io.modelcontextprotocol/auth": {"authorization": f"Bearer {envelope_token}"}}
+            ),
+            session=None,
+            lifespan_context=None,
+            request=SimpleNamespace(headers={"authorization": "Bearer not-a-jwt"}),
+        )
+        ctx = extract_task_access_context(rc)
+        assert ctx is not None
+        assert ctx.user_id is None
+        assert ctx.tenant_id is None
