@@ -133,11 +133,12 @@ def resolve_protocol_era(
 
 def supported_protocol_versions_for_era(era: ProtocolEra) -> frozenset[str]:
     """Dated protocol versions this era accepts on the wire header or envelope."""
+    legacy_versions = frozenset({LEGACY_PROTOCOL_VERSION, "2025-11-25"})
     if era == "modern":
         return frozenset({MODERN_PROTOCOL_VERSION})
     if era == "legacy":
-        return frozenset({LEGACY_PROTOCOL_VERSION})
-    return frozenset({MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION})
+        return legacy_versions
+    return frozenset({MODERN_PROTOCOL_VERSION, *legacy_versions})
 
 
 def protocol_era_for_wire_mode(wire_mode: WireMode) -> ProtocolEra:

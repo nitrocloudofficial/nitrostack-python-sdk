@@ -28,9 +28,14 @@ def has_incoming_session_id(request_headers: Mapping[str, str]) -> bool:
     return False
 
 
-def sessionless_rejects_incoming_session_id(wire_mode: str) -> bool:
-    """``modern`` and ``auto`` engines have no session semantics. ``legacy`` does."""
+def sessionless_strips_incoming_session_id(wire_mode: str) -> bool:
+    """``modern`` and ``auto`` ignore client ``Mcp-Session-Id``; ``legacy`` keeps it."""
     return wire_mode != "sessionful"
+
+
+def sessionless_rejects_incoming_session_id(wire_mode: str) -> bool:
+    """Deprecated alias for ``sessionless_strips_incoming_session_id``."""
+    return sessionless_strips_incoming_session_id(wire_mode)
 
 
 def request_protocol_version(

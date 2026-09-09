@@ -34,7 +34,6 @@ from nitrostack.runtime.stateless import (
     has_incoming_session_id,
     is_unsupported_protocol_version,
     request_protocol_version,
-    sessionless_rejects_incoming_session_id,
 )
 from nitrostack.tasks.store import TaskStore
 from nitrostack.tasks.types import TaskAccessContext, TERMINAL_TASK_STATUSES
@@ -123,10 +122,12 @@ class TestStatelessInvariants:
         assert has_incoming_session_id({"Content-Type": "application/json"}) is False
         assert has_incoming_session_id({"Mcp-Session-Id": "  "}) is False
 
-    def test_sessionless_engines_reject_incoming_session_id(self):
-        assert sessionless_rejects_incoming_session_id("reject") is True
-        assert sessionless_rejects_incoming_session_id("stateless") is True
-        assert sessionless_rejects_incoming_session_id("sessionful") is False
+    def test_sessionless_engines_strip_incoming_session_id(self):
+        from nitrostack.runtime.stateless import sessionless_strips_incoming_session_id
+
+        assert sessionless_strips_incoming_session_id("reject") is True
+        assert sessionless_strips_incoming_session_id("stateless") is True
+        assert sessionless_strips_incoming_session_id("sessionful") is False
 
 
 class TestTaskStoreContract:

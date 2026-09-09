@@ -54,10 +54,9 @@ from nitrostack.protocol.version import (
     supported_protocol_versions_for_era,
 )
 from nitrostack.runtime.stateless import (
-    has_incoming_session_id,
     is_unsupported_protocol_version,
     request_protocol_version,
-    sessionless_rejects_incoming_session_id,
+    sessionless_strips_incoming_session_id,
 )
 from nitrostack.transports.headers import (
     HEADER_MCP_METHOD,
@@ -65,6 +64,7 @@ from nitrostack.transports.headers import (
     HEADER_MCP_PROTOCOL_VERSION,
     first_oversized_mcp_param,
     get_header,
+    strip_legacy_session_headers,
 )
 
 TaskDispatchHandler = Callable[[JsonRpcRequest], Awaitable[Optional[dict[str, Any]]]]
@@ -133,25 +133,19 @@ class IngressContext:
         return rejects_legacy_initialize(self.resolved_era())
 
 
-def reject_incoming_session_id(
-    request_id: Any,
+def prepare_sessionless_request_headers(
     request_headers: dict[str, str],
     wire_mode: WireMode,
-) -> Optional[tuple[int, dict[str, Any]]]:
+) -> dict[str, str]:
     """
-    Reject client ``Mcp-Session-Id`` on sessionless engines (``modern`` / ``auto``).
+    Drop client ``Mcp-Session-Id`` on sessionless engines (``modern`` / ``auto``).
 
-    ``legacy`` (``wire_mode=sessionful``) keeps session headers.
+    Obsolete session headers must not become a dependency; they are ignored rather
+    than rejected so stateless clients stay unambiguous.
     """
-    if not sessionless_rejects_incoming_session_id(wire_mode):
-        return None
-    if not has_incoming_session_id(request_headers):
-        return None
-    return 400, jsonrpc_error(
-        request_id,
-        int(JsonRpcErrorCode.INVALID_REQUEST),
-        "Invalid Request: Mcp-Session-Id is not supported",
-    )
+    if not sessionless_strips_incoming_session_id(wire_mode):
+        return request_headers
+    return strip_legacy_session_headers(request_headers)
 
 
 def reject_legacy_handshake(
@@ -252,20 +246,32 @@ def is_task_wire_interception(method: str, params: dict[str, Any]) -> bool:
 def reject_required_mcp_name(
     request: JsonRpcRequest,
     request_headers: dict[str, str],
+    wire_mode: WireMode,
 ) -> Optional[tuple[int, dict[str, Any]]]:
-    """Require ``Mcp-Name`` on name-scoped methods (``tools/call``, ``resources/read``, ``prompts/get``)."""
+    """Require or cross-check ``Mcp-Name`` on name-scoped methods."""
     if not mcp_name_is_required(request.method):
         return None
     field = mcp_name_field(request.method) or "name"
     header_name = get_header(request_headers, HEADER_MCP_NAME)
     body_name = request.params.get(field)
+    body_value = body_name if isinstance(body_name, str) else None
     try:
-        validate_required_mcp_name(
-            header_name,
-            body_name if isinstance(body_name, str) else None,
-            body_label=field,
-        )
+        if wire_mode == "stateless":
+            if header_name is not None:
+                validate_header_body_name(header_name, body_value)
+            elif not (body_value and body_value.strip()):
+                raise InvalidRequestError(
+                    f"{field!r} is required in params for {request.method!r}"
+                )
+        else:
+            validate_required_mcp_name(
+                header_name,
+                body_value,
+                body_label=field,
+            )
     except HeaderBodyMismatchError as exc:
+        return 400, exc.to_response(request.id)
+    except InvalidRequestError as exc:
         return 400, exc.to_response(request.id)
     return None
 
@@ -349,10 +355,6 @@ class StatelessIngressPipeline:
         self._discover_handler = discover_handler
         self._initialize_handler = initialize_handler
 
-    def forbids_incoming_session_id(self, request_headers: dict[str, str]) -> bool:
-        """True when this engine must reject ``Mcp-Session-Id`` without forwarding."""
-        return reject_incoming_session_id(None, request_headers, self._context.wire_mode) is not None
-
     def reject_tools_call_mcp_name(
         self,
         raw_body: bytes,
@@ -363,7 +365,9 @@ class StatelessIngressPipeline:
             request = parse_jsonrpc_request(raw_body)
         except (JsonRpcParseError, JsonRpcWireError):
             return None
-        return reject_required_mcp_name(request, request_headers)
+        return reject_required_mcp_name(
+            request, request_headers, self._context.wire_mode
+        )
 
     def reject_jsonrpc_mcp_method(
         self,
@@ -435,12 +439,11 @@ class StatelessIngressPipeline:
         Run ingress steps 2–5. Returns None to delegate to the underlying MCP app.
         Step 1 (CORS) is handled by transport middleware.
         """
+        request_headers = prepare_sessionless_request_headers(
+            request_headers, self._context.wire_mode
+        )
+
         if is_header_only_ping(raw_body, request_headers):
-            rejected_session = reject_incoming_session_id(
-                None, request_headers, self._context.wire_mode
-            )
-            if rejected_session is not None:
-                return rejected_session
             return 200, build_ping_response(None)
 
         try:
@@ -449,12 +452,6 @@ class StatelessIngressPipeline:
             return 400, exc.to_response(None)
         except JsonRpcWireError as exc:
             return 400, exc.to_response(None)
-
-        rejected_session = reject_incoming_session_id(
-            request.id, request_headers, self._context.wire_mode
-        )
-        if rejected_session is not None:
-            return rejected_session
 
         rejected_handshake = reject_legacy_handshake(
             request, self._context.resolved_era()
@@ -468,7 +465,9 @@ class StatelessIngressPipeline:
         if required_method is not None:
             return required_method
 
-        required_name = reject_required_mcp_name(request, request_headers)
+        required_name = reject_required_mcp_name(
+            request, request_headers, self._context.wire_mode
+        )
         if required_name is not None:
             return required_name
 

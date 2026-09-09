@@ -21,6 +21,7 @@ from nitrostack.transports.headers import (
     decode_asgi_headers,
     get_header,
     scope_with_header_snapshot,
+    scope_without_session_headers,
     snapshot_validated_asgi_headers,
     strip_legacy_session_headers,
 )
@@ -67,6 +68,7 @@ class StatelessTransportMiddleware:
         buffered_body: Optional[bytes] = None
         header_snapshot: Optional[tuple[tuple[bytes, bytes], ...]] = None
         if method == "POST" and path in self.mcp_paths and self.pipeline is not None:
+            scope = self._strip_sessionless_scope(scope)
             buffered_body = await self._read_body(receive)
             handled = await self._try_pre_dispatch(scope, buffered_body, send)
             if handled:
@@ -77,9 +79,6 @@ class StatelessTransportMiddleware:
                 await self._send_pipeline_response(
                     scope, send, live_headers, rejected, body=buffered_body
                 )
-                return
-            if self.pipeline.forbids_incoming_session_id(live_headers):
-                await self._send_session_id_rejected(scope, send, live_headers)
                 return
             header_snapshot = snapshot_validated_asgi_headers(list(scope.get("headers") or []))
             snapshot_headers = decode_asgi_headers(list(header_snapshot))
@@ -93,6 +92,7 @@ class StatelessTransportMiddleware:
             scope = scope_with_header_snapshot(scope, header_snapshot)
 
         if path in self.mcp_paths and self.pipeline is not None:
+            scope = self._strip_sessionless_scope(scope)
             raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
             if method == "GET":
                 rejected = self.pipeline.reject_method_policy(b"", raw_headers)
@@ -101,9 +101,6 @@ class StatelessTransportMiddleware:
                         scope, send, raw_headers, rejected, body=b""
                     )
                     return
-            if self.pipeline.forbids_incoming_session_id(raw_headers):
-                await self._send_session_id_rejected(scope, send, raw_headers)
-                return
 
         await self._forward_with_stateless_headers(
             scope, receive, send, body=buffered_body
@@ -184,7 +181,10 @@ class StatelessTransportMiddleware:
         response_headers = self._echo_headers(raw_headers, extra=cors, body=body)
         assert_stateless_headers(response_headers)
         assert self.pipeline is not None
-        payload = self.pipeline.serialize_response(jsonrpc_response)
+        if status == 202 and jsonrpc_response == {}:
+            payload = b""
+        else:
+            payload = self.pipeline.serialize_response(jsonrpc_response)
         await send(
             {
                 "type": "http.response.start",
@@ -238,11 +238,16 @@ class StatelessTransportMiddleware:
                     k.decode("latin-1"): v.decode("latin-1")
                     for k, v in (scope.get("headers") or [])
                 }
+                inner_headers = {
+                    k: v
+                    for k, v in strip_legacy_session_headers(raw_headers).items()
+                    if k.lower() != "content-type"
+                }
                 merged = self._echo_headers(
                     req_headers,
                     content_type=raw_headers.get("content-type", "application/json"),
                     extra={
-                        **strip_legacy_session_headers(raw_headers),
+                        **inner_headers,
                         **build_cors_headers(origin=get_header(req_headers, "Origin")),
                     },
                     body=body,
@@ -262,6 +267,15 @@ class StatelessTransportMiddleware:
             receive,
             send_wrapper,
         )
+
+    def _strip_sessionless_scope(self, scope: dict[str, Any]) -> dict[str, Any]:
+        if self.pipeline is None:
+            return scope
+        from nitrostack.runtime.stateless import sessionless_strips_incoming_session_id
+
+        if sessionless_strips_incoming_session_id(self.pipeline._context.wire_mode):
+            return scope_without_session_headers(scope)
+        return scope
 
     def _echo_headers(
         self,
@@ -364,17 +378,13 @@ class SessionlessHttpGuard:
         if method == "OPTIONS" and path in MCP_POST_PATHS and self.enable_cors:
             await self._sender._send_options(scope, receive, send)
             return
+        scope = scope_without_session_headers(scope)
         raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
-        from nitrostack.runtime.stateless import has_incoming_session_id
         from nitrostack.transports.dispatch import (
             is_header_only_ping,
             reject_modern_method_policy,
         )
         from nitrostack.transports.headers import HEADER_MCP_METHOD, get_header
-
-        if path in MCP_POST_PATHS and has_incoming_session_id(raw_headers):
-            await self._sender._send_session_id_rejected(scope, send, raw_headers)
-            return
         if path in MCP_POST_PATHS and method == "GET":
             header_method = get_header(raw_headers, HEADER_MCP_METHOD)
             if header_method is not None:

@@ -683,39 +683,32 @@ class TestDispatchPipeline:
 
         asyncio.run(_run())
 
-    def test_modern_reject_incoming_session_id(self):
+    def test_modern_ignores_incoming_session_id(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
                 IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
             )
             body = json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ping"}).encode()
             status, resp = await pipeline.handle_post(
-                body, {LEGACY_SESSION_HEADER: "session-1"}
+                body, {LEGACY_SESSION_HEADER: "session-1", "Mcp-Method": "ping"}
             )
-            assert status == 400
-            assert resp["error"]["code"] == -32600
+            assert status == 200
+            assert resp["result"] == {}
 
         asyncio.run(_run())
 
-    def test_auto_reject_incoming_session_id(self):
+    def test_auto_ignores_incoming_session_id(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
                 IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
             )
-            body = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "tools/call",
-                    "params": {"name": "echo"},
-                }
-            ).encode()
+            body = json.dumps({"jsonrpc": "2.0", "id": 4, "method": "ping"}).encode()
             status, resp = await pipeline.handle_post(
-                body, {LEGACY_SESSION_HEADER: "session-1"}
+                body,
+                {LEGACY_SESSION_HEADER: "session-1", "Mcp-Method": "ping"},
             )
-            assert status == 400
-            assert resp["error"]["code"] == -32600
-            assert resp["id"] == 4
+            assert status == 200
+            assert resp["result"] == {}
 
         asyncio.run(_run())
 
@@ -2691,8 +2684,8 @@ class TestRequiredMcpName:
                     headers={**json_headers, "Mcp-Name": "echo"},
                     json={**call_body, "id": 3},
                 )
-            assert missing.status_code == 400
-            assert missing.json()["error"]["code"] == -32020
+            assert missing.status_code == 200, missing.text
+            assert missing.json()["result"]["content"][0]["text"] == "ok"
             assert mismatch.status_code == 400
             assert mismatch.json()["error"]["code"] == -32020
             assert matched.status_code == 200, matched.text
@@ -2703,10 +2696,12 @@ class TestRequiredMcpName:
 
 
 class TestRequiredMcpMethod:
-    def test_pipeline_tools_call_requires_mcp_method(self):
+    def test_pipeline_tools_call_requires_mcp_method_on_modern(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+                IngressContext(
+                    "srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject"
+                )
             )
             body = json.dumps(
                 {
@@ -2733,6 +2728,32 @@ class TestRequiredMcpMethod:
 
         asyncio.run(_run())
 
+    def test_auto_tools_call_accepts_body_only_name_and_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext(
+                    "srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless"
+                )
+            )
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "demo", "arguments": {}},
+                }
+            ).encode()
+            legacy = await pipeline.handle_post(body, {})
+            mismatch = await pipeline.handle_post(
+                body, {"Mcp-Method": "tools/list", "Mcp-Name": "demo"}
+            )
+            assert legacy is None
+            assert mismatch is not None
+            assert mismatch[0] == 400
+            assert mismatch[1]["error"]["code"] == -32020
+
+        asyncio.run(_run())
+
     def test_auto_initialize_does_not_require_mcp_method(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
@@ -2749,6 +2770,20 @@ class TestRequiredMcpMethod:
             status, resp = await pipeline.handle_post(body, {})
             assert status == 200
             assert resp["result"]["protocolVersion"] == "2025-06-18"
+
+        asyncio.run(_run())
+
+    def test_auto_list_methods_do_not_require_mcp_method(self):
+        async def _run():
+            pipeline = StatelessIngressPipeline(
+                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
+            )
+            for method in ("tools/list", "resources/list", "prompts/list"):
+                body = json.dumps(
+                    {"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}
+                ).encode()
+                result = await pipeline.handle_post(body, {})
+                assert result is None, method
 
         asyncio.run(_run())
 
@@ -2828,8 +2863,8 @@ class TestRequiredMcpMethod:
                     headers={**json_headers, "Mcp-Method": "tools/call"},
                     json={**call_body, "id": 3},
                 )
-            assert missing.status_code == 400
-            assert missing.json()["error"]["code"] == -32020
+            assert missing.status_code == 200, missing.text
+            assert missing.json()["result"]["content"][0]["text"] == "ok"
             assert mismatch.status_code == 400
             assert mismatch.json()["error"]["code"] == -32020
             assert matched.status_code == 200, matched.text
