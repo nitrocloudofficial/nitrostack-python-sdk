@@ -141,8 +141,8 @@ def _assert_project(label: str, project_dir: Path, family: str) -> None:
             )
         )
         payload = raw.root
-        assert payload.isError is not True, f"{label}: {name} error {getattr(payload, 'content', None)}"
-        assert payload.structuredContent, f"{label}: {name} has no structuredContent"
+        assert payload.is_error is not True, f"{label}: {name} error {getattr(payload, 'content', None)}"
+        assert payload.structured_content, f"{label}: {name} has no structuredContent"
         embedded = [block for block in payload.content if getattr(block, "type", None) == "resource"]
         assert embedded, f"{label}: {name} tools/call missing EmbeddedResource widget"
         assert str(embedded[0].resource.uri) == uri

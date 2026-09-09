@@ -122,7 +122,12 @@ def test_http_guard_pipe_task_progress_and_completion():
         )
         assert created.status_code == 200, created.text
         created_body = created.json()["result"]
-        task_id = created_body.get("task", {}).get("taskId") or created_body.get("taskId")
+        structured = created_body.get("structuredContent") or {}
+        task_id = (
+            created_body.get("task", {}).get("taskId")
+            or created_body.get("taskId")
+            or (structured.get("task") or {}).get("taskId")
+        )
         assert task_id, created_body
 
         status = None
@@ -143,26 +148,17 @@ def test_http_guard_pipe_task_progress_and_completion():
                 break
             asyncio.run(asyncio.sleep(0.05))
 
-        result = client.post(
-            "/mcp",
-            headers=JSON_HEADERS,
-            json={
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tasks/result",
-                "params": {"taskId": task_id},
-            },
-        )
-    assert result.status_code == 200, result.text
-    payload = result.json()["result"]
-    assert payload.get("isError") is False
-    hello = (payload.get("structuredContent") or {}).get("hello")
-    if hello is None:
-        hello = payload["content"][0]["text"]
-        assert "ADA" in hello
-    else:
-        assert hello == "ADA"
-    assert status == "completed"
+        assert status == "completed"
+        payload = polled.json()["result"]
+        assert payload.get("result") is not None
+        result_payload = payload["result"]
+        assert result_payload.get("isError") is False
+        hello = (result_payload.get("structuredContent") or {}).get("hello")
+        if hello is None:
+            hello = result_payload["content"][0]["text"]
+            assert "ADA" in hello
+        else:
+            assert hello == "ADA"
 
 
 

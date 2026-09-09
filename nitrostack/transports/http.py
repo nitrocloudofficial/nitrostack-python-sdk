@@ -46,7 +46,23 @@ from pydantic_core import PydanticUndefined
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+
+from nitrostack.protocol.version import (
+    HttpEngine,
+    ProtocolEra,
+    WireMode,
+    protocol_version_for_era,
+    resolve_http_engine,
+)
+from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
+from nitrostack.transports.headers import (
+    CORS_ALLOW_HEADER_NAMES,
+    CORS_EXPOSE_HEADER_NAMES,
+    SSE_SUBSCRIPTIONS_PATH,
+    strip_legacy_session_headers_asgi,
+)
+from nitrostack.transports.subscriptions import subscriptions_listen_endpoint
+from nitrostack.transports.proxy import public_url_for_request
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -55,16 +71,8 @@ logger = logging.getLogger("nitrostack.transports.http")
 
 DEFAULT_ENDPOINT = "/mcp"
 
-# CORS headers for browser-based MCP clients (Inspector).
-CORS_ALLOW_HEADERS = [
-    "Content-Type",
-    "Accept",
-    "Authorization",
-    "Mcp-Session-Id",
-    "MCP-Protocol-Version",
-    "Last-Event-ID",
-]
-CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
+# Shared 2026 allow-headers. Session id is exposed only on the sessionful engine.
+CORS_ALLOW_HEADERS = list(CORS_ALLOW_HEADER_NAMES)
 
 # The Accept value `StreamableHTTPServerTransport` requires: it needs
 # `application/json` on POST and `text/event-stream` on both POST and GET.
@@ -81,11 +89,16 @@ def _server_meta(mcp_app: "McpApplication") -> Dict[str, str]:
     }
 
 
-def _landing_html(name: str, version: str, endpoint: str) -> str:
+def _landing_html(
+    name: str,
+    version: str,
+    endpoint: str,
+    public_mcp_url: Optional[str] = None,
+) -> str:
     safe_name = html.escape(name)
     safe_version = html.escape(version)
-    mcp_path = html.escape(endpoint.rstrip("/") or "/mcp")
-    health_path = f"{mcp_path}/health"
+    mcp_path = html.escape(public_mcp_url or (endpoint.rstrip("/") or "/mcp"))
+    health_path = html.escape(f"{(endpoint.rstrip('/') or '/mcp')}/health")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -289,25 +302,21 @@ class ExactEndpointSlashMiddleware:
 
 class HeaderCompatMiddleware:
     """
-    Normalize `Accept` and `MCP-Protocol-Version` on the Streamable HTTP mount
-    so tolerable client quirks don't turn into a failed connection.
+    Normalize ``Accept`` on the Streamable HTTP mount so wildcard or absent
+    Accept does not 406. Session ids are stripped only when
+    ``drop_session_headers`` is set.
 
-    `StreamableHTTPServerTransport` matches Accept media types with
-    `str.startswith`, so it does not honour wildcards: a client sending
-    `Accept: */*` (or no Accept at all, which RFC 9110 also defines as
-    accepting anything) is rejected with `406` even though it accepts
-    everything the transport can send. It also rejects a request with `400` when
-    `MCP-Protocol-Version` names a version it doesn't know, which breaks a
-    client that advertises a spec release newer than the installed `mcp` SDK
-    even though the session itself negotiated a version both sides support.
+    ``MCP-Protocol-Version`` is never deleted. Duplicate casings are collapsed
+    to one ``mcp-protocol-version`` entry and the client value is kept so later
+    version checks see what the client sent.
 
-    Both rejections happen before the JSON-RPC layer, so the client sees a
-    stream that opens and closes with no response on it and no explanation.
-    Requests that already satisfy the transport pass through untouched.
+    Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
+    Sidecar version checks run on the combined app outside this mount.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
         self.app = app
+        self.drop_session_headers = drop_session_headers
 
     @staticmethod
     def _normalize_accept(value: Optional[str]) -> Optional[str]:
@@ -325,44 +334,40 @@ class HeaderCompatMiddleware:
             return MCP_ACCEPT
         return None
 
+    @staticmethod
+    def _canonicalize_protocol_version(headers: List[Any]) -> List[Any]:
+        """Keep the protocol version value; emit one lowercase header name."""
+        version_values: List[bytes] = []
+        kept: List[Any] = []
+        for key, value in headers:
+            if key.lower() == b"mcp-protocol-version":
+                version_values.append(value)
+            else:
+                kept.append((key, value))
+        if not version_values:
+            return headers
+        kept.append((b"mcp-protocol-version", version_values[0]))
+        return kept
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         headers: List[Any] = list(scope.get("headers") or [])
+        if self.drop_session_headers:
+            headers = strip_legacy_session_headers_asgi(headers)
+        headers = self._canonicalize_protocol_version(headers)
+
         raw_accept = next((value for key, value in headers if key.lower() == b"accept"), None)
         accept = self._normalize_accept(raw_accept.decode("latin-1") if raw_accept is not None else None)
-
-        raw_version = next(
-            (value for key, value in headers if key.lower() == b"mcp-protocol-version"),
-            None,
-        )
-        drop_version = raw_version is not None and raw_version.decode("latin-1") not in SUPPORTED_PROTOCOL_VERSIONS
-
-        if accept is None and not drop_version:
-            await self.app(scope, receive, send)
-            return
-
-        rewritten = [
-            (key, value)
-            for key, value in headers
-            if not (key.lower() == b"accept" and accept is not None)
-            and not (key.lower() == b"mcp-protocol-version" and drop_version)
-        ]
         if accept is not None:
-            rewritten.append((b"accept", accept.encode("latin-1")))
+            headers = [(key, value) for key, value in headers if key.lower() != b"accept"]
+            headers.append((b"accept", accept.encode("latin-1")))
             logger.debug("Rewrote Accept %r -> %r for %s", raw_accept, accept, scope.get("path"))
-        if drop_version:
-            logger.debug(
-                "Dropped unsupported MCP-Protocol-Version %r for %s (supported: %s)",
-                raw_version,
-                scope.get("path"),
-                ", ".join(SUPPORTED_PROTOCOL_VERSIONS),
-            )
 
         scope = dict(scope)
-        scope["headers"] = rewritten
+        scope["headers"] = headers
         await self.app(scope, receive, send)
 
 
@@ -469,6 +474,9 @@ def build_http_app(
     enable_cors: bool = True,
     stateless: bool = False,
     json_response: bool = False,
+    protocol_era: ProtocolEra = "auto",
+    wire_mode: WireMode = "stateless",
+    http_engine: Optional[HttpEngine] = None,
 ) -> Starlette:
     """
     Build the Starlette app exposing NitroStack's owned low-level server over
@@ -497,7 +505,24 @@ def build_http_app(
             that doesn't implement SSE parsing for POST responses sees the SSE
             form as a stream that ended without a result. Server-initiated
             streaming (progress, notifications) is unavailable in this mode.
+        protocol_era: ``legacy`` / ``modern`` / ``auto``. Distinct from ``stateless``.
+        wire_mode: Dual-spec policy for 2025 traffic (``sessionful``, ``stateless``
+            fallback, or ``reject``). ``auto`` uses ``stateless``; ``modern`` uses
+            ``reject``.
+        http_engine: Era factory result. ``sessionless`` for modern/auto,
+            ``sessionful`` only for legacy. ``auto`` / ``modern`` never start
+            a sessionful manager, even if ``stateless=False``.
     """
+    http_engine = resolve_http_engine(
+        protocol_era, http_engine=http_engine, stateless=stateless
+    )
+    stateless = http_engine == "sessionless"
+
+    server = mcp_app.mcp_server
+    if server is not None:
+        server.http_engine = http_engine
+        server.sessionful = http_engine == "sessionful"
+
     security_settings = None
     if not enable_cors:
         allowed_hosts = _env_list("MCP_ALLOWED_HOSTS") or ["localhost:*", "127.0.0.1:*"]
@@ -507,7 +532,11 @@ def build_http_app(
             allowed_hosts=allowed_hosts,
             allowed_origins=allowed_origins,
         )
+    else:
+        security_settings = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
+    # Official mcp 2.x owns /mcp (streamable HTTP, both protocol eras).
+    # One manager only; auto/modern are sessionless and legacy is sessionful.
     session_manager = StreamableHTTPSessionManager(
         app=mcp_app.mcp_server,
         stateless=stateless,
@@ -528,7 +557,9 @@ def build_http_app(
 
     # Wraps only the Streamable HTTP mount, so `/mcp/health` and the legacy SSE
     # routes keep their own (correct) content negotiation.
-    mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(handle_streamable_http)
+    mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(
+        handle_streamable_http, drop_session_headers=stateless
+    )
     session_cap: Optional[SessionCapMiddleware] = None
     if max_sessions and not stateless:
         session_cap = SessionCapMiddleware(
@@ -541,22 +572,40 @@ def build_http_app(
             await mcp_app.mcp_server.run(streams[0], streams[1], mcp_app.mcp_server.create_initialization_options())
         return Response()
 
+    def _request_public_mcp_url(request) -> str:
+        port = os.environ.get("PORT") or os.environ.get("MCP_SERVER_PORT") or "3000"
+        return public_url_for_request(
+            request,
+            path=endpoint.rstrip("/") or "/mcp",
+            fallback_host=f"localhost:{port}",
+        )
+
     async def health_check(request):
         return JSONResponse(
             {
                 "status": "ok",
                 "transport": "streamable-http",
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": protocol_version_for_era(protocol_era),
+                "protocolEra": protocol_era,
+                "statelessCapable": http_engine == "sessionless",
                 "stateless": stateless,
                 "jsonResponse": json_response,
                 "sessions": session_cap.active_session_count if session_cap else None,
                 "uptimeSeconds": round(time.monotonic() - _PROCESS_START, 2),
+                "publicUrl": _request_public_mcp_url(request),
             }
         )
 
     async def root_page(request):
         meta = _server_meta(mcp_app)
-        return HTMLResponse(_landing_html(meta["name"], meta["version"], endpoint))
+        return HTMLResponse(
+            _landing_html(
+                meta["name"],
+                meta["version"],
+                endpoint,
+                public_mcp_url=_request_public_mcp_url(request),
+            )
+        )
 
     async def oauth_not_supported(request):
         """Inspector DCR posts `/register` when Authentication is on.
@@ -564,13 +613,14 @@ def build_http_app(
         Return JSON (not the HTML 404 page) so the client shows a clear
         OAuth-off message instead of `Unexpected token '<'`.
         """
+        connect_url = _request_public_mcp_url(request)
         return JSONResponse(
             {
                 "error": "invalid_request",
                 "error_description": (
                     "This MCP server does not use OAuth. In MCP Inspector turn "
                     "Authentication off, then connect with Streamable HTTP to "
-                    f"http://localhost:{os.environ.get('PORT') or os.environ.get('MCP_SERVER_PORT') or '3000'}{endpoint}."
+                    f"{connect_url}."
                 ),
             },
             status_code=404,
@@ -610,7 +660,9 @@ def build_http_app(
         except Exception as exc:
             logger.exception("Widget preview tool call failed for %s", name)
             return JSONResponse({"error": str(exc)}, status_code=400)
-        structured = getattr(result, "structuredContent", None)
+        structured = getattr(result, "structured_content", None)
+        if structured is None:
+            structured = getattr(result, "structuredContent", None)
         try:
             html = entry.component.html_with_data(structured)
         except Exception as exc:
@@ -630,7 +682,7 @@ def build_http_app(
                 "structuredContent": structured,
                 "html": html,
                 "resourceUri": entry.component.resource_uri,
-                "isError": bool(getattr(result, "isError", False)),
+                "isError": bool(getattr(result, "is_error", None) if getattr(result, "is_error", None) is not None else getattr(result, "isError", False)),
             }
         )
 
@@ -645,6 +697,7 @@ def build_http_app(
                 "User-Agent": f"NitroStack/{meta['version']}",
                 "webSocketDebuggerUrl": "",
                 "transport": "mcp",
+                "publicUrl": _request_public_mcp_url(request),
                 "endpoints": {
                     "mcp": endpoint,
                     "sse": "/sse",
@@ -704,6 +757,14 @@ def build_http_app(
         Mount(endpoint, app=mcp_asgi_app),
         Route("/sse", endpoint=handle_sse, methods=["GET"]),
     ]
+    if protocol_era != "legacy":
+        routes.append(
+            Route(
+                SSE_SUBSCRIPTIONS_PATH,
+                endpoint=subscriptions_listen_endpoint(mcp_app),
+                methods=["GET", "POST"],
+            )
+        )
 
     # Rewrite `/mcp` → `/mcp/` *before* routing so Inspector never sees a 307.
     # CORS stays outermost so preflight still works on the original path.
@@ -711,6 +772,9 @@ def build_http_app(
         Middleware(ExactEndpointSlashMiddleware, endpoint=endpoint),
     ]
     if enable_cors:
+        expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
+        if http_engine == "sessionful":
+            expose_headers.append(LEGACY_SESSION_HEADER)
         middleware.insert(
             0,
             Middleware(
@@ -718,7 +782,7 @@ def build_http_app(
                 allow_origins=["*"],
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                 allow_headers=CORS_ALLOW_HEADERS,
-                expose_headers=CORS_EXPOSE_HEADERS,
+                expose_headers=expose_headers,
             ),
         )
 
@@ -726,4 +790,14 @@ def build_http_app(
         _enable_trace_logging()
         middleware.insert(0, Middleware(RequestTraceMiddleware))
 
-    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    app.state.protocol_era = protocol_era
+    app.state.wire_mode = wire_mode
+    app.state.stateless = stateless
+    app.state.http_engine = http_engine
+    app.state.sessionful = http_engine == "sessionful"
+    app.state.session_manager = session_manager
+    app.state.streamable_http_manager_count = 1
+    app.state.subscription_bus = getattr(mcp_app.mcp_server, "subscription_bus", None)
+    app.state.protocol_version = protocol_version_for_era(protocol_era)
+    return app

@@ -2,9 +2,13 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Protocol, List, Dict, Optional
+from typing import TYPE_CHECKING, Any, Protocol, List, Dict, Optional
 
 from nitrostack.core.errors import TaskCancelledError
+
+if TYPE_CHECKING:
+    from nitrostack.protocol.meta import RequestMeta
+    from nitrostack.protocol.observability import TraceContext
 
 # Logger protocol used by ExecutionContext (Section 13)
 class Logger(Protocol):
@@ -22,7 +26,11 @@ class FileLogger:
         self.logger = logging.getLogger(name)
         
         # Read log level from environment
-        level_str = os.environ.get("NITROSTACK_LOG_LEVEL", "DEBUG").upper()
+        level_str = (
+            os.environ.get("NITROSTACK_LOG_LEVEL")
+            or os.environ.get("NITRO_LOG_LEVEL")
+            or "DEBUG"
+        ).upper()
         level = getattr(logging, level_str, logging.DEBUG)
         self.logger.setLevel(level)
         
@@ -110,6 +118,7 @@ class TaskContext:
         *,
         session: Any = None,
         progress_token: Any = None,
+        correlation_id: Any = None,
     ):
         self.task_id = task_id
         self.progress_message: str = ""
@@ -117,17 +126,17 @@ class TaskContext:
         self._task_manager = task_manager
         self._session = session
         self._progress_token = progress_token
+        self._correlation_id = correlation_id
         self._progress_count = 0
 
     def update_progress(self, message: str) -> None:
         self.progress_message = message
         manager = self._task_manager
         if manager is not None:
-            try:
-                manager.update_progress(self.task_id, message)
-            except Exception:
-                # Task may already be terminal/expired — ignore for handler ergonomics.
-                pass
+            updater = getattr(manager, "update_progress_sync", None)
+            if updater is None:
+                raise RuntimeError("Task manager does not support synchronous progress updates")
+            updater(self.task_id, message)
         self._push_progress_notification(message)
 
     def _push_progress_notification(self, message: str) -> None:
@@ -141,6 +150,7 @@ class TaskContext:
                     progress_token=self._progress_token,
                     progress=self._progress_count,
                     message=message,
+                    related_request_id=self._correlation_id,
                 )
             )
         except Exception:
@@ -154,16 +164,16 @@ class TaskContext:
         manager = self._task_manager
         if manager is None:
             return
-        try:
-            manager.cancel_task(self.task_id)
-        except Exception:
-            pass
+        canceller = getattr(manager, "cancel_task_sync", None)
+        if canceller is None:
+            raise RuntimeError("Task manager does not support synchronous cancel")
+        canceller(self.task_id)
 
     def throw_if_cancelled(self) -> None:
         manager = self._task_manager
         if manager is not None:
             try:
-                if manager.is_task_cancelled(self.task_id):
+                if manager.is_task_cancelled_sync(self.task_id):
                     self.is_cancelled = True
             except Exception:
                 pass
@@ -173,8 +183,28 @@ class TaskContext:
 @dataclass
 class ExecutionContext:
     request_id: str
+    correlation_id: str | None = None
+    jsonrpc_id: Any = None
     tool_name: str | None = None
     logger: Logger = field(default_factory=lambda: FileLogger())
     metadata: dict = field(default_factory=dict)
     auth: AuthContext | None = None
     task: TaskContext | None = None
+    input_responses: Dict[str, Any] = field(default_factory=dict)
+    request_state: Optional[Dict[str, Any]] = None
+    trace: "TraceContext | None" = None
+    protocol_version: Optional[str] = None
+    rpc_meta: Optional["RequestMeta"] = None
+    mcp_headers: Dict[str, str] = field(default_factory=dict)
+    mcp_param_headers: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.correlation_id:
+            self.correlation_id = self.request_id
+
+    @property
+    def user(self) -> Optional[str]:
+        """Verified identity only. Unsigned ``_meta.userId`` is never used."""
+        if self.auth is None:
+            return None
+        return self.auth.subject

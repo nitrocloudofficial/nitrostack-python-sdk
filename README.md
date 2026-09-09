@@ -226,6 +226,8 @@ The SDK reads standard settings from the environment or `.env` files:
 
 | Environment Variable | Description |
 |---|---|
+| `HOST` | Bind address for HTTP/SSE (default: `127.0.0.1`). Set `0.0.0.0` to listen on all interfaces (containers). |
+| `TRUSTED_PROXIES` / `MCP_TRUSTED_PROXIES` | Comma-separated IPs, CIDRs, or hostnames allowed to send `X-Forwarded-Host` / `X-Forwarded-Proto`. Unset means those headers are ignored. `X-Forwarded-For` is never used to decide trust. |
 | `PORT` / `MCP_SERVER_PORT` | The port to bind for HTTP/SSE transport (default: `3000`). Overridden by `nitrostack-py --port`. |
 | `WIDGETS_DEV_PORT` | Widget Next.js port (default: `3001`). Overridden by `nitrostack-py --widget`. |
 | `MCP_TRANSPORT_TYPE` | Transport selection: `stdio`, `http`, or `dual` (combining stdio + HTTP/SSE). |
@@ -233,7 +235,8 @@ The SDK reads standard settings from the environment or `.env` files:
 | `MCP_MAX_SESSIONS` | Cap on concurrent Streamable HTTP sessions; new sessions beyond the cap get an HTTP `429`. Unset = unlimited. |
 | `MCP_SESSION_TIMEOUT_MS` | Idle timeout (ms) for stateful HTTP sessions; sessions with no activity for this long are terminated automatically. Unset = no timeout. |
 | `MCP_GRACEFUL_SHUTDOWN_TIMEOUT_MS` | How long (ms) the HTTP transport waits for in-flight requests to finish when shutting down (default: `10000`). |
-| `MCP_STATELESS` | Set to `true` to run the HTTP transport in stateless mode: every request gets a fresh context with no session id and no `initialize` handshake required. |
+| `NITRO_MCP_PROTOCOL_VERSION` | Protocol era (case-insensitive): `auto` / `both` / `dual` / `dual-spec` (default when unset or unknown), `modern` / `latest` / `2026` / `2026-07-28`, or `legacy` / `2025` / `2025-06-18` / `2025-11-25`. `auto` is not the same as `modern`. Wins over `ServerConfig.protocol_era`. |
+| `MCP_STATELESS` | Explicit override: `true` forces `modern` (stateless HTTP), `false` forces `legacy` (sessionful). Wins over `NITRO_MCP_PROTOCOL_VERSION` and `ServerConfig.protocol_era`. |
 | `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | Comma-separated allow-lists for DNS-rebinding protection, used only when CORS is disabled. |
 | `NITROSTACK_LOG_FILE` | Destination file for logs (default: `nitrostack.log`). |
 | `NITROSTACK_LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
@@ -259,6 +262,8 @@ Example:
 ```python
 server = ServerConfig(name="my-server", transport_type="http", max_sessions=100, session_timeout_ms=1_800_000)
 ```
+
+`ServerConfig.protocol_era` is used only when `MCP_STATELESS` and `NITRO_MCP_PROTOCOL_VERSION` are both unset. Unknown tokens become `auto`, same as an unknown env value.
 
 ---
 

@@ -46,7 +46,7 @@ async def _test_initial_tool_hook():
     # Check that called is False initially
     assert ExecutionState.called is False
     
-    # Retrieve the owned low-level Server directly (no FastMCP wrapper in between)
+    # Retrieve the owned low-level Server directly.
     server = harness.app.mcp_server
     
     # Get the InitializedNotification handler

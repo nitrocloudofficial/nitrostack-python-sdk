@@ -20,12 +20,20 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from nitrostack.auth.cimd import (
+    looks_like_cimd_url,
+    resolve_cimd_sync,
+)
+
 if TYPE_CHECKING:
     from nitrostack.auth.oauth import OAuthService
 
 
 def build_authorization_server_metadata(
-    service: "OAuthService", registration_endpoint: Optional[str] = None
+    service: "OAuthService",
+    registration_endpoint: Optional[str] = None,
+    *,
+    public_origin: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build an RFC 8414 Authorization Server Metadata document.
@@ -34,9 +42,15 @@ def build_authorization_server_metadata(
     document describes the *external* IdP configured via `authorization_servers`/
     `token_introspection_endpoint`/`jwks_uri` — it does not mean nitrostack serves
     these endpoints itself.
+
+    ``public_origin`` is the trusted-proxy-aware request origin. It is used only
+    as a last-resort issuer fallback and to make a relative registration path
+    absolute.
     """
     issuer = service.issuer or (
-        service.authorization_servers[0] if service.authorization_servers else "http://localhost"
+        service.authorization_servers[0]
+        if service.authorization_servers
+        else (public_origin or "http://localhost")
     )
     auth_server_base = service.authorization_servers[0] if service.authorization_servers else issuer
 
@@ -52,7 +66,10 @@ def build_authorization_server_metadata(
         "code_challenge_methods_supported": ["S256"],
     }
     if registration_endpoint:
-        metadata["registration_endpoint"] = registration_endpoint
+        if public_origin and registration_endpoint.startswith("/"):
+            metadata["registration_endpoint"] = f"{public_origin.rstrip('/')}{registration_endpoint}"
+        else:
+            metadata["registration_endpoint"] = registration_endpoint
     return metadata
 
 
@@ -62,6 +79,7 @@ def build_protected_resource_metadata(service: "OAuthService") -> Dict[str, Any]
         "resource": service.resource_uri,
         "authorization_servers": service.authorization_servers,
         "scopes_supported": service.scopes_supported,
+        "bearer_methods_supported": ["header"],
     }
 
 
@@ -72,8 +90,45 @@ def is_client_registration_enabled(service: "OAuthService") -> bool:
     Requires BOTH an explicit opt-in (`enable_client_registration`, from config or
     `OAUTH_ENABLE_CLIENT_REGISTRATION=true`) AND a configured client id — never a
     literal default. Without a configured client id there is nothing to hand back.
+
+    Deprecated on MCP 2026-07-28 in favor of Client ID Metadata Documents (CIMD).
     """
     return bool(service.enable_client_registration and service.static_client_id)
+
+
+def apply_cimd_to_registration_body(
+    body: Optional[Dict[str, Any]] = None,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    peer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    When registration includes a CIMD ``client_id`` URL, fetch and validate it.
+
+    Returns the body unchanged when ``client_id`` is not a URL. Raises
+    ``CimdValidationError`` / ``CimdFetchError`` on a failed CIMD fetch.
+
+    ``headers`` / ``peer`` pin the inbound request host. Forwarded host is
+    honored only when the peer is trusted, so an untrusted
+    ``X-Forwarded-Host`` cannot rebind the CIMD host comparison.
+    """
+    from nitrostack.auth.cimd import cimd_host_matches_request, request_host_for_cimd
+
+    payload = dict(body or {})
+    client_id = payload.get("client_id")
+    if not looks_like_cimd_url(client_id):
+        return payload
+    document = resolve_cimd_sync(str(client_id))
+    payload["client_id"] = document["client_id"]
+    payload["_cimd"] = document
+    if headers is not None:
+        payload["_cimd_request_host"] = request_host_for_cimd(headers, peer)
+        payload["_cimd_host_matches_request"] = cimd_host_matches_request(
+            str(document["client_id"]),
+            headers,
+            peer,
+        )
+    return payload
 
 
 def build_registration_response(service: "OAuthService", body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

@@ -127,8 +127,8 @@ def test_studio_can_search_flights_without_token():
             )
         )
         payload = raw.root
-        assert payload.isError is not True
-        assert payload.structuredContent["offers"]
+        assert payload.is_error is not True
+        assert payload.structured_content["offers"]
         html = next(b.resource.text for b in payload.content if getattr(b, "type", None) == "resource")
         assert "JFK" in html
         assert "LAX" in html
@@ -153,7 +153,7 @@ def test_oauth_required_blocks_studio_without_token():
                         ),
                     )
                 )
-                assert resp.root.isError is True
+                assert resp.root.is_error is True
                 text = resp.root.content[0].text
                 assert "OAuth" in text or "Access denied" in text
             except PermissionError as exc:
