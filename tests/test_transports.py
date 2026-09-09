@@ -18,8 +18,7 @@ from pydantic import BaseModel
 from starlette.testclient import TestClient
 
 import mcp.types as types
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.server.experimental.request_context import Experimental
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 from nitrostack import injectable, module, tool, ExecutionContext, DIContainer
 from nitrostack.core.app import McpApplication, McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.transports.http import build_http_app
@@ -97,6 +96,11 @@ async def _build_app() -> McpApplication:
     return await McpApplicationFactory.create(_TestApp)
 
 
+def _sessionful_http(app, **kwargs):
+    kwargs.setdefault("enable_cors", True)
+    return build_http_app(app, protocol_era="legacy", wire_mode="sessionful", **kwargs)
+
+
 def _initialize(client: TestClient) -> str:
     resp = client.post("/mcp", headers=JSON_HEADERS, json=INITIALIZE_BODY)
     assert resp.status_code == 200, resp.text
@@ -150,7 +154,7 @@ def _extract_json_rpc(resp) -> dict:
 
 def test_http_health_and_cors():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         health = client.get("/mcp/health")
@@ -165,7 +169,11 @@ def test_http_health_and_cors():
         )
         assert preflight.status_code == 200
         assert preflight.headers.get("access-control-allow-origin") == "*"
-        assert "Mcp-Session-Id" in preflight.headers.get("access-control-allow-headers", "")
+        allow_headers = preflight.headers.get("access-control-allow-headers", "")
+        assert "Mcp-Session-Id" in allow_headers
+        assert "Mcp-Name" in allow_headers
+        assert "Mcp-Method" in allow_headers
+        assert "MCP-Protocol-Version" in allow_headers
 
         root = client.get("/")
         assert root.status_code == 200
@@ -196,7 +204,7 @@ def test_http_health_and_cors():
 
 def test_http_tool_call_parity():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)
@@ -231,7 +239,7 @@ def test_http_tool_call_parity():
 
 def test_session_isolation_and_termination():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_a = _initialize(client)
@@ -260,7 +268,7 @@ def test_session_isolation_and_termination():
 
 def test_max_sessions_cap():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True, max_sessions=1)
+    http_app = _sessionful_http(app, max_sessions=1)
 
     with TestClient(http_app) as client:
         _initialize(client)  # first session: at capacity now
@@ -308,7 +316,7 @@ def test_stateless_mode_skips_handshake():
 
 def test_di_singletons_shared_across_transports():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)
@@ -357,7 +365,7 @@ async def _test_progress_notifications_pushed():
         params=types.CallToolRequestParams(
             name="progress_task",
             arguments={"input": {"value": ""}},
-            task=types.TaskMetadata(ttl=60),
+            task=types.TaskMetadata(ttl=60_000),
             _meta={"progressToken": "tok-abc"},
         ),
     )
@@ -377,14 +385,18 @@ async def _test_progress_notifications_pushed():
         request_ctx.reset(token)
 
     assert isinstance(response.root, types.CreateTaskResult)
-    task_id = response.root.task.taskId
+    task_id = response.root.task.task_id
 
     # Wait for the background task to finish (it does 3 quick progress updates).
-    result_handler = app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-    result_req = types.GetTaskPayloadRequest(
-        method="tasks/result", params=types.GetTaskPayloadRequestParams(taskId=task_id)
+    get_handler = app.mcp_server.request_handlers[types.GetTaskRequest]
+    get_req = types.GetTaskRequest(
+        method="tasks/get", params=types.GetTaskRequestParams(taskId=task_id)
     )
-    await result_handler(result_req)
+    for _ in range(40):
+        get_res = await get_handler(get_req)
+        if get_res.status in ("completed", "failed", "cancelled"):
+            break
+        await asyncio.sleep(0.05)
 
     # Give the fire-and-forget notification tasks a moment to actually run.
     for _ in range(20):
@@ -409,7 +421,7 @@ def test_progress_notifications_pushed():
 
 async def _test_dual_mode_coordinated_shutdown():
     app = await _build_app()
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
     port = _free_port()
 
     stdio_started = asyncio.Event()
@@ -474,7 +486,7 @@ def test_dual_mode_coordinated_shutdown():
 
 def test_mcp_path_does_not_redirect():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app, follow_redirects=False) as client:
         init = client.post("/mcp", headers=JSON_HEADERS, json=INITIALIZE_BODY)
@@ -520,7 +532,7 @@ def test_mcp_path_does_not_redirect():
 
 def test_legacy_sse_messages_not_swallowed_by_streamable_http():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         # Trailing-slash path reaches SseServerTransport. Unknown session → 404
@@ -551,15 +563,13 @@ def test_legacy_sse_messages_not_swallowed_by_streamable_http():
 
 # ---------------------------------------------------------------------------
 # 11. Client-header tolerance: `StreamableHTTPServerTransport` matches Accept
-#    media types with `startswith` (so `*/*` is rejected with 406) and rejects
-#    any MCP-Protocol-Version it doesn't know with 400. Both happen before the
-#    JSON-RPC layer, so the client just sees a stream open and close with no
-#    response on it.
+#    media types with `startswith` (so `*/*` is rejected with 406). Protocol
+#    version is left on the request so later checks see the client value.
 # ---------------------------------------------------------------------------
 
 def test_wildcard_and_missing_accept_are_honoured():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         init = client.post(
@@ -597,29 +607,47 @@ def test_wildcard_and_missing_accept_are_honoured():
     print("Success! Wildcard and absent Accept headers no longer 406 on /mcp.")
 
 
-def test_unsupported_protocol_version_header_does_not_fail_request():
-    app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+def test_header_compat_preserves_protocol_version_for_inner_app():
+    from nitrostack.transports.http import HeaderCompatMiddleware
 
-    with TestClient(http_app) as client:
-        session_id = _initialize(client)
+    captured: dict[str, list] = {}
 
-        listed = client.post(
+    async def inner(scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        captured["headers"] = list(scope.get("headers") or [])
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    wrapped = HeaderCompatMiddleware(inner)
+    with TestClient(wrapped) as client:
+        response = client.post(
             "/mcp",
-            headers={**JSON_HEADERS, "mcp-session-id": session_id, "MCP-Protocol-Version": "2026-06-18"},
+            headers={**JSON_HEADERS, "MCP-Protocol-Version": "2026-07-28"},
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        assert listed.status_code == 200, (
-            f"a newer-than-supported protocol version should not fail the request, got: {listed.text}"
-        )
-        assert "echo" in [t["name"] for t in _extract_json_rpc(listed)["result"]["tools"]]
+    assert response.status_code == 200, response.text
+    headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in captured["headers"]}
+    assert headers["mcp-protocol-version"] == "2026-07-28"
 
-    print("Success! An unknown MCP-Protocol-Version no longer turns into a 400.")
+    print("Success! HeaderCompatMiddleware keeps MCP-Protocol-Version for the inner app.")
 
 
 def test_delete_terminates_live_session_and_404s_unknown_one():
     app = asyncio.run(_build_app())
-    http_app = build_http_app(app, enable_cors=True)
+    http_app = _sessionful_http(app)
 
     with TestClient(http_app) as client:
         session_id = _initialize(client)
@@ -695,7 +723,7 @@ if __name__ == "__main__":
     test_mcp_path_does_not_redirect()
     test_legacy_sse_messages_not_swallowed_by_streamable_http()
     test_wildcard_and_missing_accept_are_honoured()
-    test_unsupported_protocol_version_header_does_not_fail_request()
+    test_header_compat_preserves_protocol_version_for_inner_app()
     test_delete_terminates_live_session_and_404s_unknown_one()
     test_oauth_register_returns_json_not_html()
     test_oauth_configured_skips_not_supported_stubs()

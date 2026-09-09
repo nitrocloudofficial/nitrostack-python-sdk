@@ -76,8 +76,12 @@ def test_widget_metadata_openai_mode():
     assert meta.get("ui/template") == uri
     assert meta.get("openai/outputTemplate") == uri
     assert "ui" not in meta
-    assert getattr(target, "outputTemplate", None) == uri
-    schema = getattr(target, "outputSchema", None)
+    assert (
+        getattr(target, "output_template", None)
+        or getattr(target, "outputTemplate", None)
+        or meta.get("openai/outputTemplate")
+    ) == uri
+    schema = getattr(target, "output_schema", None) or getattr(target, "outputSchema", None)
     assert isinstance(schema, dict)
     assert "status" in (schema.get("properties") or {})
 

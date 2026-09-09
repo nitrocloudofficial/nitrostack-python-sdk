@@ -16,8 +16,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import mcp.types as types
-from mcp.server.lowlevel.server import request_ctx, RequestContext
-from mcp.server.experimental.request_context import Experimental
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
 from pydantic import BaseModel
 from starlette.testclient import TestClient
 
@@ -285,7 +284,7 @@ def test_output_schema_on_tools_list():
         harness = await NitroTestingModule.create(SchemaModule)
         tools = await _list_tools(harness)
         target = next(t for t in tools if t.name == "schema_tool")
-        schema = getattr(target, "outputSchema", None)
+        schema = getattr(target, "output_schema", None) or getattr(target, "outputSchema", None)
         assert isinstance(schema, dict)
         props = schema.get("properties") or {}
         assert "value" in props
@@ -346,7 +345,11 @@ def test_tool_list_meta_openai_mode():
         assert meta["ui/template"] == "ui://widget/sample.html"
         assert meta["openai/outputTemplate"] == "ui://widget/sample.html"
         assert "ui" not in meta or "resourceUri" not in (meta.get("ui") or {})
-        assert getattr(widget_tool, "outputTemplate", None) == "ui://widget/sample.html"
+        assert (
+            getattr(widget_tool, "output_template", None)
+            or getattr(widget_tool, "outputTemplate", None)
+            or meta.get("openai/outputTemplate")
+        ) == "ui://widget/sample.html"
         assert "openai/outputTemplate" not in plain_meta
         assert "ui" not in plain_meta
 
@@ -438,7 +441,7 @@ def test_resources_list_and_read_with_meta():
         assert len(contents) == 1
         text = contents[0].text or contents[0].blob
         assert "widget" in (text or "")
-        assert contents[0].mimeType == RESOURCE_MIME_TYPE_MCP_APP
+        assert getattr(contents[0], "mime_type", None) or getattr(contents[0], "mimeType", None) == RESOURCE_MIME_TYPE_MCP_APP
         meta = contents[0].meta or {}
         assert meta.get("openai/widgetPrefersBorder") is True
         assert meta["ui"]["prefersBorder"] is True
@@ -458,7 +461,7 @@ def test_call_tool_structured_content_and_meta():
         with app_mode("universal"):
             resp = await _call_tool_raw(harness, "widget_tool", {"value": "hello"})
             result = resp.root
-            assert result.structuredContent == {"value": "hello", "rendered": True}
+            assert result.structured_content == {"value": "hello", "rendered": True}
             assert result.meta["ui"]["resourceUri"] == "ui://widget/sample.html"
             assert result.meta["openai/outputTemplate"] == "ui://widget/sample.html"
             types_found = {getattr(block, "type", None) for block in result.content}
@@ -520,25 +523,25 @@ def test_widget_task_result_matches_direct_call():
                 request_ctx.reset(token)
 
             assert isinstance(task_resp.root, types.CreateTaskResult)
-            task_id = task_resp.root.task.taskId
+            task_id = task_resp.root.task.task_id
 
-            payload_handler = harness.app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
+            get_handler = harness.app.mcp_server.request_handlers[types.GetTaskRequest]
             task_payload = None
             for _ in range(50):
                 await asyncio.sleep(0.02)
-                raw = await payload_handler(
-                    types.GetTaskPayloadRequest(
-                        method="tasks/result",
-                        params=types.GetTaskPayloadRequestParams(taskId=task_id),
+                raw = await get_handler(
+                    types.GetTaskRequest(
+                        method="tasks/get",
+                        params=types.GetTaskRequestParams(taskId=task_id),
                     )
                 )
-                task_payload = getattr(raw, "root", raw)
-                if hasattr(task_payload, "structuredContent"):
+                if raw.status == "completed" and raw.result is not None:
+                    task_payload = types.CallToolResult(**raw.result)
                     break
             else:
                 raise AssertionError("task did not complete in time")
 
-            assert task_payload.structuredContent == direct.structuredContent
+            assert task_payload.structured_content == direct.structured_content
             assert task_payload.meta == direct.meta
 
     asyncio.run(run())

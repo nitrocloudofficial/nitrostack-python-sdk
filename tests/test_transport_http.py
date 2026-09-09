@@ -75,7 +75,13 @@ def test_cors_disabled_rejects_disallowed_origin(monkeypatch):
 
 def test_stateful_tool_call_without_session_is_rejected():
     app = _app()
-    http_app = build_http_app(app, enable_cors=True, stateless=False, json_response=True)
+    http_app = build_http_app(
+        app,
+        enable_cors=True,
+        protocol_era="legacy",
+        wire_mode="sessionful",
+        json_response=True,
+    )
     with TestClient(http_app) as client:
         resp = client.post(
             "/mcp",

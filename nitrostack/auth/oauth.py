@@ -10,11 +10,13 @@ import threading
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
 from nitrostack.auth.oauth_module import (
+    apply_cimd_to_registration_body,
     build_authorization_server_metadata,
     build_protected_resource_metadata,
     build_registration_response,
     is_client_registration_enabled,
 )
+from nitrostack.auth.cimd import CimdFetchError, CimdValidationError
 from nitrostack.core.errors import AudienceMismatchError, ConfigurationError, TokenInactiveError
 
 
@@ -174,17 +176,42 @@ class OAuthService:
                 self.send_header("Connection", "close")
                 self.end_headers()
 
+            def _proxy_headers(self) -> Dict[str, str]:
+                return {key: value for key, value in self.headers.items()}
+
+            def _proxy_peer(self) -> Optional[str]:
+                return self.client_address[0] if self.client_address else None
+
+            def _trusted_public_origin(self) -> Optional[str]:
+                from nitrostack.transports.proxy import public_origin, trusted_forwarded_host
+
+                headers = self._proxy_headers()
+                peer = self._proxy_peer()
+                if not trusted_forwarded_host(headers, peer):
+                    return None
+                return public_origin(
+                    headers,
+                    peer,
+                    fallback_host=f"localhost:{service_instance.discovery_port}",
+                    fallback_proto="http",
+                )
+
             def do_GET(self):
                 if self.path == "/.well-known/oauth-protected-resource":
                     _write_json(self, 200, build_protected_resource_metadata(service_instance))
                 elif self.path == "/.well-known/oauth-authorization-server":
+                    origin = self._trusted_public_origin()
                     registration_endpoint = (
                         registration_path if is_client_registration_enabled(service_instance) else None
                     )
                     _write_json(
                         self,
                         200,
-                        build_authorization_server_metadata(service_instance, registration_endpoint),
+                        build_authorization_server_metadata(
+                            service_instance,
+                            registration_endpoint,
+                            public_origin=origin,
+                        ),
                     )
                 else:
                     _write_empty(self, 404)
@@ -208,6 +235,23 @@ class OAuthService:
                     body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
                 except Exception:
                     body = {}
+
+                try:
+                    body = apply_cimd_to_registration_body(
+                        body,
+                        headers=self._proxy_headers(),
+                        peer=self._proxy_peer(),
+                    )
+                except (CimdValidationError, CimdFetchError) as exc:
+                    _write_json(
+                        self,
+                        400,
+                        {
+                            "error": "invalid_client_metadata",
+                            "error_description": str(exc),
+                        },
+                    )
+                    return
 
                 _write_json(self, 200, build_registration_response(service_instance, body))
 

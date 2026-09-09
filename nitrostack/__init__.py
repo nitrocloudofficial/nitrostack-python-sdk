@@ -84,6 +84,17 @@ from nitrostack.auth.oauth import (
     OAuthService,
     generate_www_authenticate_header,
 )
+from nitrostack.auth.cimd import (
+    CimdFetchError,
+    CimdValidationError,
+    is_blocked_ip,
+    resolve_cimd,
+    validate_client_identifier_url,
+)
+from nitrostack.auth.oauth_security import (
+    AuthorizationIssuerMismatchError,
+    validate_authorization_iss,
+)
 from nitrostack.auth.pkce import (
     generate_code_challenge,
     generate_code_verifier,
@@ -118,9 +129,13 @@ from nitrostack.widgets import (
 from nitrostack.testing import (
     NitroTestingModule,
 )
-from nitrostack.testing import (
-    NitroTestingModule,
-)
+from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.mrtr import InputRequest, InputRequiredResult, accepted_content, input_required
+from nitrostack.tasks import InMemoryTaskStore, TaskAccessContext, TaskStore
+from nitrostack.tasks.authorization import check_task_access, extract_task_access_context
+from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
+from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipeline
 
 
 __all__ = [
@@ -165,6 +180,13 @@ __all__ = [
     "OAuthModule",
     "OAuthService",
     "generate_www_authenticate_header",
+    "validate_client_identifier_url",
+    "resolve_cimd",
+    "is_blocked_ip",
+    "CimdValidationError",
+    "CimdFetchError",
+    "validate_authorization_iss",
+    "AuthorizationIssuerMismatchError",
     "generate_code_challenge",
     "generate_code_verifier",
     "generate_pkce_params",
@@ -207,4 +229,19 @@ __all__ = [
     "RESOURCE_MIME_TYPE_MCP_APP",
     "RESOURCE_MIME_TYPE_OPENAI",
     "NitroTestingModule",
+    "MODERN_PROTOCOL_VERSION",
+    "JsonRpcErrorCode",
+    "InputRequest",
+    "InputRequiredResult",
+    "accepted_content",
+    "input_required",
+    "TaskAccessContext",
+    "TaskStore",
+    "InMemoryTaskStore",
+    "check_task_access",
+    "extract_task_access_context",
+    "StatelessInvariants",
+    "assert_stateless_headers",
+    "wrap_stateless_transport",
+    "StatelessIngressPipeline",
 ]

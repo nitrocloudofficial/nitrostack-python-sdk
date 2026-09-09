@@ -11,9 +11,8 @@ class NitroTestingModule:
     In-process test harness for testing NitroStack applications
     without spinning up real transports or subprocesses (Section 15).
 
-    Dispatches directly through the owned low-level `mcp.server.lowlevel.Server`'s
-    registered `request_handlers` (the same dict the real stdio/HTTP transports use),
-    rather than any FastMCP-specific convenience method.
+    Dispatches through the owned low-level `mcp.server.lowlevel.Server`
+    `request_handlers` (the same dict the real stdio/HTTP transports use).
     """
     @classmethod
     async def create(cls, app_module: Type) -> "NitroTestingModule":

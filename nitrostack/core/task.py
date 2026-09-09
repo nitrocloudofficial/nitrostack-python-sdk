@@ -1,26 +1,19 @@
 """
-MCP Task state machine (Phase 1).
+MCP task state machine.
 
-Validated in-memory task store used by McpApplication for MCP Tasks.
+``TaskManager`` owns lifecycle logic; persistence is delegated to a pluggable
+``TaskStore`` (default: ``InMemoryTaskStore``).
 
-State machine (ASCII)::
-
-    [*] --> WORKING
-    WORKING --> COMPLETED
-    WORKING --> FAILED
-    WORKING --> CANCELLED
-    WORKING --> EXPIRED   (lazy TTL check-on-read)
-    COMPLETED / FAILED / CANCELLED / EXPIRED are terminal — no further transitions
-
-TTL: optional ``ttl_seconds`` sets ``expires_at``. Expiration is evaluated lazily
-on read/mutate (no background thread). An expired non-terminal task is transitioned
-to ``EXPIRED``.
+TTL eviction invariants:
+- ``working`` / ``input_required`` tasks are never evicted.
+- TTL countdown starts only after a terminal transition.
+- ``cleanup_expired(now_ms)`` removes terminal tasks where
+  ``(now_ms - lastUpdatedAt) > ttl_ms``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import datetime
 import uuid
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -32,17 +25,26 @@ from nitrostack.core.errors import (
     TaskExpiredError,
     TaskNotFoundError,
 )
+from nitrostack.protocol.tasks import DEFAULT_POLL_INTERVAL_MS, ttl_seconds_to_ms
+from nitrostack.tasks.memory import InMemoryTaskStore
+from nitrostack.tasks.store import TaskStore
+from nitrostack.tasks.types import TaskEntry, TaskWireData, datetime_to_ms, utc_now
+from nitrostack.tasks.types import TaskAccessContext
+from nitrostack.tasks.authorization import check_task_access, list_task_wire_data_for_context
 
 
 class TaskStatus(Enum):
-    """Task lifecycle statuses required by Phase 1."""
+    """Task lifecycle statuses required by MCP 2026-07-28."""
 
     WORKING = "working"
+    INPUT_REQUIRED = "input_required"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
 
+
+ACTIVE_STATUSES = frozenset({TaskStatus.WORKING, TaskStatus.INPUT_REQUIRED})
 
 TERMINAL_STATUSES = frozenset(
     {
@@ -59,17 +61,21 @@ def is_terminal_status(status: TaskStatus) -> bool:
     return status in TERMINAL_STATUSES
 
 
+def _status_from_wire(value: str) -> TaskStatus:
+    return TaskStatus(value)
+
+
+def _status_to_wire(status: TaskStatus) -> str:
+    return status.value
+
+
 @dataclass
 class TaskData:
     """
     Snapshot of a task's protocol-visible and result state.
 
     ``progress`` holds the latest progress/status message. ``result`` / ``error``
-    are populated on successful completion or failure respectively. Tasks created
-    without a TTL have ``expires_at is None`` and never expire.
-
-    Compatibility aliases (``task_id``, ``status_message``, ``ttl``) mirror the
-    previous task-entry attribute names used by callers.
+    are populated on successful completion or failure respectively.
     """
 
     id: str
@@ -77,13 +83,12 @@ class TaskData:
     progress: Optional[str] = None
     result: Any = None
     error: Any = None
-    created_at: datetime.datetime = field(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
-    )
-    expires_at: Optional[datetime.datetime] = None
-    last_updated_at: Optional[datetime.datetime] = None
+    created_at: Any = field(default_factory=utc_now)
+    expires_at: Optional[Any] = None
+    last_updated_at: Optional[Any] = None
     ttl_seconds: Optional[int] = None
-    poll_interval: int = 5
+    ttl_ms: Optional[int] = None
+    poll_interval: int = DEFAULT_POLL_INTERVAL_MS
 
     def __post_init__(self) -> None:
         if self.last_updated_at is None:
@@ -99,211 +104,370 @@ class TaskData:
 
     @property
     def ttl(self) -> Optional[int]:
-        return self.ttl_seconds
+        return self.ttl_ms if self.ttl_ms is not None else ttl_seconds_to_ms(self.ttl_seconds)
 
 
 @dataclass
-class _TaskEntry:
-    """Internal store entry (not part of the public API)."""
+class _RuntimeTaskHandle:
+    """Local-only execution primitives (not persisted to distributed stores)."""
 
-    data: TaskData
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    cancelled: bool = False
 
 
 class TaskManager:
     """
-    In-memory task store with validated transitions, result storage, and lazy TTL.
+    Task lifecycle manager backed by a pluggable ``TaskStore``.
 
-    Typical flow::
-
-        manager = TaskManager()
-        task = manager.create_task(ttl_seconds=60)
-        manager.update_progress(task.id, "halfway")
-        manager.complete_task(task.id, {"ok": True})
-        assert manager.get_task(task.id).result == {"ok": True}
+    Runtime wait/cancel handles remain process-local even when using Redis or
+    PostgreSQL persistence.
     """
 
-    def __init__(self) -> None:
-        self._tasks: Dict[str, _TaskEntry] = {}
+    def __init__(self, store: Optional[TaskStore] = None) -> None:
+        self._store = store or InMemoryTaskStore()
+        self._runtime: Dict[str, _RuntimeTaskHandle] = {}
 
-    def create_task(
+    async def create_task(
         self,
         ttl_seconds: Optional[int] = None,
         *,
+        ttl_ms: Optional[int] = None,
         task_id: Optional[str] = None,
+        poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
+        tool_name: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> TaskData:
-        """
-        Create a new task in ``WORKING`` status.
-
-        ``ttl_seconds=None`` means the task never expires. ``task_id`` is optional
-        and intended for compatibility callers that supply their own ID.
-        """
-        now = datetime.datetime.now(datetime.timezone.utc)
+        """Create a new task in ``WORKING`` status."""
+        now = utc_now()
         resolved_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
-        if resolved_id in self._tasks:
+        if await self._store.has(resolved_id):
             raise ValueError(f"Task {resolved_id} already exists")
-        expires_at = None
-        if ttl_seconds is not None:
-            expires_at = now + datetime.timedelta(seconds=ttl_seconds)
 
-        data = TaskData(
-            id=resolved_id,
-            status=TaskStatus.WORKING,
-            progress="Task started",
+        resolved_ttl_seconds = ttl_seconds
+        resolved_ttl_ms = ttl_ms
+        if resolved_ttl_ms is not None and resolved_ttl_seconds is None:
+            resolved_ttl_seconds = max(1, int(resolved_ttl_ms / 1000))
+        elif resolved_ttl_seconds is not None and resolved_ttl_ms is None:
+            resolved_ttl_ms = ttl_seconds_to_ms(resolved_ttl_seconds)
+
+        wire = TaskWireData(
+            task_id=resolved_id,
+            status="working",
+            status_message="Task created",
             created_at=now,
             last_updated_at=now,
-            expires_at=expires_at,
-            ttl_seconds=ttl_seconds,
-            poll_interval=5,
+            ttl_ms=resolved_ttl_ms,
+            poll_interval_ms=poll_interval_ms,
+            owner_id=owner_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
         )
-        self._tasks[resolved_id] = _TaskEntry(data=data)
-        return self._snapshot(data)
+        entry = TaskEntry(
+            task_id=resolved_id,
+            data=wire,
+            status="working",
+            tool_name=tool_name,
+            owner_id=owner_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+        await self._store.set(resolved_id, entry)
+        self._runtime[resolved_id] = _RuntimeTaskHandle()
+        return self._snapshot_from_entry(entry)
 
-    def get_task(self, task_id: str) -> TaskData:
-        """
-        Return a snapshot of the task.
+    async def get_task(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskData:
+        """Return a snapshot of the task or raise ``TaskNotFoundError``."""
+        entry = await self._require_entry(task_id, access_context=access_context)
+        return self._snapshot_from_entry(entry)
 
-        Missing IDs raise ``TaskNotFoundError``. Expired non-terminal tasks are
-        lazily transitioned to ``EXPIRED`` before the snapshot is returned.
-        """
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        return self._snapshot(entry.data)
-
-    def update_progress(self, task_id: str, progress: Any) -> None:
-        """
-        Update progress for a ``WORKING`` task.
-
-        Raises ``TaskAlreadyTerminalError`` if the task is already terminal
-        (including after lazy expiration).
-        """
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        if is_terminal_status(entry.data.status):
-            if entry.data.status == TaskStatus.EXPIRED:
+    def update_progress_sync(self, task_id: str, progress: Any) -> None:
+        """Synchronous progress update for ``TaskContext`` (same-loop safe)."""
+        entry = self._require_entry_sync(task_id)
+        status = _status_from_wire(entry.status)
+        if is_terminal_status(status):
+            if status == TaskStatus.EXPIRED:
                 raise TaskExpiredError(task_id)
-            raise TaskAlreadyTerminalError(task_id, entry.data.status)
-        entry.data.progress = progress
-        entry.data.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
+            raise TaskAlreadyTerminalError(task_id, status)
+        now = utc_now()
+        entry.data.status_message = str(progress)
+        entry.data.last_updated_at = now
+        entry.status = entry.data.status
+        self._store_set_sync(task_id, entry)
 
-    def complete_task(self, task_id: str, result: Any) -> None:
-        """Transition ``WORKING`` → ``COMPLETED`` and store ``result``."""
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        self._require_working_for_transition(entry, TaskStatus.COMPLETED)
-        entry.data.result = result
-        entry.data.error = None
-        entry.data.progress = "Task completed successfully"
-        self._set_status(entry, TaskStatus.COMPLETED)
+    async def update_progress(self, task_id: str, progress: Any) -> None:
+        """Update progress for an active task."""
+        self.update_progress_sync(task_id, progress)
 
-    def fail_task(self, task_id: str, error: Any) -> None:
-        """Transition ``WORKING`` → ``FAILED`` and store ``error``."""
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        self._require_working_for_transition(entry, TaskStatus.FAILED)
-        entry.data.error = error
-        entry.data.progress = f"Task failed: {error}"
-        self._set_status(entry, TaskStatus.FAILED)
-
-    def cancel_task(self, task_id: str) -> None:
-        """Transition ``WORKING`` → ``CANCELLED``."""
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        if is_terminal_status(entry.data.status):
-            if entry.data.status == TaskStatus.EXPIRED:
+    async def require_input(
+        self,
+        task_id: str,
+        pause_payload: Any,
+        *,
+        progress: str = "Additional input required",
+    ) -> None:
+        """Transition an active task to ``input_required``."""
+        entry = await self._require_entry(task_id)
+        status = _status_from_wire(entry.status)
+        if is_terminal_status(status):
+            if status == TaskStatus.EXPIRED:
                 raise TaskExpiredError(task_id)
-            raise TaskAlreadyTerminalError(task_id, entry.data.status)
-        entry.data.progress = "Task cancelled by client"
-        self._set_status(entry, TaskStatus.CANCELLED)
+            raise TaskAlreadyTerminalError(task_id, status)
+        if status not in ACTIVE_STATUSES:
+            raise InvalidTaskTransitionError(status, TaskStatus.INPUT_REQUIRED)
+        now = utc_now()
+        entry.result = pause_payload
+        entry.status = "input_required"
+        entry.data.status = "input_required"
+        entry.data.status_message = progress
+        entry.data.last_updated_at = now
+        await self._store.set(task_id, entry)
 
-    def list_tasks(self) -> List[TaskData]:
-        """Return snapshots for all known tasks (applies lazy expiration)."""
-        snapshots: List[TaskData] = []
-        for entry in list(self._tasks.values()):
-            self._maybe_expire(entry)
-            snapshots.append(self._snapshot(entry.data))
+    async def resume_task(self, task_id: str, *, progress: str = "Resuming task") -> None:
+        """Transition ``input_required`` back to ``working``."""
+        entry = await self._require_entry(task_id)
+        status = _status_from_wire(entry.status)
+        if status != TaskStatus.INPUT_REQUIRED:
+            raise InvalidTaskTransitionError(status, TaskStatus.WORKING)
+        now = utc_now()
+        entry.status = "working"
+        entry.data.status = "working"
+        entry.data.status_message = progress
+        entry.data.last_updated_at = now
+        await self._store.set(task_id, entry)
+
+    async def complete_task(self, task_id: str, result: Any) -> None:
+        """Transition an active task to ``completed``."""
+        entry = await self._require_entry(task_id)
+        self._require_active_for_transition(entry, TaskStatus.COMPLETED)
+        entry.result = result
+        entry.error = None
+        entry.status = "completed"
+        entry.data.status = "completed"
+        entry.data.status_message = "Task completed successfully"
+        entry.data.last_updated_at = utc_now()
+        await self._store.set(task_id, entry)
+        self._signal_done(task_id)
+
+    async def fail_task(self, task_id: str, error: Any) -> None:
+        """Transition an active task to ``failed``."""
+        entry = await self._require_entry(task_id)
+        self._require_active_for_transition(entry, TaskStatus.FAILED)
+        entry.error = {"message": str(error)}
+        entry.status = "failed"
+        entry.data.status = "failed"
+        entry.data.status_message = f"Task failed: {error}"
+        entry.data.last_updated_at = utc_now()
+        await self._store.set(task_id, entry)
+        self._signal_done(task_id)
+
+    def cancel_task_sync(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> None:
+        """Synchronous cancel for ``TaskContext`` (same-loop safe)."""
+        entry = self._require_entry_sync(task_id, access_context=access_context)
+        status = _status_from_wire(entry.status)
+        if is_terminal_status(status):
+            if status == TaskStatus.EXPIRED:
+                raise TaskExpiredError(task_id)
+            raise TaskAlreadyTerminalError(task_id, status)
+        entry.status = "cancelled"
+        entry.data.status = "cancelled"
+        entry.data.status_message = "Task cancelled by client"
+        entry.data.last_updated_at = utc_now()
+        self._store_set_sync(task_id, entry)
+        handle = self._runtime.setdefault(task_id, _RuntimeTaskHandle())
+        handle.cancelled = True
+        self._signal_done(task_id)
+
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> None:
+        """Transition an active task to ``cancelled``."""
+        self.cancel_task_sync(task_id, access_context=access_context)
+
+    async def list_tasks(
+        self,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[TaskData]:
+        """Return task snapshots filtered by caller access context."""
+        snapshots, _ = await self.list_tasks_page(
+            access_context=access_context,
+            cursor=cursor,
+            limit=limit,
+        )
         return snapshots
 
-    def has_task(self, task_id: str) -> bool:
-        """Return True if a task with ``task_id`` exists in the store."""
-        return task_id in self._tasks
+    async def list_tasks_page(
+        self,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> tuple[List[TaskData], Optional[str]]:
+        """Return a filtered, paginated task page and optional next cursor."""
+        entries = await self._store.list()
+        page, next_cursor = list_task_wire_data_for_context(
+            entries,
+            access_context,
+            cursor=cursor,
+            limit=limit,
+        )
+        by_id = {entry.task_id: entry for entry in entries}
+        snapshots = [
+            self._snapshot_from_entry(by_id[wire.task_id])
+            for wire in page
+            if wire.task_id in by_id
+        ]
+        return snapshots, next_cursor
 
-    def is_task_cancelled(self, task_id: str) -> bool:
-        """Return True if the task exists and is in ``CANCELLED`` status."""
-        if task_id not in self._tasks:
+    async def has_task(self, task_id: str) -> bool:
+        return await self._store.has(task_id)
+
+    async def is_task_cancelled(self, task_id: str) -> bool:
+        handle = self._runtime.get(task_id)
+        if handle is not None and handle.cancelled:
+            return True
+        if not await self._store.has(task_id):
             return False
-        entry = self._tasks[task_id]
-        self._maybe_expire(entry)
-        return entry.data.status == TaskStatus.CANCELLED
+        entry = await self._store.get(task_id)
+        return entry is not None and entry.status == "cancelled"
 
-    async def wait_until_done(self, task_id: str) -> TaskData:
-        """
-        Block until the task reaches a terminal state, then return a snapshot.
+    def is_task_cancelled_sync(self, task_id: str) -> bool:
+        """Best-effort synchronous cancel probe for ``TaskContext.throw_if_cancelled``."""
+        handle = self._runtime.get(task_id)
+        if handle is not None and handle.cancelled:
+            return True
+        return False
 
-        Applies lazy expiration before waiting when the task is still working.
-        """
-        entry = self._get_entry(task_id)
-        self._maybe_expire(entry)
-        if not is_terminal_status(entry.data.status):
-            await entry.done_event.wait()
-            # Re-fetch: status may have changed while waiting.
-            entry = self._get_entry(task_id)
-        return self._snapshot(entry.data)
+    async def wait_until_done(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskData:
+        """Block until the task reaches a terminal state."""
+        entry = await self._require_entry(task_id, access_context=access_context)
+        status = _status_from_wire(entry.status)
+        if not is_terminal_status(status):
+            handle = self._runtime.setdefault(task_id, _RuntimeTaskHandle())
+            await handle.done_event.wait()
+            entry = await self._require_entry(task_id, access_context=access_context)
+        return self._snapshot_from_entry(entry)
 
-    def get_result(self, task_id: str) -> Any:
-        """
-        Return the stored result for a completed task.
-
-        Raises ``TaskNotFoundError``, ``TaskExpiredError``, or
-        ``InvalidTaskTransitionError`` if the task is not completed.
-        """
-        data = self.get_task(task_id)
+    async def get_result(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> Any:
+        """Return the stored result for a completed task."""
+        data = await self.get_task(task_id, access_context=access_context)
         if data.status == TaskStatus.EXPIRED:
             raise TaskExpiredError(task_id)
         if data.status != TaskStatus.COMPLETED:
             raise InvalidTaskTransitionError(data.status, TaskStatus.COMPLETED)
         return data.result
 
+    async def cleanup_expired(self, now_ms: Optional[int] = None) -> int:
+        """Evict terminal tasks whose post-completion TTL has elapsed."""
+        resolved_now = now_ms if now_ms is not None else datetime_to_ms(utc_now())
+        evicted = await self._store.cleanup_expired(resolved_now)
+        for task_id in list(self._runtime.keys()):
+            if not await self._store.has(task_id):
+                self._runtime.pop(task_id, None)
+        return evicted
+
+    async def destroy(self) -> None:
+        await self._store.destroy()
+        self._runtime.clear()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_entry(self, task_id: str) -> _TaskEntry:
-        entry = self._tasks.get(task_id)
+    def _store_get_sync(self, task_id: str) -> Optional[TaskEntry]:
+        getter = getattr(self._store, "get_sync", None)
+        if getter is None:
+            raise RuntimeError("Task store does not support synchronous reads")
+        return getter(task_id)
+
+    def _store_set_sync(self, task_id: str, entry: TaskEntry) -> None:
+        setter = getattr(self._store, "set_sync", None)
+        if setter is None:
+            raise RuntimeError("Task store does not support synchronous writes")
+        setter(task_id, entry)
+
+    def _require_entry_sync(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskEntry:
+        entry = self._store_get_sync(task_id)
         if entry is None:
             raise TaskNotFoundError(task_id)
+        check_task_access(entry, access_context)
         return entry
 
-    def _maybe_expire(self, entry: _TaskEntry) -> None:
-        if entry.data.expires_at is None:
-            return
-        if is_terminal_status(entry.data.status):
-            return
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if now >= entry.data.expires_at:
-            entry.data.status = TaskStatus.EXPIRED
-            entry.data.progress = "Task expired"
-            entry.data.last_updated_at = now
-            entry.done_event.set()
+    async def _require_entry(
+        self,
+        task_id: str,
+        *,
+        access_context: Optional[TaskAccessContext] = None,
+    ) -> TaskEntry:
+        entry = await self._store.get(task_id)
+        if entry is None:
+            raise TaskNotFoundError(task_id)
+        check_task_access(entry, access_context)
+        return entry
 
-    def _require_working_for_transition(
-        self, entry: _TaskEntry, to_status: TaskStatus
-    ) -> None:
-        current = entry.data.status
+    def _require_active_for_transition(self, entry: TaskEntry, to_status: TaskStatus) -> None:
+        current = _status_from_wire(entry.status)
         if current == TaskStatus.EXPIRED:
-            raise TaskExpiredError(entry.data.id)
+            raise TaskExpiredError(entry.task_id)
         if is_terminal_status(current):
-            raise TaskAlreadyTerminalError(entry.data.id, current)
-        if current != TaskStatus.WORKING:
+            raise TaskAlreadyTerminalError(entry.task_id, current)
+        if current not in ACTIVE_STATUSES:
             raise InvalidTaskTransitionError(current, to_status)
 
-    def _set_status(self, entry: _TaskEntry, status: TaskStatus) -> None:
-        entry.data.status = status
-        entry.data.last_updated_at = datetime.datetime.now(datetime.timezone.utc)
-        if is_terminal_status(status):
-            entry.done_event.set()
+    def _signal_done(self, task_id: str) -> None:
+        handle = self._runtime.setdefault(task_id, _RuntimeTaskHandle())
+        handle.done_event.set()
+
+    @staticmethod
+    def _snapshot_from_entry(entry: TaskEntry) -> TaskData:
+        ttl_ms = entry.data.ttl_ms
+        ttl_seconds = max(1, int(ttl_ms / 1000)) if ttl_ms is not None else None
+        return TaskData(
+            id=entry.task_id,
+            status=_status_from_wire(entry.status),
+            progress=entry.data.status_message,
+            result=entry.result,
+            error=entry.error,
+            created_at=entry.data.created_at,
+            last_updated_at=entry.data.last_updated_at,
+            expires_at=None,
+            ttl_seconds=ttl_seconds,
+            ttl_ms=ttl_ms,
+            poll_interval=entry.data.poll_interval_ms,
+        )
 
     @staticmethod
     def _snapshot(data: TaskData) -> TaskData:
-        """Return a shallow copy so callers cannot mutate internal state."""
         return replace(data)

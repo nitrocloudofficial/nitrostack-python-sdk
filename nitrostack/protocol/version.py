@@ -1,0 +1,239 @@
+"""MCP protocol version identifiers and protocol-era selection."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Literal, Optional
+
+MODERN_PROTOCOL_VERSION = "2026-07-28"
+LEGACY_PROTOCOL_VERSION = "2025-06-18"
+
+SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = (MODERN_PROTOCOL_VERSION,)
+
+PROTOCOL_ERA_ENV = "NITRO_MCP_PROTOCOL_VERSION"
+STATELESS_OVERRIDE_ENV = "MCP_STATELESS"
+
+ProtocolEra = Literal["legacy", "modern", "auto"]
+EraSource = Literal["mcp_stateless", "env", "config", "default"]
+# How the HTTP factory should treat 2025-shaped traffic for this era.
+# ``stateless`` here is the dual-spec fallback (sessionless initialize), not
+# the 1.x ``StreamableHTTPSessionManager(stateless=True)`` flag.
+WireMode = Literal["sessionful", "stateless", "reject"]
+# Which /mcp HTTP engine the era factory mounts. Official mcp 2.x replaces
+# the sessionless 1.x manager when that dependency is installed.
+HttpEngine = Literal["sessionless", "sessionful"]
+
+_AUTO_ALIASES = frozenset({"auto", "both", "dual", "dual-spec"})
+_MODERN_ALIASES = frozenset({"modern", "latest", "2026", MODERN_PROTOCOL_VERSION})
+_LEGACY_ALIASES = frozenset({"legacy", "2025", "2025-11-25", LEGACY_PROTOCOL_VERSION})
+_TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
+_FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
+
+
+def _parse_bool_token(raw: Optional[str]) -> Optional[bool]:
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value in _TRUE_TOKENS:
+        return True
+    if value in _FALSE_TOKENS:
+        return False
+    return None
+
+
+def _era_token(raw: Optional[str]) -> str:
+    return (raw or "").strip().lower()
+
+
+def _era_from_token(value: str) -> ProtocolEra:
+    if not value or value in _AUTO_ALIASES:
+        return "auto"
+    if value in _MODERN_ALIASES:
+        return "modern"
+    if value in _LEGACY_ALIASES:
+        return "legacy"
+    return "auto"
+
+
+@dataclass(frozen=True)
+class ProtocolEraResolution:
+    """Resolved era plus which input selected it."""
+
+    era: ProtocolEra
+    source: EraSource
+
+    def log_line(self) -> str:
+        return f"protocol era={self.era} (source={self.source})"
+
+
+def resolve_protocol_era_resolution(
+    raw: Optional[str] = None,
+    *,
+    stateless_override: Optional[str] = None,
+    config_value: Optional[str] = None,
+) -> ProtocolEraResolution:
+    """
+    Resolve the active protocol era and record how it was chosen.
+
+    Precedence:
+    1. ``MCP_STATELESS`` (explicit boolean) → source ``mcp_stateless``
+    2. ``NITRO_MCP_PROTOCOL_VERSION`` (or the ``raw`` argument) → ``env``
+    3. ``ServerConfig.protocol_era`` (``config_value``) → ``config``
+    4. ``auto`` → ``default``
+
+    Tokens (case-insensitive, trimmed): ``modern`` / ``latest`` / ``2026`` /
+    ``2026-07-28``; ``auto`` / ``both`` / ``dual`` / ``dual-spec``; ``legacy`` /
+    ``2025`` / ``2025-06-18`` / ``2025-11-25``. Unknown tokens resolve to
+    ``auto``.
+
+    ``auto`` is not ``modern``. ``modern`` is stateless-only; ``auto`` is the
+    dual-spec era and does not force the 1.x ``stateless=True`` transport flag.
+    """
+    override = (
+        stateless_override
+        if stateless_override is not None
+        else os.environ.get(STATELESS_OVERRIDE_ENV)
+    )
+    flag = _parse_bool_token(override)
+    if flag is True:
+        return ProtocolEraResolution("modern", "mcp_stateless")
+    if flag is False:
+        return ProtocolEraResolution("legacy", "mcp_stateless")
+
+    if raw is not None:
+        value = _era_token(raw)
+        source: EraSource = "env" if value else "default"
+        return ProtocolEraResolution(_era_from_token(value), source)
+
+    value = _era_token(os.environ.get(PROTOCOL_ERA_ENV))
+    if value:
+        return ProtocolEraResolution(_era_from_token(value), "env")
+    value = _era_token(config_value)
+    if value:
+        return ProtocolEraResolution(_era_from_token(value), "config")
+    return ProtocolEraResolution("auto", "default")
+
+
+def resolve_protocol_era(
+    raw: Optional[str] = None,
+    *,
+    stateless_override: Optional[str] = None,
+    config_value: Optional[str] = None,
+) -> ProtocolEra:
+    """Resolve the active protocol era. See ``resolve_protocol_era_resolution``."""
+    return resolve_protocol_era_resolution(
+        raw,
+        stateless_override=stateless_override,
+        config_value=config_value,
+    ).era
+
+
+def supported_protocol_versions_for_era(era: ProtocolEra) -> frozenset[str]:
+    """Dated protocol versions this era accepts on the wire header or envelope."""
+    legacy_versions = frozenset({LEGACY_PROTOCOL_VERSION, "2025-11-25"})
+    if era == "modern":
+        return frozenset({MODERN_PROTOCOL_VERSION})
+    if era == "legacy":
+        return legacy_versions
+    return frozenset({MODERN_PROTOCOL_VERSION, *legacy_versions})
+
+
+def protocol_era_for_wire_mode(wire_mode: WireMode) -> ProtocolEra:
+    """Map dual-spec wire mode onto the era that owns its supported versions."""
+    if wire_mode == "reject":
+        return "modern"
+    if wire_mode == "sessionful":
+        return "legacy"
+    return "auto"
+
+
+def protocol_version_for_era(era: Optional[ProtocolEra], fallback: str = MODERN_PROTOCOL_VERSION) -> str:
+    if era == "legacy":
+        return LEGACY_PROTOCOL_VERSION
+    if era in ("modern", "auto"):
+        return MODERN_PROTOCOL_VERSION
+    return fallback
+
+
+def stateless_for_era(era: Optional[ProtocolEra]) -> Optional[bool]:
+    """
+    Map era onto the 1.x Streamable HTTP ``stateless`` flag.
+
+    ``modern`` → True, ``legacy`` → False, ``auto`` → None so the HTTP factory
+    does not treat dual-spec as modern-only.
+    """
+    if era == "modern":
+        return True
+    if era == "legacy":
+        return False
+    return None
+
+
+def wire_mode_for_era(era: ProtocolEra) -> WireMode:
+    """
+    Dual-spec policy for an era.
+
+    * ``legacy`` — sessionful 2025 wire only
+    * ``auto`` — accept 2025 ``initialize`` without a session (official v2 fallback)
+    * ``modern`` — reject 2025 sessionful wire
+    """
+    if era == "modern":
+        return "reject"
+    if era == "auto":
+        return "stateless"
+    return "sessionful"
+
+
+def accepts_sessionless_initialize(era: ProtocolEra) -> bool:
+    """True when era ``auto`` answers 2025 ``initialize`` without a session."""
+    return era == "auto"
+
+
+def rejects_legacy_initialize(era: ProtocolEra) -> bool:
+    """True when era ``modern`` rejects 2025 ``initialize`` / ``initialized``."""
+    return era == "modern"
+
+
+def needs_modern_engine(era: ProtocolEra) -> bool:
+    """True when ``/mcp`` should be the official 2026 engine (``modern`` or ``auto``)."""
+    return era in ("modern", "auto")
+
+
+def needs_sessionful_engine(era: ProtocolEra) -> bool:
+    """True only for ``legacy``. ``auto`` does not mount a second session manager."""
+    return era == "legacy"
+
+
+def http_engine_for_era(era: ProtocolEra) -> HttpEngine:
+    """
+    Select the /mcp HTTP engine for an era.
+
+    ``legacy`` uses the sessionful 1.x manager. ``modern`` and ``auto`` use the
+    sessionless /mcp path (one engine; official mcp 2.x when mounted).
+    """
+    if needs_sessionful_engine(era):
+        return "sessionful"
+    return "sessionless"
+
+
+def resolve_http_engine(
+    era: ProtocolEra,
+    *,
+    http_engine: Optional[HttpEngine] = None,
+    stateless: Optional[bool] = None,
+) -> HttpEngine:
+    """
+    Sessionful 1.x is mounted only when era is ``legacy``.
+
+    ``auto`` and ``modern`` stay sessionless even if a caller passes
+    ``stateless=False`` or ``http_engine='sessionful'``. ``legacy`` is
+    sessionful unless ``stateless`` is True.
+    """
+    if not needs_sessionful_engine(era):
+        return "sessionless"
+    if stateless is True or http_engine == "sessionless":
+        return "sessionless"
+    return "sessionful"
