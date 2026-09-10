@@ -1256,6 +1256,9 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
 
     # 2. Overwrite check
     if os.path.exists(name):
+        if not sys.stdin.isatty():
+            print(f"Error: Directory '{name}' already exists.")
+            sys.exit(1)
         sys.stdout.write(f"\033[32m? \033[1;37mDirectory '{name}' already exists. Overwrite?\033[0m (Yes/No) [No]: ")
         sys.stdout.flush()
         ans = sys.stdin.readline().strip().lower()
@@ -1270,9 +1273,13 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     else:
         template = _resolve_template(template)
 
-    # 4. Description and Author
-    description = _prompt("Description", "My awesome MCP server")
-    author = _prompt("Author", "developer")
+    # 4. Description and Author — never block when stdin is not a TTY (Studio / CI).
+    if sys.stdin.isatty():
+        description = _prompt("Description", "My awesome MCP server")
+        author = _prompt("Author", "developer")
+    else:
+        description = "My awesome MCP server"
+        author = "developer"
 
     # 5. Install dependencies (Y/n). --skip-install skips the prompt.
     if skip_install:
