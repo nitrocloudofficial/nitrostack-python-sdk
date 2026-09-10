@@ -71,6 +71,7 @@ from nitrostack.cli.validators import (
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 REPO_ROOT = ROOT
+os.environ.setdefault("NITROSTACK_SKIP_UV_LOCK", "1")
 
 
 def _cli_env():
@@ -859,7 +860,102 @@ def test_official_templates_map_to_existing_dirs():
     for official, folder in OFFICIAL_TEMPLATES.items():
         path = os.path.join(package_dir, "templates", folder)
         assert os.path.isdir(path), f"missing template dir for {official}: {path}"
+        pyproject = os.path.join(path, "pyproject.toml")
+        assert os.path.isfile(pyproject), folder
+        deps = parse_pyproject_dependencies(open(pyproject, encoding="utf-8").read())
+        assert "nitrostack" in deps, folder
+        assert open(os.path.join(path, ".python-version"), encoding="utf-8").read().strip() == "3.12"
+        assert os.path.isfile(os.path.join(path, "uv.toml")), folder
+        assert not os.path.isfile(os.path.join(path, "uv.lock")), folder
+        req = open(os.path.join(path, "requirements.txt"), encoding="utf-8").read()
+        assert "nitrostack" in req
     print("Success! Explicit template names map to on-disk folders.")
+
+
+@pytest.mark.parametrize("template", list(OFFICIAL_TEMPLATES))
+def test_init_rewrites_pyproject_identity_and_copies_uv_files(template):
+    tmp = tempfile.mkdtemp(prefix="nitro-cli-uv-")
+    original_cwd = os.getcwd()
+    original_stdin = sys.stdin
+    try:
+        os.chdir(tmp)
+        sys.stdin = io.StringIO("Rewritten description\nTester\n")
+        init_project("My_App", template=template, skip_install=True)
+        project = os.path.join(tmp, "My_App")
+        pyproject = open(os.path.join(project, "pyproject.toml"), encoding="utf-8").read()
+        assert 'name = "my-app"' in pyproject
+        assert 'description = "Rewritten description"' in pyproject
+        assert os.path.isfile(os.path.join(project, ".python-version"))
+        assert os.path.isfile(os.path.join(project, "uv.toml"))
+        assert os.path.isfile(os.path.join(project, "requirements.txt"))
+    finally:
+        sys.stdin = original_stdin
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_init_runs_uv_lock_in_project_dir():
+    tmp = tempfile.mkdtemp(prefix="nitro-cli-uv-lock-")
+    original_cwd = os.getcwd()
+    original_stdin = sys.stdin
+    try:
+        os.chdir(tmp)
+        sys.stdin = io.StringIO("\n\n")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
+            with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
+                with patch("nitrostack.cli.install._run_uv") as run_uv:
+                    init_project("lock-demo", template="python-starter", skip_install=True)
+        run_uv.assert_called_once()
+        assert run_uv.call_args.args[0] == ["lock"]
+        assert os.path.abspath(run_uv.call_args.kwargs["cwd"]) == os.path.abspath("lock-demo")
+        assert os.path.isfile(os.path.join(tmp, "lock-demo", "main.py"))
+    finally:
+        sys.stdin = original_stdin
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_init_succeeds_when_uv_is_missing():
+    tmp = tempfile.mkdtemp(prefix="nitro-cli-no-uv-")
+    original_cwd = os.getcwd()
+    original_stdin = sys.stdin
+    try:
+        os.chdir(tmp)
+        sys.stdin = io.StringIO("\n\n")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
+            with patch("nitrostack.cli.install._uv_bin", return_value=None):
+                init_project("no-uv-demo", template="python-starter", skip_install=True)
+        assert os.path.isfile(os.path.join(tmp, "no-uv-demo", "pyproject.toml"))
+        assert not os.path.isfile(os.path.join(tmp, "no-uv-demo", "uv.lock"))
+    finally:
+        sys.stdin = original_stdin
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_init_succeeds_when_uv_lock_fails():
+    tmp = tempfile.mkdtemp(prefix="nitro-cli-uv-fail-")
+    original_cwd = os.getcwd()
+    original_stdin = sys.stdin
+    try:
+        os.chdir(tmp)
+        sys.stdin = io.StringIO("\n\n")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
+            with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
+                with patch(
+                    "nitrostack.cli.install._run_uv",
+                    side_effect=RuntimeError("uv lock failed"),
+                ):
+                    init_project("uv-fail-demo", template="python-starter", skip_install=True)
+        assert os.path.isfile(os.path.join(tmp, "uv-fail-demo", "pyproject.toml"))
+        assert not os.path.isfile(os.path.join(tmp, "uv-fail-demo", "uv.lock"))
+    finally:
+        sys.stdin = original_stdin
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 GENERATE_CASES = [

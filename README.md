@@ -130,6 +130,15 @@ nitrostack-py install --production    # skip optional extras and requirements-de
 nitrostack-py validate                # lint deps, @mcp_app imports, and @module() refs
 ```
 
+`init` writes `pyproject.toml`, `.python-version`, and `uv.toml`, then runs `uv lock` when `uv` is on PATH. `install` prefers `uv sync` in that case. If `requirements.txt` pins nitrostack as a local path (`-e /path/to/nitrostack-python-sdk`), install uses `pip install -r requirements.txt` instead so unpublished SDK testing still works. The uv equivalent is:
+
+```toml
+[tool.uv.sources]
+nitrostack = { path = "/path/to/nitrostack-python-sdk", editable = true }
+```
+
+then `uv lock` / `uv sync`. Without `uv`, install falls back to `.venv` + `pip`.
+
 `upgrade` updates the `nitrostack` dependency spec in `pyproject.toml` in place (and `requirements.txt` when it already pins nitrostack). `--version X` writes `nitrostack==X`. Without `--version`, the latest PyPI release is written as `nitrostack>=latest`. A target older than the currently declared version is rejected unless `--allow-downgrade` is passed. `validate` reports missing/conflicting dependencies, `@mcp_app` modules that fail to import, and `@module()` `imports`/`exports` that are not real classes.
 
 ---

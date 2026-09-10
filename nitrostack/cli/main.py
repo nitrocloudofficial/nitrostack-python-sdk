@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from nitrostack.cli.generate import generate_component, generate_module as generate_module_from_template
-from nitrostack.cli.install import install_dependencies
+from nitrostack.cli.install import install_dependencies, lock_with_uv, rewrite_pyproject_identity
 from nitrostack.cli.pack import pack_project
 from nitrostack.cli.skills import run_skills_flow
 from nitrostack.cli.upgrade import upgrade_project
@@ -1294,6 +1294,12 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
         sys.exit(1)
 
     shutil.copytree(template_src_dir, name)
+    rewrite_pyproject_identity(
+        os.path.join(name, "pyproject.toml"),
+        name=os.path.basename(os.path.abspath(name)),
+        description=description,
+    )
+    lock_with_uv(name)
     widget_routes = ensure_python_widgets(name)
     print("\n\033[32m✓\033[0m Project created")
     if widget_routes:

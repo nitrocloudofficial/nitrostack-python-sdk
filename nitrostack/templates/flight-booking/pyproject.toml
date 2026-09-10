@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nitrostack-flight-booking"
+version = "0.1.0"
+description = "NitroStack flight-booking MCP server"
+requires-python = ">=3.10"
+dependencies = [
+    "nitrostack",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = true
+exclude = ["tests*", ".venv*", "venv*", "node_modules*", "widgets*"]

@@ -14,8 +14,16 @@ from nitrostack.cli.install import (
     _run_pip,
     ensure_project_venv,
     install_dependencies,
+    pep503_name,
+    requirements_uses_local_nitrostack,
     venv_python,
 )
+
+
+@pytest.fixture(autouse=True)
+def _uv_absent(monkeypatch):
+    """Keep the existing pip-path tests off a real uv binary on PATH."""
+    monkeypatch.setattr("nitrostack.cli.install._uv_bin", lambda: None)
 
 
 def test_optional_extra_names_parses_pyproject():
@@ -105,3 +113,64 @@ def test_install_requirements_uses_venv_python(tmp_path):
     assert cmd[0] == venv_py
     assert cmd[1:4] == ["-m", "pip", "install"]
     assert cmd[4] == "-r"
+
+
+def test_pep503_name_normalizes_folder():
+    assert pep503_name("My_App") == "my-app"
+    assert pep503_name("  Nitro Stack!  ") == "nitro-stack"
+    assert pep503_name("") == "nitrostack-app"
+
+
+def test_requirements_uses_local_nitrostack(tmp_path):
+    req = tmp_path / "requirements.txt"
+    req.write_text("nitrostack\n", encoding="utf-8")
+    assert requirements_uses_local_nitrostack(str(req)) is False
+    req.write_text("-e /path/to/nitrostack-python-sdk\n", encoding="utf-8")
+    assert requirements_uses_local_nitrostack(str(req)) is True
+    req.write_text("nitrostack @ file:///tmp/sdk\n", encoding="utf-8")
+    assert requirements_uses_local_nitrostack(str(req)) is True
+    req.write_text("./vendor/nitrostack\n", encoding="utf-8")
+    assert requirements_uses_local_nitrostack(str(req)) is True
+    assert requirements_uses_local_nitrostack(str(tmp_path / "missing.txt")) is False
+
+
+def test_install_uses_uv_sync_when_uv_and_pyproject(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'demo'\ndependencies = ['nitrostack']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("nitrostack\n", encoding="utf-8")
+    with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
+        with patch("nitrostack.cli.install._run_uv") as run_uv:
+            with patch("nitrostack.cli.install._run_pip") as run_pip:
+                install_dependencies(cwd=str(tmp_path), production=False)
+    run_uv.assert_called_once_with(["sync"], cwd=str(tmp_path))
+    run_pip.assert_not_called()
+
+
+def test_install_uv_production_passes_no_dev(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
+        with patch("nitrostack.cli.install._run_uv") as run_uv:
+            install_dependencies(cwd=str(tmp_path), production=True)
+    run_uv.assert_called_once_with(["sync", "--no-dev"], cwd=str(tmp_path))
+
+
+def test_install_uses_pip_when_local_nitrostack_pin(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'demo'\ndependencies = ['nitrostack']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text(
+        "-e /path/to/nitrostack-python-sdk\n",
+        encoding="utf-8",
+    )
+    with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
+        with patch("nitrostack.cli.install._run_uv") as run_uv:
+            with patch("nitrostack.cli.install._run_pip") as run_pip:
+                install_dependencies(cwd=str(tmp_path), production=False)
+    run_uv.assert_not_called()
+    run_pip.assert_called_once_with(
+        ["-r", str(tmp_path / "requirements.txt")],
+        cwd=str(tmp_path),
+    )
