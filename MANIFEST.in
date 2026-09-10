@@ -1,0 +1,11 @@
+recursive-include nitrostack/templates *
+recursive-include nitrostack/cli/templates *
+include nitrostack/templates/starter/.python-version
+include nitrostack/templates/starter/.gitignore
+include nitrostack/templates/starter/uv.toml
+include nitrostack/templates/pizzaz/.python-version
+include nitrostack/templates/pizzaz/.gitignore
+include nitrostack/templates/pizzaz/uv.toml
+include nitrostack/templates/flight-booking/.python-version
+include nitrostack/templates/flight-booking/.gitignore
+include nitrostack/templates/flight-booking/uv.toml
