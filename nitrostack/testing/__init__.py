@@ -15,9 +15,17 @@ class NitroTestingModule:
     `request_handlers` (the same dict the real stdio/HTTP transports use).
     """
     @classmethod
-    async def create(cls, app_module: Type) -> "NitroTestingModule":
+    async def create(
+        cls,
+        app_module: Type,
+        *,
+        protocol_era: str = "auto",
+    ) -> "NitroTestingModule":
         # Construct a dummy App class decorated with @mcp_app
-        @mcp_app(module=app_module, server=ServerConfig(name="test-server"))
+        @mcp_app(
+            module=app_module,
+            server=ServerConfig(name="test-server", protocol_era=protocol_era),
+        )
         class TestApp:
             pass
 

@@ -471,7 +471,7 @@ class TestTasksModule:
 
 
 async def _mcp_task_flow():
-    harness = await NitroTestingModule.create(TestTasksModule)
+    harness = await NitroTestingModule.create(TestTasksModule, protocol_era="legacy")
 
     req = types.CallToolRequest(
         method="tools/call",

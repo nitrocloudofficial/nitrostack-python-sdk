@@ -103,7 +103,7 @@ PROTOCOL_DELIVERABLES: tuple[ProtocolDeliverable, ...] = (
     ),
     ProtocolDeliverable(
         ProtocolArea.ASYNC_TASKS,
-        "Task state machine and tasks/get embedded result",
+        "Legacy/in-process Task state machine and embedded result",
         "tests/test_mcp20_tasks.py",
     ),
     ProtocolDeliverable(
@@ -146,7 +146,7 @@ ACCEPTANCE_CRITERIA: tuple[AcceptanceCriterion, ...] = (
     ),
     AcceptanceCriterion(
         "task_cancellation",
-        "tasks/cancel marks cancelled; terminal cancel returns -32602",
+        "Legacy tasks/cancel marks cancelled; terminal cancel returns -32602",
         "tests/test_mcp20_tasks.py",
     ),
     AcceptanceCriterion(
