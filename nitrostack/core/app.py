@@ -75,7 +75,7 @@ from nitrostack.protocol.meta import (
     strip_tool_arguments,
 )
 from nitrostack.protocol.observability import TraceContext, extract_trace_context
-from nitrostack.runtime.correlation import InFlightRegistry, new_correlation_id
+from nitrostack.runtime.correlation import new_correlation_id
 from nitrostack.transports.headers import (
     extract_mcp_param_headers,
     extract_mcp_scope_headers,
@@ -541,7 +541,6 @@ class McpApplication:
         self._prompts: Dict[str, _PromptEntry] = {}
         self._initial_tools: List[Tuple[Any, Callable, ToolConfig]] = []
         self.task_manager = TaskManager()
-        self._in_flight = InFlightRegistry()
 
         self._bootstrap()
 
@@ -766,6 +765,11 @@ class McpApplication:
     # ------------------------------------------------------------------
 
     def _advertise_tasks_extension(self) -> bool:
+        # Tasks remain available to in-process callers and the legacy wire only.
+        # MCP 2026 has no complete tasks surface (notably tasks/update), so
+        # advertising this partial implementation would make discovery lie.
+        if self.protocol_era in ("auto", "modern"):
+            return False
         return any(
             entry.config.task_support in ("optional", "required")
             for entry in self._tools.values()
@@ -1275,6 +1279,11 @@ class McpApplication:
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
         if cfg.task_support == "forbidden" and task_metadata is not None:
             raise MCPError(
                 types.METHOD_NOT_FOUND,
@@ -1369,7 +1378,6 @@ class McpApplication:
             trace=trace,
         )
         _apply_request_envelope(ctx, rc)
-        ticket = self._in_flight.register(correlation_id, jsonrpc_id=jsonrpc_id)
         try:
             result = await run_pipeline(
                 handler=entry.method,
@@ -1389,13 +1397,6 @@ class McpApplication:
             logger.exception("Tool %s failed", cfg.name)
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=str(exc))],
-                isError=True,
-            )
-        finally:
-            self._in_flight.discard(correlation_id)
-        if ticket.cancel_requested.is_set():
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text="Request was cancelled.")],
                 isError=True,
             )
         return self._to_call_tool_result(result, entry.component, ctx)
@@ -1546,6 +1547,10 @@ class McpApplication:
         return GetTaskResult(**payload)
 
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
+        if self.protocol_era in ("auto", "modern"):
+            server.has_task_support = False
+            return
+
         async def handle_list_tasks(req):
             if rejects_deprecated_method("tasks/list", self.protocol_era):
                 message = deprecated_method_message("tasks/list")
@@ -1769,37 +1774,10 @@ class McpApplication:
             http_engine=http_engine,
         )
 
-        if http_engine == "sessionless":
-            from nitrostack.transports.middleware import wrap_stateless_transport
-
-            def _discover_handler(_request):
-                return self.handle_server_discover()
-
-            def _initialize_handler(request):
-                params = getattr(request, "params", None) or {}
-                requested = params.get("protocolVersion") if isinstance(params, dict) else None
-                return self.handle_sessionless_initialize(
-                    requested if isinstance(requested, str) else None
-                )
-
-            http_app = wrap_stateless_transport(
-                http_app,
-                server_name=self.server_config.name,
-                server_version=self.server_config.version,
-                protocol_version=protocol_version_for_era(era, self.server_config.protocol_version),
-                advertise_tasks=self._advertise_tasks_extension(),
-                advertise_app=any(
-                    getattr(entry, "component", None) is not None
-                    for entry in getattr(self, "_tools", {}).values()
-                ),
-                custom_extensions=self._custom_extensions(),
-                wire_mode=wire_mode,
-                protocol_era=era,
-                enable_cors=enable_cors,
-                discover_handler=_discover_handler,
-                initialize_handler=_initialize_handler,
-            )
-
+        # The official MCP SDK owns the complete Streamable HTTP request lifecycle
+        # mounted by ``build_http_app``.  Do not wrap it in a second JSON-RPC
+        # dispatcher: a sidecar would answer ping/initialize/tools/call itself and
+        # could diverge from the protocol and session behaviour of the SDK.
         return http_app
 
     async def _run_stdio(self) -> None:

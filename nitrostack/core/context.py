@@ -107,8 +107,9 @@ class TaskContext:
     whichever transport (STDIO or Streamable HTTP) initiated the task —
     transport-agnostic since both use the same ``mcp.server.session.ServerSession``.
     The client only receives these if it supplied a ``progressToken`` in the
-    original ``tools/call`` request's ``_meta``; ``TaskManager``-backed polling via
-    ``tasks/get`` always works regardless, so this is additive, not required.
+    original ``tools/call`` request's ``_meta``. TaskManager-backed polling is
+    retained for in-process callers and the legacy wire; the incomplete Tasks
+    surface is deliberately not advertised on MCP 2026.
     """
 
     def __init__(

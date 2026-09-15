@@ -32,7 +32,7 @@ BLUEPRINT_CONFORMANCE_AREAS: dict[ConformanceArea, str] = {
         "Standard JSON-RPC error codes; deprecated methods rejected on modern wire"
     ),
     ConformanceArea.TASKS: (
-        "Task-augmented tools/call, tasks/get lifecycle, cancel, terminal-only TTL eviction"
+        "MCP 2026 hides the incomplete Tasks surface; legacy/in-process task lifecycle remains"
     ),
     ConformanceArea.MULTI_TENANT: (
         "Cross-tenant task access raises TaskNotFoundError without enumeration"
