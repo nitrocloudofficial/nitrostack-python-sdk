@@ -789,10 +789,14 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
+        # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
+        # `server/discover` and real capability negotiation never disagree.
+        resources_subscribe = getattr(self, "protocol_era", None) != "modern"
         return build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
+            resources_subscribe=resources_subscribe,
             advertise_tasks=self._advertise_tasks_extension(),
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),

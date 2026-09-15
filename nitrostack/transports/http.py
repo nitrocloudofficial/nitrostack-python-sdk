@@ -42,6 +42,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from nitrostack.widgets.preview_page import render_preview_page
 from nitrostack.core.di import DIContainer
+from nitrostack.transports.cors import configured_cors_origins
 from pydantic_core import PydanticUndefined
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -523,6 +524,7 @@ def build_http_app(
     if server is not None:
         server.http_engine = http_engine
         server.sessionful = http_engine == "sessionful"
+        server.protocol_era = protocol_era
 
     security_settings = None
     if not enable_cors:
@@ -694,7 +696,7 @@ def build_http_app(
         return JSONResponse(
             {
                 "Browser": meta["name"],
-                "Protocol-Version": "2025-06-18",
+                "Protocol-Version": protocol_version_for_era(protocol_era),
                 "User-Agent": f"NitroStack/{meta['version']}",
                 "webSocketDebuggerUrl": "",
                 "transport": "mcp",
@@ -776,11 +778,15 @@ def build_http_app(
         expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
         if http_engine == "sessionful":
             expose_headers.append(LEGACY_SESSION_HEADER)
+        # Single CORS layer for `/mcp`: the sidecar that used to add a second
+        # one has been removed (#22), so `MCP_CORS_ALLOWED_ORIGINS` is honored
+        # here and nowhere else.
+        allow_origins = list(configured_cors_origins()) or ["*"]
         middleware.insert(
             0,
             Middleware(
                 CORSMiddleware,
-                allow_origins=["*"],
+                allow_origins=allow_origins,
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                 allow_headers=CORS_ALLOW_HEADERS,
                 expose_headers=expose_headers,

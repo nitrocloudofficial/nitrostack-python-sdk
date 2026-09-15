@@ -33,6 +33,7 @@ class NitroStackMcpServer(LowLevelServer):
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
         self.sessionful: bool = False
+        self.protocol_era: Optional[str] = None
         self.discover_handler: Optional[Callable[[], dict[str, Any]]] = None
         self.initialize_handler: Optional[Callable[[Optional[str]], dict[str, Any]]] = None
         # In-process tests still look up handlers by request type.
@@ -67,7 +68,10 @@ class NitroStackMcpServer(LowLevelServer):
         )
 
         if caps.resources is not None:
-            caps.resources.subscribe = True
+            # `resources/subscribe` is only rejected on `modern`
+            # (see `rejects_deprecated_method`); `legacy` and `auto` both serve
+            # it live, so this must track era, not the sessionful/sessionless split.
+            caps.resources.subscribe = self.protocol_era != "modern"
 
         if self.has_task_support:
             caps.tasks = types.ServerTasksCapability(
