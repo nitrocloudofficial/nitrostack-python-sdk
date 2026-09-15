@@ -311,7 +311,8 @@ class HeaderCompatMiddleware:
     version checks see what the client sent.
 
     Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
-    Sidecar version checks run on the combined app outside this mount.
+    This middleware only normalizes transport headers; JSON-RPC dispatch remains
+    owned by the official MCP Streamable HTTP manager.
     """
 
     def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
