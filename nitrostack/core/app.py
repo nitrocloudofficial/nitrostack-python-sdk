@@ -789,10 +789,14 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
+        # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
+        # `server/discover` and real capability negotiation never disagree.
+        resources_subscribe = getattr(self, "protocol_era", None) != "modern"
         return build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
+            resources_subscribe=resources_subscribe,
             advertise_tasks=self._advertise_tasks_extension(),
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
@@ -1769,37 +1773,10 @@ class McpApplication:
             http_engine=http_engine,
         )
 
-        if http_engine == "sessionless":
-            from nitrostack.transports.middleware import wrap_stateless_transport
-
-            def _discover_handler(_request):
-                return self.handle_server_discover()
-
-            def _initialize_handler(request):
-                params = getattr(request, "params", None) or {}
-                requested = params.get("protocolVersion") if isinstance(params, dict) else None
-                return self.handle_sessionless_initialize(
-                    requested if isinstance(requested, str) else None
-                )
-
-            http_app = wrap_stateless_transport(
-                http_app,
-                server_name=self.server_config.name,
-                server_version=self.server_config.version,
-                protocol_version=protocol_version_for_era(era, self.server_config.protocol_version),
-                advertise_tasks=self._advertise_tasks_extension(),
-                advertise_app=any(
-                    getattr(entry, "component", None) is not None
-                    for entry in getattr(self, "_tools", {}).values()
-                ),
-                custom_extensions=self._custom_extensions(),
-                wire_mode=wire_mode,
-                protocol_era=era,
-                enable_cors=enable_cors,
-                discover_handler=_discover_handler,
-                initialize_handler=_initialize_handler,
-            )
-
+        # The official MCP SDK owns the complete Streamable HTTP request lifecycle
+        # mounted by ``build_http_app``.  Do not wrap it in a second JSON-RPC
+        # dispatcher: a sidecar would answer ping/initialize/tools/call itself and
+        # could diverge from the protocol and session behaviour of the SDK.
         return http_app
 
     async def _run_stdio(self) -> None:

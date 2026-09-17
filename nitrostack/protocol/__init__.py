@@ -32,7 +32,6 @@ from nitrostack.protocol.errors import ERROR_CODE_MESSAGES, JsonRpcErrorCode
 from nitrostack.protocol.extensions import MCPExtensionId
 from nitrostack.protocol.jsonrpc import (
     JsonRpcWireError,
-    build_ping_response,
     build_tool_error_result,
     jsonrpc_error,
     jsonrpc_success,
@@ -166,7 +165,6 @@ __all__ = [
     "build_sessionless_initialize_result",
     "build_discover_result",
     "parse_jsonrpc_request",
-    "build_ping_response",
     "jsonrpc_success",
     "jsonrpc_error",
     "build_tool_error_result",
