@@ -57,7 +57,7 @@ def test_install_editable_with_extras(tmp_path):
     )
     with patch("nitrostack.cli.install._run_pip") as run_pip:
         install_dependencies(cwd=str(tmp_path), production=False)
-    run_pip.assert_called_once_with(["-e", ".[dev]"], cwd=str(tmp_path))
+    run_pip.assert_called_once_with(["-r", str(tmp_path / "requirements.txt")], cwd=str(tmp_path))
 
 
 def test_install_production_skips_extras_and_dev_files(tmp_path):
@@ -65,7 +65,7 @@ def test_install_production_skips_extras_and_dev_files(tmp_path):
     (tmp_path / "requirements-dev.txt").write_text("pytest\n", encoding="utf-8")
     with patch("nitrostack.cli.install._run_pip") as run_pip:
         install_dependencies(cwd=str(tmp_path), production=True)
-    run_pip.assert_called_once_with(["-e", "."], cwd=str(tmp_path))
+    run_pip.assert_called_once_with(["-r", str(tmp_path / "requirements.txt")], cwd=str(tmp_path))
 
 
 def test_install_requirements_txt_and_dev_file(tmp_path):
@@ -134,9 +134,9 @@ def test_requirements_uses_local_nitrostack(tmp_path):
     assert requirements_uses_local_nitrostack(str(tmp_path / "missing.txt")) is False
 
 
-def test_install_uses_uv_sync_when_uv_and_pyproject(tmp_path):
+def test_install_vendors_sdk_then_uses_pip_for_file_pin(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = 'demo'\ndependencies = ['nitrostack']\n",
+        '[project]\nname = "demo"\ndependencies = ["nitrostack"]\n',
         encoding="utf-8",
     )
     (tmp_path / "requirements.txt").write_text("nitrostack\n", encoding="utf-8")
@@ -144,16 +144,20 @@ def test_install_uses_uv_sync_when_uv_and_pyproject(tmp_path):
         with patch("nitrostack.cli.install._run_uv") as run_uv:
             with patch("nitrostack.cli.install._run_pip") as run_pip:
                 install_dependencies(cwd=str(tmp_path), production=False)
-    run_uv.assert_called_once_with(["sync"], cwd=str(tmp_path))
-    run_pip.assert_not_called()
+    run_uv.assert_not_called()
+    run_pip.assert_called_once_with(["-r", str(tmp_path / "requirements.txt")], cwd=str(tmp_path))
+    assert "./vendor/nitrostack" in (tmp_path / "requirements.txt").read_text(encoding="utf-8")
+    assert (tmp_path / "vendor" / "nitrostack" / "nitrostack" / "transports" / "assets" / "landing.html").is_file()
 
 
-def test_install_uv_production_passes_no_dev(tmp_path):
+def test_install_uv_production_still_vendors_then_pips(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
     with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
         with patch("nitrostack.cli.install._run_uv") as run_uv:
-            install_dependencies(cwd=str(tmp_path), production=True)
-    run_uv.assert_called_once_with(["sync", "--no-dev"], cwd=str(tmp_path))
+            with patch("nitrostack.cli.install._run_pip") as run_pip:
+                install_dependencies(cwd=str(tmp_path), production=True)
+    run_uv.assert_not_called()
+    run_pip.assert_called_once()
 
 
 def test_install_uses_pip_when_local_nitrostack_pin(tmp_path):

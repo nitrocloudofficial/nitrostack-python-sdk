@@ -885,9 +885,17 @@ def test_init_rewrites_pyproject_identity_and_copies_uv_files(template):
         pyproject = open(os.path.join(project, "pyproject.toml"), encoding="utf-8").read()
         assert 'name = "my-app"' in pyproject
         assert 'description = "Rewritten description"' in pyproject
+        assert 'nitrostack = { path = "vendor/nitrostack" }' in pyproject
+        assert "file:./vendor" not in pyproject
+        assert os.path.isfile(os.path.join(project, "vendor", "nitrostack", "nitrostack", "transports", "assets", "landing.html"))
+        env_text = open(os.path.join(project, ".env"), encoding="utf-8").read()
+        assert 'SERVER_NAME="My_App"' in env_text
         assert os.path.isfile(os.path.join(project, ".python-version"))
         assert os.path.isfile(os.path.join(project, "uv.toml"))
         assert os.path.isfile(os.path.join(project, "requirements.txt"))
+        assert "./vendor/nitrostack" in open(
+            os.path.join(project, "requirements.txt"), encoding="utf-8"
+        ).read()
     finally:
         sys.stdin = original_stdin
         os.chdir(original_cwd)

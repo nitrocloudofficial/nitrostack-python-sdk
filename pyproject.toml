@@ -37,7 +37,7 @@ include = ["nitrostack*"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-nitrostack = ["templates/**/*", "templates/**/.*", "cli/templates/*"]
+nitrostack = ["templates/**/*", "templates/**/.*", "cli/templates/*", "transports/assets/*"]
 
 [tool.ruff]
 line-length = 100

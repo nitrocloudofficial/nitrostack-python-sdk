@@ -1,5 +1,6 @@
 recursive-include nitrostack/templates *
 recursive-include nitrostack/cli/templates *
+recursive-include nitrostack/transports/assets *
 include nitrostack/templates/starter/.python-version
 include nitrostack/templates/starter/.gitignore
 include nitrostack/templates/starter/uv.toml

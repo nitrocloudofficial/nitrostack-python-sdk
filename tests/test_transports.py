@@ -179,7 +179,7 @@ def test_http_health_and_cors():
         assert root.status_code == 200
         assert "text/html" in root.headers.get("content-type", "")
         assert "MCP" in root.text
-        assert "/widgets/preview" in root.text
+        assert "Available Tools" in root.text
 
         version = client.get("/json/version")
         assert version.status_code == 200
