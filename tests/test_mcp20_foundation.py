@@ -50,14 +50,13 @@ class TestProtocolVersion:
         assert MODERN_PROTOCOL_VERSION in SUPPORTED_PROTOCOL_VERSIONS
 
     def test_supported_versions_per_era(self):
+        legacy_versions = frozenset({LEGACY_PROTOCOL_VERSION, "2025-11-25"})
         assert supported_protocol_versions_for_era("modern") == frozenset(
             {MODERN_PROTOCOL_VERSION}
         )
-        assert supported_protocol_versions_for_era("legacy") == frozenset(
-            {LEGACY_PROTOCOL_VERSION}
-        )
+        assert supported_protocol_versions_for_era("legacy") == legacy_versions
         assert supported_protocol_versions_for_era("auto") == frozenset(
-            {MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION}
+            {MODERN_PROTOCOL_VERSION, *legacy_versions}
         )
         assert protocol_era_for_wire_mode("reject") == "modern"
         assert protocol_era_for_wire_mode("stateless") == "auto"
