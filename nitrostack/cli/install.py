@@ -186,6 +186,8 @@ def install_dependencies(
         )
 
     print("NITROSTACK — Install" + (" (production)" if production else ""))
+    from nitrostack.cli.vendor import ensure_vendored_nitrostack
+    ensure_vendored_nitrostack(root)
     local_pin = requirements_uses_local_nitrostack(requirements)
     use_uv = bool(_uv_bin() and os.path.isfile(pyproject) and not local_pin)
     print(f"Target: {venv_dir(root)}")

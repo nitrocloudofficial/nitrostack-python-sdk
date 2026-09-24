@@ -14,7 +14,7 @@ not provide out of the box:
   session-count API or creation hook, so this is tracked via a thin ASGI
   middleware watching the `mcp-session-id` header)
 - A `/mcp/health` endpoint
-- A root documentation page at `GET /` (browsers opening the HTTP port)
+- A documentation landing page at `GET /` (connection setup + tool catalog)
 - Chrome DevTools discovery stubs at `GET /json` and `GET /json/version` so
   inspector probes do not 404
 - JSON 404s for OAuth discovery / DCR (`/register`) so MCP Inspector does not
@@ -26,7 +26,6 @@ See `dev-plan/PHASE-3-http-transport.md` for the full scope.
 from __future__ import annotations
 
 import contextlib
-import html
 import logging
 import os
 import sys
@@ -40,6 +39,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from nitrostack.transports.landing_page import render_landing_page
 from nitrostack.widgets.preview_page import render_preview_page
 from nitrostack.core.di import DIContainer
 from pydantic_core import PydanticUndefined
@@ -89,56 +89,22 @@ def _server_meta(mcp_app: "McpApplication") -> Dict[str, str]:
     }
 
 
-def _landing_html(
-    name: str,
-    version: str,
-    endpoint: str,
-    public_mcp_url: Optional[str] = None,
-) -> str:
-    safe_name = html.escape(name)
-    safe_version = html.escape(version)
-    mcp_path = html.escape(public_mcp_url or (endpoint.rstrip("/") or "/mcp"))
-    health_path = html.escape(f"{(endpoint.rstrip('/') or '/mcp')}/health")
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{safe_name}</title>
-  <style>
-    :root {{ color-scheme: dark; }}
-    body {{
-      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-      background: radial-gradient(circle at 10% 20%, #0f172a 0%, #020617 90%);
-      color: #f8fafc;
-    }}
-    main {{
-      width: min(640px, calc(100% - 2rem));
-      background: rgba(30, 41, 59, 0.55);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 16px; padding: 2rem;
-    }}
-    h1 {{ margin: 0 0 0.35rem; font-size: 1.6rem; }}
-    p {{ color: #94a3b8; margin: 0 0 1.25rem; }}
-    code, a {{ color: #a5b4fc; }}
-    ul {{ margin: 0; padding-left: 1.2rem; line-height: 1.8; }}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>{safe_name}</h1>
-    <p>NitroStack MCP server v{safe_version}. This is not a website — connect with an MCP client.</p>
-    <ul>
-      <li>Streamable HTTP: <code>POST {mcp_path}</code></li>
-      <li>Legacy SSE: <code>GET /sse</code></li>
-      <li>Widget preview: <a href="/widgets/preview"><code>/widgets/preview</code></a></li>
-      <li>Health: <a href="{health_path}"><code>{health_path}</code></a></li>
-    </ul>
-  </main>
-</body>
-</html>
-"""
+def _landing_tools(mcp_app: "McpApplication") -> List[Dict[str, Any]]:
+    tools: List[Dict[str, Any]] = []
+    for entry in getattr(mcp_app, "_tools", {}).values():
+        try:
+            schema = mcp_app._tool_input_schema(entry.input_model)
+        except Exception:
+            logger.exception("Landing page schema failed for %s", entry.config.name)
+            schema = None
+        tools.append(
+            {
+                "name": entry.config.name,
+                "description": entry.config.description or "",
+                "inputSchema": schema,
+            }
+        )
+    return tools
 
 
 def _env_list(name: str) -> List[str]:
@@ -599,11 +565,12 @@ def build_http_app(
     async def root_page(request):
         meta = _server_meta(mcp_app)
         return HTMLResponse(
-            _landing_html(
-                meta["name"],
-                meta["version"],
-                endpoint,
-                public_mcp_url=_request_public_mcp_url(request),
+            render_landing_page(
+                name=meta["name"],
+                version=meta["version"],
+                description=getattr(getattr(mcp_app, "server_config", None), "description", None),
+                mcp_endpoint=_request_public_mcp_url(request),
+                tools=_landing_tools(mcp_app),
             )
         )
 

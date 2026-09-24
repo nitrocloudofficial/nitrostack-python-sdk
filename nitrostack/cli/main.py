@@ -1299,6 +1299,8 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
         name=os.path.basename(os.path.abspath(name)),
         description=description,
     )
+    from nitrostack.cli.vendor import ensure_vendored_nitrostack
+    ensure_vendored_nitrostack(name)
     lock_with_uv(name)
     widget_routes = ensure_python_widgets(name)
     print("\n\033[32m✓\033[0m Project created")
@@ -1313,14 +1315,19 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
             lines = f.readlines()
         new_lines = []
         for line in lines:
-            if line.startswith("SERVER_DESC="):
+            if line.startswith("SERVER_NAME="):
+                new_lines.append(f'SERVER_NAME="{os.path.basename(os.path.abspath(name))}"\n')
+            elif line.startswith("SERVER_DESC="):
                 new_lines.append(f'SERVER_DESC="{description}"\n')
             elif line.startswith("SERVER_AUTHOR="):
                 new_lines.append(f'SERVER_AUTHOR="{author}"\n')
             else:
                 new_lines.append(line)
+        has_name = any(line.startswith("SERVER_NAME=") for line in new_lines)
         has_desc = any(line.startswith("SERVER_DESC=") for line in new_lines)
         has_author = any(line.startswith("SERVER_AUTHOR=") for line in new_lines)
+        if not has_name:
+            new_lines.append(f'SERVER_NAME="{os.path.basename(os.path.abspath(name))}"\n')
         if not has_desc:
             new_lines.append(f'SERVER_DESC="{description}"\n')
         if not has_author:

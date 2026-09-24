@@ -62,6 +62,8 @@ nitrostack-py dev --port 4000 --widget 4001
 nitrostack-py start --port 4000 --widget 4001
 ```
 
+`init` / `install` vendor this SDK into `vendor/nitrostack` and pin it with `[tool.uv.sources]` so NitroCloud `uv sync` and Open URL use this documentation page (not the older PyPI stub). Do not put a `file:` URL in `[project].dependencies` — that breaks the cloud wheel metadata.
+
 Once scaffolded, follow the next steps printed by the CLI to run your server, configure environment variables, and try it out.
 
 ---
@@ -260,6 +262,7 @@ NitroStack apps can run over three transports, selected via `MCP_TRANSPORT_TYPE`
 
 - **`stdio`** (default outside production): JSON-RPC over stdin/stdout — the standard mode for desktop MCP clients (Claude Desktop, Cursor, etc.).
 - **`http`**: Streamable HTTP + legacy SSE over a real network port, for cloud/remote deployments. Exposes:
+  - `GET /` — documentation landing page (connection setup for Cursor/Claude/ChatGPT plus the registered tool catalog). Same page TypeScript NitroStack serves on Open URL.
   - `POST/GET/DELETE /mcp` — Streamable HTTP (session-based JSON-RPC + SSE streaming). `/mcp` and `/mcp/` are equivalent; the server does not 307 between them (MCP Inspector needs the no-slash URL for its SSE GET).
   - `GET /sse` + `POST /mcp/messages/` — legacy HTTP+SSE for older clients (trailing slash required so messages aren't swallowed by the Streamable HTTP `/mcp` mount)
   - `GET /mcp/health` — health check (`status`, active session count, uptime)
