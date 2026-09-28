@@ -68,6 +68,14 @@ class StatelessTransportMiddleware:
         buffered_body: Optional[bytes] = None
         header_snapshot: Optional[tuple[tuple[bytes, bytes], ...]] = None
         if method == "POST" and path in self.mcp_paths and self.pipeline is not None:
+            raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
+            rejected_session = self.pipeline.reject_incoming_session_id(raw_headers)
+            if rejected_session is not None:
+                buffered_body = await self._read_body(receive)
+                await self._send_pipeline_response(
+                    scope, send, raw_headers, rejected_session, body=buffered_body
+                )
+                return
             scope = self._strip_sessionless_scope(scope)
             buffered_body = await self._read_body(receive)
             handled = await self._try_pre_dispatch(scope, buffered_body, send)
@@ -92,7 +100,6 @@ class StatelessTransportMiddleware:
             scope = scope_with_header_snapshot(scope, header_snapshot)
 
         if path in self.mcp_paths and self.pipeline is not None:
-            scope = self._strip_sessionless_scope(scope)
             raw_headers = decode_asgi_headers(list(scope.get("headers") or []))
             if method == "GET":
                 rejected = self.pipeline.reject_method_policy(b"", raw_headers)
@@ -101,6 +108,13 @@ class StatelessTransportMiddleware:
                         scope, send, raw_headers, rejected, body=b""
                     )
                     return
+                rejected_session = self.pipeline.reject_incoming_session_id(raw_headers)
+                if rejected_session is not None:
+                    await self._send_pipeline_response(
+                        scope, send, raw_headers, rejected_session, body=b""
+                    )
+                    return
+            scope = self._strip_sessionless_scope(scope)
 
         await self._forward_with_stateless_headers(
             scope, receive, send, body=buffered_body

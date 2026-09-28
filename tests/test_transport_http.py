@@ -56,8 +56,62 @@ def test_landing_html_escapes_server_name():
     with TestClient(http_app) as client:
         page = client.get("/")
     assert page.status_code == 200
-    assert "<script>" not in page.text
+    assert '<script>alert("xss")' not in page.text
     assert "&lt;script&gt;" in page.text
+
+
+def test_landing_page_lists_tools_and_connection_setup():
+    app = _app(name="hospital-emr-search")
+    http_app = build_http_app(app, enable_cors=True, stateless=True, json_response=True)
+    with TestClient(http_app, base_url="https://emr.example.com") as client:
+        page = client.get("/")
+    assert page.status_code == 200
+    text = page.text
+    assert "<title>Hospital Emr Search - MCP Server Documentation</title>" in text
+    assert "Connection Setup" in text
+    assert "Available Tools" in text
+    assert 'class="tool-name">echo</span>' in text
+    assert "View Input Schema" in text
+    assert '"hospital-emr-search": {' in text
+    assert "https://emr.example.com/mcp" in text
+    assert "{{" not in text
+
+
+def test_landing_page_uses_pyproject_identity_for_module_apps(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SERVER_NAME", raising=False)
+    monkeypatch.delenv("SERVER_DESC", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "y-server"\nversion = "0.1.0"\ndescription = "Hospital search"\n',
+        encoding="utf-8",
+    )
+
+    @module(name="app", controllers=[HttpExtraController])
+    class TemplateAppModule:
+        pass
+
+    app = asyncio.run(McpApplicationFactory.create(TemplateAppModule))
+    assert app.server_config.name == "y-server"
+    assert app.server_config.description == "Hospital search"
+    http_app = build_http_app(app, enable_cors=True, stateless=True, json_response=True)
+    with TestClient(http_app) as client:
+        page = client.get("/")
+    assert page.status_code == 200
+    assert "Y Server" in page.text
+    assert "Hospital search" in page.text
+    assert "Connection Setup" in page.text
+
+
+def test_landing_page_tools_json_cannot_break_out_of_script():
+    from nitrostack.transports.landing_page import render_landing_page
+
+    page = render_landing_page(
+        name="x",
+        version="1.0.0",
+        mcp_endpoint="http://localhost:3000/mcp",
+        tools=[{"name": "t", "description": "</script><script>alert(1)</script>", "inputSchema": {}}],
+    )
+    assert "</script><script>alert(1)" not in page
 
 
 def test_cors_disabled_rejects_disallowed_origin(monkeypatch):

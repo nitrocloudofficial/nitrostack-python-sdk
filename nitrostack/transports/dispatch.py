@@ -54,6 +54,7 @@ from nitrostack.protocol.version import (
     supported_protocol_versions_for_era,
 )
 from nitrostack.runtime.stateless import (
+    has_incoming_session_id,
     is_unsupported_protocol_version,
     request_protocol_version,
     sessionless_strips_incoming_session_id,
@@ -405,6 +406,22 @@ class StatelessIngressPipeline:
             return None
         return reject_unsupported_protocol_version(
             request, request_headers, self._context.resolved_era()
+        )
+
+    def reject_incoming_session_id(
+        self,
+        request_headers: dict[str, str],
+        request_id: Any = None,
+    ) -> Optional[tuple[int, dict[str, Any]]]:
+        """Reject ``Mcp-Session-Id`` on sessionless engines before it is stripped."""
+        if not has_incoming_session_id(request_headers):
+            return None
+        if not sessionless_strips_incoming_session_id(self._context.wire_mode):
+            return None
+        return 400, jsonrpc_error(
+            request_id,
+            JsonRpcErrorCode.INVALID_REQUEST,
+            "Invalid Request: Mcp-Session-Id is not supported",
         )
 
     def reject_method_policy(
