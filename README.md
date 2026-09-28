@@ -62,7 +62,7 @@ nitrostack-py dev --port 4000 --widget 4001
 nitrostack-py start --port 4000 --widget 4001
 ```
 
-`init` / `install` vendor this SDK into `vendor/nitrostack` and pin it with `[tool.uv.sources]` so NitroCloud `uv sync` and Open URL use this documentation page (not the older PyPI stub). Do not put a `file:` URL in `[project].dependencies` — that breaks the cloud wheel metadata.
+`init` and `pack` vendor this SDK into `vendor/nitrostack` and pin it with `[tool.uv.sources]`. The dependency name stays `nitrostack` in `pyproject.toml` and `requirements.txt`, so `nitrostack-py install` and NitroCloud still run `uv sync`. Do not put a `file:` URL in `[project].dependencies` — that breaks the cloud wheel metadata.
 
 Once scaffolded, follow the next steps printed by the CLI to run your server, configure environment variables, and try it out.
 

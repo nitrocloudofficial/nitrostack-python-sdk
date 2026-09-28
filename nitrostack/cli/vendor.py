@@ -17,7 +17,14 @@ from typing import Optional
 from nitrostack.cli._shared import write_text_atomic
 
 VENDOR_REL = os.path.join("vendor", "nitrostack")
-_REQ_PATH = "./vendor/nitrostack"
+_PLAIN_REQUIREMENT = "nitrostack"
+_PATH_PINS = frozenset({"./vendor/nitrostack", "-e ./vendor/nitrostack"})
+_NAMED_REQUIREMENT = re.compile(
+    r"^(?:-e\s+|--editable\s+)?nitrostack"
+    r"(?:\s*(?:===|==|!=|~=|>=|<=|>|<)\s*\S+)?"
+    r"(?:\s*@\s*\S+)?$",
+    re.IGNORECASE,
+)
 
 _SKIP_DIR_NAMES = {
     "__pycache__",
@@ -59,10 +66,29 @@ def _ignore(_directory: str, names: list) -> list:
     return skipped
 
 
-def _write_minimal_pyproject(dest: Path) -> None:
+def _distribution_version() -> str:
+    """Version of the SDK this CLI is running, without a hardcoded fallback."""
     import nitrostack
 
-    version = getattr(nitrostack, "__version__", None) or "0.3.2"
+    declared = getattr(nitrostack, "__version__", None)
+    if isinstance(declared, str) and declared.strip():
+        return declared.strip()
+    try:
+        from importlib.metadata import version as dist_version
+
+        found = dist_version("nitrostack")
+    except Exception:
+        found = ""
+    if found.strip():
+        return found.strip()
+    raise RuntimeError(
+        "Cannot determine the nitrostack package version. "
+        "Install the SDK so its distribution metadata is available."
+    )
+
+
+def _write_minimal_pyproject(dest: Path) -> None:
+    version = _distribution_version()
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "pyproject.toml").write_text(
         "[build-system]\n"
@@ -130,26 +156,17 @@ def _pin_text(text: str) -> str:
 
 
 def _pin_requirements(path: Path) -> None:
+    """Keep the requirement name ``nitrostack`` so uv resolves ``[tool.uv.sources]``."""
     if not path.is_file():
-        path.write_text(f"{_REQ_PATH}\n", encoding="utf-8")
         return
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    found = False
     out = []
     for line in lines:
         stripped = line.strip()
-        if stripped and not stripped.startswith("#") and re.match(r"(?:-e\s+)?(?:\./)?nitrostack(?![\w.-])", stripped, re.I):
-            out.append(f"{_REQ_PATH}\n")
-            found = True
-        elif stripped in {"./vendor/nitrostack", "-e ./vendor/nitrostack"}:
-            out.append(f"{_REQ_PATH}\n")
-            found = True
+        if stripped in _PATH_PINS or _NAMED_REQUIREMENT.match(stripped):
+            out.append(f"{_PLAIN_REQUIREMENT}\n")
         else:
             out.append(line)
-    if not found:
-        if out and not out[-1].endswith("\n"):
-            out[-1] = out[-1] + "\n"
-        out.append(f"{_REQ_PATH}\n")
     path.write_text("".join(out), encoding="utf-8")
 
 

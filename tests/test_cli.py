@@ -893,9 +893,9 @@ def test_init_rewrites_pyproject_identity_and_copies_uv_files(template):
         assert os.path.isfile(os.path.join(project, ".python-version"))
         assert os.path.isfile(os.path.join(project, "uv.toml"))
         assert os.path.isfile(os.path.join(project, "requirements.txt"))
-        assert "./vendor/nitrostack" in open(
-            os.path.join(project, "requirements.txt"), encoding="utf-8"
-        ).read()
+        requirements = open(os.path.join(project, "requirements.txt"), encoding="utf-8").read()
+        assert "nitrostack" in requirements
+        assert "./vendor/nitrostack" not in requirements
     finally:
         sys.stdin = original_stdin
         os.chdir(original_cwd)

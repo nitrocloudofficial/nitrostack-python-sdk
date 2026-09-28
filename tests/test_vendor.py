@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from nitrostack.cli.vendor import (
     copy_running_nitrostack,
     ensure_vendored_nitrostack,
@@ -36,7 +38,7 @@ def test_ensure_vendored_pins_pyproject_and_requirements(tmp_path: Path):
     assert 'dependencies = ["nitrostack"]' in pyproject
     assert "file:./vendor" not in pyproject
     assert 'nitrostack = { path = "vendor/nitrostack" }' in pyproject
-    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "./vendor/nitrostack"
+    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "nitrostack"
     pin_project_to_vendor(tmp_path)
     again = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     assert again.count('nitrostack = { path = "vendor/nitrostack" }') == 1
@@ -55,7 +57,32 @@ def test_pin_strips_file_url_that_breaks_cloud_uv_wheels(tmp_path: Path):
     assert 'dependencies = ["nitrostack"]' in text
     assert "file:./vendor" not in text
     assert 'nitrostack = { path = "vendor/nitrostack" }' in text
-    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "./vendor/nitrostack"
+    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "nitrostack"
+
+
+def test_minimal_pyproject_uses_distribution_version(tmp_path: Path, monkeypatch):
+    from nitrostack.cli import vendor
+
+    monkeypatch.setattr(vendor, "_distribution_version", lambda: "9.9.9")
+    dest = tmp_path / "sdk"
+    vendor._write_minimal_pyproject(dest)
+    text = (dest / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'version = "9.9.9"' in text
+    assert "0.3.2" not in text
+
+
+def test_distribution_version_has_no_hardcoded_fallback(monkeypatch):
+    import nitrostack
+    from nitrostack.cli.vendor import _distribution_version
+
+    monkeypatch.delattr(nitrostack, "__version__", raising=False)
+
+    def _missing(_name: str) -> str:
+        raise Exception("missing")
+
+    monkeypatch.setattr("importlib.metadata.version", _missing)
+    with pytest.raises(RuntimeError, match="package version"):
+        _distribution_version()
 
 
 def test_ensure_vendored_skips_the_sdk_checkout():
