@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nitrostack"
-version = "0.3.2"
+version = "0.3.6"
 description = "NitroStack Python SDK — A Python-idiomatic port of the NitroStack MCP framework"
 readme = "README.md"
 requires-python = ">=3.10"
