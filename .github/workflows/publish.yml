@@ -1,0 +1,64 @@
+name: Publish to PyPI
+
+# Runs when main moves. Uploads only if [project].version is not already on PyPI
+# (the release PR merge). Feature merges no-op in the check job so a protected
+# `pypi` environment does not block ordinary merges.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: check
+        run: |
+          set -euo pipefail
+          if VERSION=$(python scripts/bump_version.py --if-unpublished); then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "pyproject version is already on PyPI; skipping upload"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/nitrostack/
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U build && python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Tag release
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="v${VERSION}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+            exit 0
+          fi
+          git tag -a "$TAG" -m "nitrostack ${VERSION}"
+          git push origin "$TAG"
