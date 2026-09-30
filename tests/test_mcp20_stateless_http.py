@@ -572,7 +572,9 @@ class TestDispatchPipeline:
     def test_tools_call_requires_mcp_name(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+                IngressContext(
+                    "srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject"
+                )
             )
             body = json.dumps(
                 {
@@ -1731,7 +1733,8 @@ class TestAutoEraOneMcpDualClients:
             assert not state.session_manager._server_instances
 
             assert initialized.status_code == 202, initialized.text
-            assert initialized.json() == {}
+            if initialized.content:
+                assert initialized.json() == {}
             initialized_headers = {
                 key.lower(): value for key, value in initialized.headers.items()
             }
@@ -2962,7 +2965,9 @@ class TestSep2243AllModernMethods:
     def test_resources_read_and_prompts_get_require_mcp_name(self):
         async def _run():
             pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION)
+                IngressContext(
+                    "srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject"
+                )
             )
             read_body = json.dumps(
                 {

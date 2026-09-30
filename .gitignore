@@ -64,6 +64,15 @@ flight-book-app/
 my-pizza-app/
 my-test-server/
 new-app/
+my-app/
+y-server/
+
+# Vendored SDK copies from `nitrostack-py init` (user projects only)
+vendor/
+
+# Local preview captures
+.landing-preview.png
+*-landing-preview.png
 
 # Node widgets (if installed locally in examples/templates)
 node_modules/

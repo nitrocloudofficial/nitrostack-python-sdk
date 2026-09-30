@@ -460,6 +460,8 @@ def pack_project(
     Returns a dict with ``files``, ``wheel`` (path or planned name), and ``dry_run``.
     """
     root = os.path.abspath(root or os.getcwd())
+    from nitrostack.cli.vendor import ensure_vendored_nitrostack
+    ensure_vendored_nitrostack(root)
     files = collect_pack_files(root)
     name, version = _project_name_and_version(root)
     dist_name = _pep503_wheel_name(_normalize_dist_name(name))
