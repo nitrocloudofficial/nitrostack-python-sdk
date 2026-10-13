@@ -330,6 +330,57 @@ from nitrostack import WidgetOptions, WidgetCsp, widget
 `nitrostack-py init` copies `widgets/out/{route}.html` for every `@widget`. Widget HTML
 is generated in Python from the tool's `structuredContent` (one iframe, N cards).
 
+#### Custom widget HTML: data and host bridge
+
+The tool result is passed to the widget as a JSON-compatible object. The shared host bridge
+normalizes the following sources, in order:
+
+1. `window.openai.toolOutput.structuredContent` (or `toolResult`).
+2. A JSON `application/json` content block, or a JSON object in a `text/plain` content block.
+3. The `#nitrostack-tool-data` embedded JSON script used by Python-rendered pages.
+
+The normalized object is passed to `window.__nitroWidgetRender(data)`. Keep the tool return
+shape stable and render from that object. `NITROSTACK_APP_MODE` changes the advertised
+metadata and resource MIME type, not this data shape:
+
+- `openai` uses OpenAI output-template metadata and the OpenAI host data channel.
+- `mcp-app` uses MCP Apps `_meta.ui` metadata; tool-result notifications are normalized by the bridge.
+- `universal` (the default) publishes both forms.
+
+A hand-written file found at `widgets/out/{route}.html` is loaded as-is. The loader does
+not inject the host bridge into that file. The built-in route templates created by `init`
+do include the bridge, so custom HTML must include the equivalent bridge/render hook itself.
+The generated files under `examples/widgets/out/` are the reference implementation.
+
+Minimal render hook (used after the bridge has been included):
+
+```html
+<div id="value">Waiting for tool data…</div>
+<script>
+  window.__nitroWidgetRender = function (data) {
+    const value = data && data.value;
+    document.getElementById("value").textContent =
+      value == null ? "—" : String(value);
+  };
+</script>
+```
+
+#### Widget CSP metadata
+
+`WidgetCsp` describes the origins a widget needs; NitroStack publishes this as
+metadata for the host to enforce. The SDK does not build or attach a response
+`Content-Security-Policy` header itself.
+
+| Field | Meaning | MCP Apps metadata | OpenAI metadata |
+|---|---|---|---|
+| `connect_domains` | Network connections made by the widget | `connectDomains` | `connect_domains` |
+| `resource_domains` | External resources such as images, scripts, or styles | `resourceDomains` | `resource_domains` |
+| `frame_domains` | Origins the widget may embed in frames | `frameDomains` | `frame_domains` |
+
+Whether a scheme such as `data:` is accepted is host-dependent. Listing `data:`
+in `resource_domains` requests/advertises that resource origin; it is not a guarantee
+that every host will allow data URIs.
+
 MCP Inspector: use **HTTP + stateless**, then the **Apps** tab. `tools/call` also embeds
 the data-filled HTML. Do not use `widgets/preview.html` as the live result — that file
 is a static helper. Live preview: `http://localhost:3000/widgets/preview`.
