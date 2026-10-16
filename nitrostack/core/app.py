@@ -306,10 +306,10 @@ def tool_json_schema(schema_spec: Any) -> Optional[Dict[str, Any]]:
     if schema_spec is None:
         return None
     if isinstance(schema_spec, dict):
-        return normalize_output_schema(inspector_friendly_schema(schema_spec))
+        return normalize_output_schema(schema_spec)
     model = get_pydantic_model(schema_spec)
     if model is not None:
-        return normalize_output_schema(inspector_friendly_schema(model.model_json_schema()))
+        return normalize_output_schema(model.model_json_schema())
     return None
 
 
