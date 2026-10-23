@@ -1,8 +1,9 @@
 """Project packing for `nitrostack-py pack`.
 
 Builds a deployable wheel of the current project using the setuptools backend
-already declared in NitroStack's packaging config. Secrets (``.env``) are never
-included. Temporary build artifacts are cleaned up after packing.
+already declared in NitroStack's packaging config. Secrets (``.env``) are excluded
+by default; pass ``include_env`` to pack them. Temporary build artifacts are
+cleaned up after packing.
 """
 
 from __future__ import annotations
@@ -110,10 +111,17 @@ def _matches_gitignore(rel_posix: str, patterns: Sequence[Tuple[str, bool]]) -> 
     return ignored
 
 
-def _should_exclude(rel_posix: str, name: str, is_dir: bool, gitignore: Sequence[Tuple[str, bool]]) -> bool:
+def _should_exclude(
+    rel_posix: str,
+    name: str,
+    is_dir: bool,
+    gitignore: Sequence[Tuple[str, bool]],
+    *,
+    include_env: bool = False,
+) -> bool:
     if name == ".env.example":
         return False
-    if _is_secret_env(name):
+    if _is_secret_env(name) and not include_env:
         return True
     if name in _EXCLUDE_DIR_NAMES and is_dir:
         return True
@@ -128,7 +136,7 @@ def _should_exclude(rel_posix: str, name: str, is_dir: bool, gitignore: Sequence
     return False
 
 
-def collect_pack_files(root: str) -> List[str]:
+def collect_pack_files(root: str, *, include_env: bool = False) -> List[str]:
     """Return posix-relative paths that would be included in a pack."""
     gitignore = _load_gitignore_patterns(root)
     included: List[str] = []
@@ -141,14 +149,14 @@ def collect_pack_files(root: str) -> List[str]:
         kept_dirs = []
         for dirname in dirnames:
             child_rel = f"{rel_dir_posix}/{dirname}" if rel_dir_posix else dirname
-            if _should_exclude(child_rel, dirname, True, gitignore):
+            if _should_exclude(child_rel, dirname, True, gitignore, include_env=include_env):
                 continue
             kept_dirs.append(dirname)
         dirnames[:] = kept_dirs
 
         for filename in filenames:
             child_rel = f"{rel_dir_posix}/{filename}" if rel_dir_posix else filename
-            if _should_exclude(child_rel, filename, False, gitignore):
+            if _should_exclude(child_rel, filename, False, gitignore, include_env=include_env):
                 continue
             included.append(child_rel)
 
@@ -348,14 +356,14 @@ def _is_valid_wheel(path: str) -> bool:
         return "Wheel-Version:" in body
 
 
-def _collect_staging_bytes(src_root: str) -> dict:
+def _collect_staging_bytes(src_root: str, *, include_env: bool = False) -> dict:
     contents = {}
     for dirpath, dirnames, filenames in os.walk(src_root):
         dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES and not d.endswith(".egg-info")]
         for filename in filenames:
             if any(filename.endswith(suffix) for suffix in _EXCLUDE_SUFFIXES):
                 continue
-            if _is_secret_env(filename):
+            if _is_secret_env(filename) and not include_env:
                 continue
             full = os.path.join(dirpath, filename)
             rel = os.path.relpath(full, src_root).replace("\\", "/")
@@ -370,6 +378,8 @@ def _write_purelib_wheel(
     name: str,
     version: str,
     deps: Sequence[str],
+    *,
+    include_env: bool = False,
 ) -> str:
     """Write a PEP 427 py3-none-any wheel from the staged project files."""
     os.makedirs(wheel_dir, exist_ok=True)
@@ -379,7 +389,7 @@ def _write_purelib_wheel(
     wheel_path = os.path.join(wheel_dir, wheel_filename)
     dist_info = f"{dist_name}-{version}.dist-info"
 
-    contents = _collect_staging_bytes(src_root)
+    contents = _collect_staging_bytes(src_root, include_env=include_env)
     metadata_lines = [
         "Metadata-Version: 2.1",
         f"Name: {display_name}",
@@ -441,18 +451,34 @@ def _build_wheel(
     name: str,
     version: str,
     deps: Sequence[str],
+    *,
+    include_env: bool = False,
 ) -> str:
     os.makedirs(wheel_dir, exist_ok=True)
     built = _build_wheel_with_setuptools(src_root, wheel_dir)
     if built:
         return built
-    return _write_purelib_wheel(src_root, wheel_dir, name, version, deps)
+    return _write_purelib_wheel(
+        src_root, wheel_dir, name, version, deps, include_env=include_env
+    )
+
+
+def _secret_env_paths_in_pack(files: Sequence[str]) -> List[str]:
+    return sorted(rel for rel in files if _is_secret_env(rel.rsplit("/", 1)[-1]))
+
+
+def _warn_including_env_files(env_files: Sequence[str]) -> None:
+    if not env_files:
+        return
+    listed = ", ".join(env_files)
+    print(f"Warning: Including .env files in the wheel (use with caution!): {listed}")
 
 
 def pack_project(
     root: Optional[str] = None,
     *,
     dry_run: bool = False,
+    include_env: bool = False,
     output_dir: Optional[str] = None,
 ) -> dict:
     """Pack the project at ``root``.
@@ -462,11 +488,14 @@ def pack_project(
     root = os.path.abspath(root or os.getcwd())
     from nitrostack.cli.vendor import ensure_vendored_nitrostack
     ensure_vendored_nitrostack(root)
-    files = collect_pack_files(root)
+    files = collect_pack_files(root, include_env=include_env)
     name, version = _project_name_and_version(root)
     dist_name = _pep503_wheel_name(_normalize_dist_name(name))
     planned_wheel = f"{dist_name}-{version}-py3-none-any.whl"
     dest_dir = os.path.abspath(output_dir or os.path.join(root, "dist"))
+
+    if include_env:
+        _warn_including_env_files(_secret_env_paths_in_pack(files))
 
     print("Files that would be packed:" if dry_run else "Packing files:")
     for rel in files:
@@ -486,12 +515,17 @@ def pack_project(
         write_requirements_txt(staging, deps)
         _ensure_pyproject(staging, name, version, deps)
 
-        wheel_path = _build_wheel(staging, wheel_tmp, name, version, deps)
+        wheel_path = _build_wheel(
+            staging, wheel_tmp, name, version, deps, include_env=include_env
+        )
         extra = []
         env_example = os.path.join(staging, ".env.example")
         reqs = os.path.join(staging, "requirements.txt")
         extra.append((".env.example", env_example))
         extra.append(("requirements.txt", reqs))
+        if include_env:
+            for rel in _secret_env_paths_in_pack(files):
+                extra.append((rel, os.path.join(staging, rel.replace("/", os.sep))))
         _inject_into_wheel(wheel_path, extra)
 
         if not _is_valid_wheel(wheel_path):

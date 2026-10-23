@@ -8,13 +8,18 @@ with `[tool.uv.sources]`.
 """
 from __future__ import annotations
 
+import email.parser
+import io
+import json
 import os
 import re
 import shutil
+import tempfile
+import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
-from nitrostack.cli._shared import write_text_atomic
+from nitrostack.cli._shared import loads_toml, write_text_atomic
 
 VENDOR_REL = os.path.join("vendor", "nitrostack")
 _PLAIN_REQUIREMENT = "nitrostack"
@@ -87,8 +92,25 @@ def _distribution_version() -> str:
     )
 
 
-def _write_minimal_pyproject(dest: Path) -> None:
-    version = _distribution_version()
+_DEFAULT_DEPENDENCIES = (
+    "mcp>=2,<3",
+    "pydantic>=2.0.0",
+    "starlette>=0.30.0",
+    "uvicorn>=0.20.0",
+    "watchfiles>=0.18.0",
+    "anyio>=4.0.0",
+    "packaging>=23.0.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+)
+
+
+def _write_minimal_pyproject(
+    dest: Path,
+    version: Optional[str] = None,
+    dependencies: Optional[List[str]] = None,
+) -> None:
+    version = version or _distribution_version()
+    deps = "".join(f"    {json.dumps(dep)},\n" for dep in (dependencies or _DEFAULT_DEPENDENCIES))
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "pyproject.toml").write_text(
         "[build-system]\n"
@@ -100,14 +122,7 @@ def _write_minimal_pyproject(dest: Path) -> None:
         'description = "NitroStack Python SDK (vendored)"\n'
         'requires-python = ">=3.10"\n'
         "dependencies = [\n"
-        '    "mcp>=2,<3",\n'
-        '    "pydantic>=2.0.0",\n'
-        '    "starlette>=0.30.0",\n'
-        '    "uvicorn>=0.20.0",\n'
-        '    "watchfiles>=0.18.0",\n'
-        '    "anyio>=4.0.0",\n'
-        '    "packaging>=23.0.0",\n'
-        '    "tomli>=2.0.0; python_version < \'3.11\'",\n'
+        f"{deps}"
         "]\n\n"
         "[project.scripts]\n"
         'nitrostack-py = "nitrostack.cli.main:main"\n\n'
@@ -142,12 +157,103 @@ def copy_running_nitrostack(dest: Path) -> None:
     else:
         _write_minimal_pyproject(dest)
 
+    _check_vendored_tree(dest)
+
+
+def _check_vendored_tree(dest: Path) -> None:
     assets = dest / "nitrostack" / "transports" / "assets" / "landing.html"
     if not assets.is_file():
         raise RuntimeError(
             f"Vendored SDK is missing the documentation page at {assets}. "
             "Update nitrostack and retry."
         )
+
+
+def extract_nitrostack_wheel(wheel: bytes, dest: Path) -> str:
+    """Unpack a nitrostack wheel into ``dest`` as a vendored tree; return its version.
+
+    Skips the same directories as `copy_running_nitrostack` (templates, caches).
+    """
+    with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+        metadata_name = next(
+            (
+                n for n in archive.namelist()
+                if re.fullmatch(r"nitrostack-[^/]+\.dist-info/METADATA", n)
+            ),
+            None,
+        )
+        if metadata_name is None:
+            raise RuntimeError("The downloaded file is not a nitrostack wheel (no METADATA).")
+        metadata = email.parser.Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
+        version = metadata.get("Version")
+        if not version:
+            raise RuntimeError("The nitrostack wheel has no version in its METADATA.")
+        requires = [
+            req for req in metadata.get_all("Requires-Dist") or []
+            if not re.search(r"\bextra\s*==", req)
+        ]
+
+        root = dest.resolve()
+        for name in archive.namelist():
+            parts = name.split("/")
+            if parts[0] != "nitrostack" or name.endswith("/"):
+                continue
+            if any(part in _SKIP_DIR_NAMES or part.endswith(".egg-info") for part in parts[:-1]):
+                continue
+            target = (dest / name).resolve()
+            if root not in target.parents:
+                raise RuntimeError(f"Refusing to extract {name!r} outside {dest}.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(name))
+
+    _write_minimal_pyproject(dest, version=version, dependencies=requires)
+    _check_vendored_tree(dest)
+    return version
+
+
+def vendored_version(project: str) -> Optional[str]:
+    """Version of the SDK in ``project/vendor/nitrostack``, or None if not vendored."""
+    pyproject = Path(project) / VENDOR_REL / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        data = loads_toml(pyproject.read_text(encoding="utf-8"))
+        version = data.get("project", {}).get("version")
+    except Exception:
+        return None
+    return str(version) if version else None
+
+
+def replace_vendored_nitrostack(project: str, wheel: Optional[bytes] = None) -> str:
+    """Swap ``vendor/nitrostack`` for the running SDK, or for ``wheel`` when given.
+
+    The new tree is built next to the old one and swapped in afterwards, so a
+    failed download or extraction leaves the project's current SDK in place.
+    Returns the vendored version.
+    """
+    dest = Path(os.path.abspath(project)) / VENDOR_REL
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".nitrostack-new-", dir=dest.parent))
+    backup = dest.parent / f".nitrostack-old-{os.getpid()}"
+    try:
+        if wheel is None:
+            copy_running_nitrostack(staging)
+            version = _distribution_version()
+        else:
+            version = extract_nitrostack_wheel(wheel, staging)
+        if dest.exists():
+            os.replace(dest, backup)
+        try:
+            os.replace(staging, dest)
+        except OSError:
+            if backup.exists():
+                os.replace(backup, dest)
+            raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(backup, ignore_errors=True)
+    pin_project_to_vendor(Path(os.path.abspath(project)))
+    return version
 
 
 def _pin_text(text: str) -> str:

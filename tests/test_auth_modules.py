@@ -178,3 +178,33 @@ def test_api_key_empty_string_is_rejected(monkeypatch):
     service = DIContainer.get_instance().resolve(ApiKeyService)
     assert service.validate("") is False
     assert service.validate("anything") is False
+
+
+def test_config_process_env_wins_over_env_file(tmp_path, monkeypatch):
+    from nitrostack.core.app import resolve_http_port
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("PORT=3000\nFROM_FILE=file\n", encoding="utf-8")
+    monkeypatch.setenv("PORT", "3001")
+    monkeypatch.delenv("FROM_FILE", raising=False)
+    ConfigModule.for_root(env_file_path=str(env_file), defaults={"PORT": "9999", "ONLY_DEFAULT": "d"})
+    cfg = DIContainer.get_instance().resolve(ConfigService)
+    assert cfg.get("PORT") == "3001"
+    assert resolve_http_port() == 3001
+    # Keys the process doesn't set still come from the file, then defaults.
+    assert cfg.get("FROM_FILE") == "file"
+    assert cfg.get("ONLY_DEFAULT") == "d"
+    monkeypatch.delenv("FROM_FILE", raising=False)
+
+
+def test_config_env_file_port_applies_when_process_has_none(tmp_path, monkeypatch):
+    from nitrostack.core.app import resolve_http_port
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("PORT=3005\n", encoding="utf-8")
+    monkeypatch.delenv("PORT", raising=False)
+    ConfigModule.for_root(env_file_path=str(env_file), defaults={"PORT": "3000"})
+    cfg = DIContainer.get_instance().resolve(ConfigService)
+    assert cfg.get("PORT") == "3005"
+    assert resolve_http_port() == 3005
+    monkeypatch.delenv("PORT", raising=False)

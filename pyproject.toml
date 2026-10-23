@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nitrostack"
-version = "0.3.2"
+version = "0.4.2"
 description = "NitroStack Python SDK — A Python-idiomatic port of the NitroStack MCP framework"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,12 @@ dev = [
     "httpx>=0.27.0",
     "tox>=4.0.0",
 ]
+
+[project.urls]
+Homepage = "https://nitrostack.ai/"
+Documentation = "https://docs.nitrostack.ai/python"
+Repository = "https://github.com/nitrocloudofficial/nitrostack-python-sdk"
+Issues = "https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues"
 
 [project.scripts]
 nitrostack-py = "nitrostack.cli.main:main"

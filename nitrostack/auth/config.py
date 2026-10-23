@@ -19,7 +19,10 @@ class ConfigService:
         # Merge system environment variables first
         self._config.update(os.environ)
 
-        # Parse .env manually (no stdout prints allowed)
+        # Parse .env manually (no stdout prints allowed). The process
+        # environment wins, as with python-dotenv and Node's dotenv: a host
+        # that starts the server with PORT=3001 must not be overridden by the
+        # PORT=3000 that `nitrostack init` writes into .env.
         if not ignore_env_file and os.path.exists(env_file_path):
             try:
                 with open(env_file_path, "r", encoding="utf-8") as f:
@@ -31,6 +34,8 @@ class ConfigService:
                             k, v = line.split("=", 1)
                             k = k.strip()
                             v = v.strip().strip("'\"") # Remove wrapping quotes
+                            if k in os.environ:
+                                continue
                             self._config[k] = v
                             os.environ[k] = v
             except Exception as e:

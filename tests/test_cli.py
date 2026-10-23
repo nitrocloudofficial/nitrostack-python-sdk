@@ -1072,6 +1072,38 @@ def test_pack_dry_run_lists_files_without_writing(tmp_path: Path):
     assert not (project / "dist").exists()
 
 
+def test_pack_include_env_dry_run_lists_env_without_printing_contents(tmp_path: Path, capsys):
+    project = _mini_project(tmp_path)
+    (project / ".env.local").write_text("TOKEN=local-secret\n", encoding="utf-8")
+    result = pack_project(str(project), dry_run=True, include_env=True)
+    assert result["dry_run"] is True
+    assert ".env" in result["files"]
+    assert ".env.local" in result["files"]
+    captured = capsys.readouterr().out
+    assert "Warning: Including .env files in the wheel (use with caution!)" in captured
+    assert ".env" in captured
+    assert ".env.local" in captured
+    assert "SECRET=should-never-pack" not in captured
+    assert "TOKEN=local-secret" not in captured
+
+
+def test_pack_include_env_puts_env_in_wheel_without_printing_contents(tmp_path: Path, capsys):
+    project = _mini_project(tmp_path)
+    result = pack_project(str(project), dry_run=False, include_env=True)
+    captured = capsys.readouterr().out
+    assert "Warning: Including .env files in the wheel (use with caution!)" in captured
+    assert "SECRET=should-never-pack" not in captured
+
+    wheel = Path(result["wheel"])
+    with zipfile.ZipFile(wheel) as zf:
+        names = zf.namelist()
+        assert any(n == ".env" or n.endswith("/.env") for n in names)
+        env_data = next(
+            zf.read(n).decode("utf-8") for n in names if n == ".env" or n.endswith("/.env")
+        )
+        assert "SECRET=should-never-pack" in env_data
+
+
 def test_pack_creates_valid_wheel(tmp_path: Path):
     project = _mini_project(tmp_path)
     result = pack_project(str(project), dry_run=False)
@@ -1152,6 +1184,33 @@ def test_validate_catches_broken_imports_and_module_refs(tmp_path: Path):
     assert "definitely_missing_nitrostack_pkg" in messages
     assert "not a class" in messages.lower() or "not a class" in messages
     assert "→" in messages or "Fix the import" in messages
+
+
+def test_validate_skips_the_vendored_sdk(tmp_path: Path):
+    """`init` vendors the SDK; its testing helpers apply @mcp_app inside functions."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\n"
+        'name = "vendored"\n'
+        'version = "0.1.0"\n'
+        "dependencies = [\n"
+        '    "nitrostack",\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    sdk = tmp_path / "vendor" / "nitrostack" / "nitrostack" / "testing"
+    sdk.mkdir(parents=True)
+    (sdk / "__init__.py").write_text(
+        "from nitrostack import mcp_app, ServerConfig\n\n"
+        "def create(module):\n"
+        "    @mcp_app(module=module, server=ServerConfig(name='test'))\n"
+        "    class TestApp:\n"
+        "        pass\n"
+        "    return TestApp\n",
+        encoding="utf-8",
+    )
+
+    issues = validate_project(str(tmp_path))
+    assert not [issue for issue in issues if "vendor" in issue.path], [i.format() for i in issues]
 
 
 def test_validate_accepts_module_only_bootstrap(tmp_path: Path):
