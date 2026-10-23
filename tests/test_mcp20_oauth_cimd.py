@@ -176,9 +176,10 @@ class TestCimdTrustedProxyHost:
         assert cimd_peer_is_acceptable("8.8.8.8", "8.8.8.8") is True
         assert cimd_peer_is_acceptable("1.2.3.4", "8.8.8.8") is False
 
-    def test_trusted_proxy_peer_is_acceptable(self, monkeypatch):
+    def test_trusted_proxy_peer_is_not_acceptable_for_outbound(self, monkeypatch):
         monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
-        assert cimd_peer_is_acceptable("10.0.0.5", "8.8.8.8") is True
+        # Trusted proxies apply to inbound headers, NOT outbound socket fetch pins.
+        assert cimd_peer_is_acceptable("10.0.0.5", "8.8.8.8") is False
         assert cimd_peer_is_acceptable("10.0.0.9", "8.8.8.8") is False
 
     def test_untrusted_forwarded_host_cannot_rebind_cimd(self, monkeypatch):
@@ -191,7 +192,7 @@ class TestCimdTrustedProxyHost:
         assert request_host_for_cimd(headers, peer="8.8.8.8") == "mcp.nitrostack.io"
         assert cimd_host_matches_request(url, headers, peer="8.8.8.8") is False
 
-    def test_apply_cimd_records_untrusted_request_host(self, monkeypatch):
+    def test_apply_cimd_denies_untrusted_request_host_mismatch(self, monkeypatch):
         monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
         url = "https://app.nitrostack.io/oauth/client-metadata.json"
         headers = {
@@ -202,13 +203,13 @@ class TestCimdTrustedProxyHost:
             "nitrostack.auth.oauth_module.resolve_cimd_sync",
             return_value={"client_id": url, "client_name": "Studio"},
         ):
-            body = apply_cimd_to_registration_body(
-                {"client_id": url},
-                headers=headers,
-                peer="8.8.8.8",
-            )
-        assert body["_cimd_request_host"] == "mcp.nitrostack.io"
-        assert body["_cimd_host_matches_request"] is False
+            with pytest.raises(CimdValidationError) as exc_info:
+                apply_cimd_to_registration_body(
+                    {"client_id": url},
+                    headers=headers,
+                    peer="8.8.8.8",
+                )
+            assert "host" in str(exc_info.value).lower()
 
     def test_apply_cimd_honors_trusted_forwarded_host(self, monkeypatch):
         monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.5")
@@ -228,6 +229,12 @@ class TestCimdTrustedProxyHost:
             )
         assert body["_cimd_request_host"] == "app.nitrostack.io"
         assert body["_cimd_host_matches_request"] is True
+
+    def test_cimd_helpers_defined_once(self):
+        from pathlib import Path
+        source = Path("nitrostack/auth/cimd.py").read_text(encoding="utf-8")
+        assert source.count("def looks_like_cimd_url") == 1
+        assert source.count("def resolve_cimd_sync") == 1
 
 
 class TestCimdRegistrationWiring:
@@ -266,3 +273,44 @@ class TestRfc9207IssValidation:
     def test_rejects_mismatched_iss(self):
         with pytest.raises(AuthorizationIssuerMismatchError, match="mismatch"):
             validate_authorization_iss("https://evil.example", "https://auth.nitrostack.io")
+
+
+class TestVerifyBearerPayload:
+    def test_returns_payload_for_valid_token(self):
+        from nitrostack.auth.jwt import JWTService
+        from nitrostack.auth.request import verify_bearer_payload
+        from nitrostack.core.di import DIContainer
+
+        DIContainer.reset()
+        service = JWTService()
+        DIContainer.get_instance().register_value(JWTService, service)
+        token = service.create_token({"sub": "user_123", "tenant_id": "org_abc"})
+        payload = verify_bearer_payload(token)
+        assert payload is not None
+        assert payload["sub"] == "user_123"
+        assert payload["tenant_id"] == "org_abc"
+
+    def test_returns_none_for_invalid_token(self):
+        from nitrostack.auth.jwt import JWTService
+        from nitrostack.auth.request import verify_bearer_payload
+        from nitrostack.core.di import DIContainer
+
+        DIContainer.reset()
+        service = JWTService()
+        DIContainer.get_instance().register_value(JWTService, service)
+        assert verify_bearer_payload("invalid.token.structure") is None
+        assert verify_bearer_payload("not-a-jwt") is None
+
+    def test_raises_on_di_misconfig(self):
+        from nitrostack.auth.request import verify_bearer_payload
+        from nitrostack.core.di import DIContainer
+        from nitrostack.core.errors import DependencyResolutionError
+
+        DIContainer.reset()
+        with patch.object(
+            DIContainer.get_instance(),
+            "resolve",
+            side_effect=DependencyResolutionError("JWTService missing"),
+        ):
+            with pytest.raises(DependencyResolutionError):
+                verify_bearer_payload("header.payload.signature")

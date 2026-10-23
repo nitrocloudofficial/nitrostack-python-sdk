@@ -125,16 +125,10 @@ def _pick_pinned_ip(resolved_ips: set[str]) -> str:
 
 
 def cimd_peer_is_acceptable(peer: str, pinned_ip: str) -> bool:
-    """Require the direct socket peer to match the pinned IP.
-
-    A configured trusted proxy hop is the only exception; untrusted peers
-    cannot stand in for the destination.
-    """
+    """Require the direct socket peer to match the pinned IP."""
     if peer == pinned_ip:
         return not is_blocked_ip(peer)
-    from nitrostack.transports.proxy import peer_is_trusted
-
-    return peer_is_trusted(peer)
+    return False
 
 
 def request_host_for_cimd(
@@ -348,27 +342,6 @@ async def resolve_cimd(
         raise CimdValidationError("CIMD document must be valid UTF-8 JSON") from exc
 
     return _validate_cimd_document(document, normalized)
-
-
-def looks_like_cimd_url(value: Any) -> bool:
-    """Return True when ``value`` is an http(s) client identifier URL."""
-    return isinstance(value, str) and value.startswith(("https://", "http://"))
-
-
-def resolve_cimd_sync(
-    client_id_url: str,
-    *,
-    allow_loopback: bool = False,
-    timeout_sec: float = CIMD_FETCH_TIMEOUT_SEC,
-) -> dict[str, Any]:
-    """Synchronous wrapper for registration / other non-async callers."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(
-            resolve_cimd(client_id_url, allow_loopback=allow_loopback, timeout_sec=timeout_sec)
-        )
-    raise CimdFetchError("CIMD resolution cannot run nested on a running event loop")
 
 
 def looks_like_cimd_url(value: Any) -> bool:

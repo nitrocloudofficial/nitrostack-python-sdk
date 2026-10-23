@@ -112,22 +112,32 @@ def apply_cimd_to_registration_body(
     honored only when the peer is trusted, so an untrusted
     ``X-Forwarded-Host`` cannot rebind the CIMD host comparison.
     """
-    from nitrostack.auth.cimd import cimd_host_matches_request, request_host_for_cimd
+    from nitrostack.auth.cimd import (
+        CimdValidationError,
+        cimd_host_matches_request,
+        request_host_for_cimd,
+    )
 
     payload = dict(body or {})
     client_id = payload.get("client_id")
     if not looks_like_cimd_url(client_id):
         return payload
     document = resolve_cimd_sync(str(client_id))
+    if headers is not None or peer is not None:
+        req_headers = headers if headers is not None else {}
+        if not cimd_host_matches_request(
+            str(document["client_id"]),
+            req_headers,
+            peer,
+        ):
+            req_host = request_host_for_cimd(req_headers, peer)
+            raise CimdValidationError(
+                f"CIMD client_id URL host does not match request host: {req_host!r}"
+            )
+        payload["_cimd_request_host"] = request_host_for_cimd(req_headers, peer)
+        payload["_cimd_host_matches_request"] = True
     payload["client_id"] = document["client_id"]
     payload["_cimd"] = document
-    if headers is not None:
-        payload["_cimd_request_host"] = request_host_for_cimd(headers, peer)
-        payload["_cimd_host_matches_request"] = cimd_host_matches_request(
-            str(document["client_id"]),
-            headers,
-            peer,
-        )
     return payload
 
 
