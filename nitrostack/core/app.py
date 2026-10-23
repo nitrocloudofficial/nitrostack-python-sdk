@@ -25,6 +25,12 @@ from mcp.types import (
     UnsubscribeRequestParams,
 )
 from pydantic import BaseModel, create_model
+from nitrostack.transforms import (
+    TransformContext,
+    TransformError,
+    TransformPipeline,
+    TransformRegistry,
+)
 
 from nitrostack.core.context import ExecutionContext, TaskContext
 from nitrostack.core.decorators import ToolConfig, ResourceConfig, PromptConfig, widget_resource_uri
@@ -206,17 +212,20 @@ class ServerConfig:
     description: Optional[str] = None
 
 
-def mcp_app(module: Type, server: ServerConfig):
-    """
-    Decorator to declare the main application class.
-    Specifies the root AppModule and ServerConfig.
-    """
+def mcp_app(
+    module: Type,
+    server: ServerConfig,
+    transforms: Optional[List[Any]] = None,
+):
+    """Declare an MCP application and its optional tool-list transforms."""
+
     def decorator(cls: Type):
         cls._mcp_app_module = module
         cls._mcp_app_server = server
+        cls._mcp_transforms = list(transforms or [])
         return cls
-    return decorator
 
+    return decorator
 
 def get_pydantic_model(schema: Any) -> Type[BaseModel]:
     """Helper to resolve or construct a Pydantic model for input validation."""
@@ -601,6 +610,15 @@ class McpApplication:
 
         self._bootstrap()
 
+        # Initialize the transform pipeline
+        # Initialize transforms before registering handlers. Handlers use
+        # this pipeline when tools/list is requested.
+        self._transforms = TransformPipeline(
+            getattr(self.app_class, "_mcp_transforms", None) or []
+        )
+
+        self._bootstrap()
+
     def _bootstrap(self) -> None:
         # 1. Construct the low-level server directly.
         self.mcp_server = NitroStackMcpServer(
@@ -880,9 +898,30 @@ class McpApplication:
         return build_list_endpoint_cache_hint_meta()
 
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
-        async def _list_tools(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
+        async def _list_tools(
+            _ctx: ServerRequestContext,
+            _params: Optional[PaginatedRequestParams],
+        ):
+            tools = [
+                self._build_tool_definition(entry)
+                for entry in self._tools.values()
+            ]
+
+            if self._transforms.enabled:
+                try:
+                    context = TransformContext()
+                    tools = await self._transforms.transform_tools(
+                        tools,
+                        context,
+                    )
+                except TransformError as exc:
+                    raise MCPError(
+                        types.INTERNAL_ERROR,
+                        str(exc),
+                    ) from exc
+
             return types.ListToolsResult(
-                tools=[self._build_tool_definition(entry) for entry in self._tools.values()],
+                tools=tools,
                 _meta=self._list_endpoint_cache_meta(),
             )
 
