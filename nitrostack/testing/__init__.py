@@ -14,18 +14,31 @@ class NitroTestingModule:
     Dispatches through the owned low-level `mcp.server.lowlevel.Server`
     `request_handlers` (the same dict the real stdio/HTTP transports use).
     """
+    def __init__(self, app: McpApplication):
+        self.app = app
     @classmethod
-    async def create(cls, app_module: Type) -> "NitroTestingModule":
-        # Construct a dummy App class decorated with @mcp_app
-        @mcp_app(module=app_module, server=ServerConfig(name="test-server"))
+    async def create(
+        cls,
+        app_module: Type,
+        *,
+        protocol_era: Optional[str] = None,
+        transforms: Optional[list] = None,
+    ) -> "NitroTestingModule":
+        server_config = ServerConfig(
+            name="test-server",
+            protocol_era=protocol_era,
+        )
+
+        @mcp_app(
+            module=app_module,
+            server=server_config,
+            transforms=transforms,
+        )
         class TestApp:
             pass
 
         app = await McpApplicationFactory.create(TestApp)
         return cls(app)
-
-    def __init__(self, app: McpApplication):
-        self.app = app
 
     @staticmethod
     def _extract_text(text_val: Optional[str]) -> Any:
