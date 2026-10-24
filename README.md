@@ -28,6 +28,18 @@ pip install -e .
 ```
 
 ---
+### Security: eMudhra/emSign CA incident
+
+A [security incident](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576) affecting eMudhra intermediate certificates means older packaging tools can be man-in-the-middled. Use at least:
+
+- pip 26.2.2
+- uv 0.13.4
+- certifi 2026.10.19 (this SDK now requires it)
+
+Upgrade pip and uv in existing virtual environments, refresh lockfiles (`uv lock --upgrade-package certifi`), and rebuild container images. The official `python:3.11` and `3.12` Docker images keep an older pip, so upgrade it with the hash-pinned command from the advisory.
+
+`nitrostack-py install` upgrades the pip in the project `.venv` to a hash-pinned 26.2.2 before installing anything, and refuses to run `uv` older than 0.13.4.
+
 
 ## Scaffolding a New Project (Recommended)
 

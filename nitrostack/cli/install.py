@@ -1,19 +1,28 @@
 """Dependency installation wrapper for `nitrostack-py install`."""
 
 from __future__ import annotations
-
 import os
 import re
 import shutil
 import subprocess
 import sys
-from typing import List, Optional
-
+from typing import List, Optional, Tuple 
 from nitrostack.cli._shared import write_text_atomic
 
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
 _PEP503_KEEP = re.compile(r"[^A-Za-z0-9._-]+")
 _PEP503_DASH = re.compile(r"[-_.]+")
+
+# eMudhra/emSign CA incident minimums (python.org advisory).
+MIN_PIP_VERSION = (26, 2, 2)
+MIN_UV_VERSION = (0, 13, 4)
+# Hash-pinned wheel taken verbatim from the advisory. Do not edit by hand.
+SECURE_PIP_SPEC = (
+    "pip @ https://files.pythonhosted.org/packages/"
+    "3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/"
+    "pip-26.2.2-py3-none-any.whl"
+    "#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+)
 
 
 def _read(path: str) -> str:
@@ -115,8 +124,68 @@ def ensure_project_venv(root: str) -> str:
     return python
 
 
+def _parse_version(text: str, tool: str) -> Optional[Tuple[int, int, int]]:
+    """Parse `pip 24.0 from ...` or `uv 0.13.4 (abc 2026-10-20)` into a tuple."""
+    match = re.search(rf"\b{tool}\s+(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    if not match:
+        return None
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0))
+
+
+def _tool_version(cmd: List[str], tool: str) -> Optional[Tuple[int, int, int]]:
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_version(result.stdout, tool)
+
+
+def _get_pip_version(python: str) -> Optional[Tuple[int, int, int]]:
+    return _tool_version([python, "-m", "pip", "--version"], "pip")
+
+
+def _get_uv_version(uv: str) -> Optional[Tuple[int, int, int]]:
+    return _tool_version([uv, "--version"], "uv")
+
+
+def _ensure_secure_pip(python: str, cwd: str) -> None:
+    """Make sure the venv's pip is >= 26.2.2 before it downloads anything.
+
+    The venv pip is whatever the interpreter bundled, which can trust the
+    compromised emSign intermediates. The pinned wheel is verified by sha256,
+    so the bootstrap itself cannot be tampered with.
+    """
+    version = _get_pip_version(python)
+    if version is not None and version >= MIN_PIP_VERSION:
+        return
+    print("Updating pip securely before installing dependencies (eMudhra/emSign advisory).")
+    result = subprocess.run([python, "-m", "pip", "install", SECURE_PIP_SPEC], cwd=cwd)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Secure pip upgrade failed. Upgrade pip using the python.org eMudhra/emSign "
+            "advisory instructions, then retry `nitrostack-py install`."
+        )
+    version = _get_pip_version(python)
+    if version is None or version < MIN_PIP_VERSION:
+        raise RuntimeError(
+            "pip is still below 26.2.2 after the secure upgrade. "
+            "Upgrade pip manually, then retry `nitrostack-py install`."
+        )
+
+def _check_uv_version(uv: str) -> None:
+    version = _get_uv_version(uv)
+    if version is None or version < MIN_UV_VERSION:
+        raise RuntimeError(
+            "uv 0.13.4 or later is required (eMudhra/emSign CA incident). "
+            "Upgrade uv (`uv self update` or reinstall) and retry."
+        )
+
 def _run_pip(args: List[str], cwd: str) -> None:
     python = ensure_project_venv(cwd)
+    _ensure_secure_pip(python, cwd)
     cmd = [python, "-m", "pip", "install", *args]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
@@ -131,6 +200,7 @@ def _run_uv(args: List[str], cwd: str) -> None:
     uv = _uv_bin()
     if not uv:
         raise RuntimeError("uv is not installed")
+    _check_uv_version(uv)
     cmd = [uv, *args]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd)
