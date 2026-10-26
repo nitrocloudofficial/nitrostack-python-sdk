@@ -12,6 +12,7 @@ class JsonRpcErrorCode(IntEnum):
     INVALID_PARAMS = -32602
     INTERNAL_ERROR = -32603
     HEADER_BODY_MISMATCH = -32020
+    MISSING_REQUIRED_CLIENT_CAPABILITY = -32021
     UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 
@@ -22,5 +23,6 @@ ERROR_CODE_MESSAGES: dict[JsonRpcErrorCode, str] = {
     JsonRpcErrorCode.INVALID_PARAMS: "Invalid params",
     JsonRpcErrorCode.INTERNAL_ERROR: "Internal error",
     JsonRpcErrorCode.HEADER_BODY_MISMATCH: "Header/body mismatch",
+    JsonRpcErrorCode.MISSING_REQUIRED_CLIENT_CAPABILITY: "Missing required client capability",
     JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION: "Unsupported protocol version",
 }
