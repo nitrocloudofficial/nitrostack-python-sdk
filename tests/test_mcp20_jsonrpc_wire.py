@@ -1,6 +1,5 @@
 """Tests for MCP 2.0 JSON-RPC wire specification."""
 
-import asyncio
 import json
 
 import pytest
@@ -31,6 +30,45 @@ from nitrostack.protocol.meta import (
     split_params_and_meta,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from tests.http_probe import decode, http_client, post
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+def test_official_http_rejects_unknown_protocol_header(era):
+    with http_client(era) as (_, _, client):
+        response = post(client, version="1999-01-01")
+        assert response.status_code == 400, response.text
+        assert "result" not in decode(response)
+
+
+@pytest.mark.parametrize("era,version", [
+    ("auto", "2025-06-18"), ("auto", "2025-11-25"), ("auto", "2026-07-28"),
+    ("modern", "2026-07-28"),
+])
+def test_official_http_accepts_supported_protocol(era, version):
+    with http_client(era) as (_, _, client):
+        response = post(client, modern=version == MODERN_PROTOCOL_VERSION, version=version)
+        assert response.status_code == 200, response.text
+        assert decode(response)["result"]["tools"][0]["name"] == "echo"
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+@pytest.mark.parametrize("wrong_header", [{"Mcp-Method": "tools/list"}, {"Mcp-Name": "wrong"}])
+def test_official_http_checks_method_and_name_headers(era, wrong_header):
+    with http_client(era) as (_, _, client):
+        response = post(client, "tools/call", {"name": "echo", "arguments": {}},
+                        extra_headers=wrong_header)
+        assert response.status_code == 400, response.text
+        assert decode(response)["error"]["code"] == HEADER_BODY_MISMATCH
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+def test_protocol_header_and_envelope_must_agree_in_official_runner(era):
+    with http_client(era) as (_, _, client):
+        response = post(client, extra_headers={"MCP-Protocol-Version": "2025-06-18"})
+        # The 2025 header selects the SDK's legacy HTTP error mapping.
+        assert response.status_code == 200, response.text
+        assert decode(response)["error"]["code"] == HEADER_BODY_MISMATCH
 
 
 class TestErrorCodes:
