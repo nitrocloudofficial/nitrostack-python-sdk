@@ -16,13 +16,16 @@ from nitrostack.protocol.jsonrpc import (
     validate_header_body_method,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from nitrostack.protocol.method_contract import MODERN_METHOD_CONTRACTS
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers, resolve_allowed_origin
 from nitrostack.transports.headers import (
     MAX_MCP_PARAM_VALUE_BYTES,
+    build_mcp_echo_headers,
     build_mcp_response_headers,
     build_sse_stream_headers,
     extract_mcp_param_headers,
     first_oversized_mcp_param,
+    handled_protocol_version,
     merge_mcp_param_headers,
     scope_with_header_snapshot,
     scope_without_session_headers,
@@ -131,6 +134,26 @@ def test_incoming_session_id_cannot_attach_sessionless_calls(era):
             assert response.status_code == 200, response.text
             assert "mcp-session-id" not in response.headers
             assert decode(response)["result"]["structuredContent"]["value"] == expected
+
+
+def test_method_contract_table_still_covers_modern_surface():
+    methods = {row.method for row in MODERN_METHOD_CONTRACTS}
+    assert {"server/discover", "resources/read", "prompts/get", "completion/complete",
+            "tasks/get", "tools/call"} <= methods
+
+
+def test_response_echo_uses_supported_request_version():
+    echoed = build_mcp_echo_headers(
+        {"MCP-Protocol-Version": "2025-06-18", "Mcp-Method": "tools/call"},
+        protocol_version=MODERN_PROTOCOL_VERSION,
+        supported_versions={MODERN_PROTOCOL_VERSION, "2025-06-18"},
+    )
+    assert echoed["MCP-Protocol-Version"] == "2025-06-18"
+    assert echoed["Mcp-Method"] == "tools/call"
+    assert handled_protocol_version(
+        {"MCP-Protocol-Version": "1999-01-01"}, fallback=MODERN_PROTOCOL_VERSION,
+        supported={MODERN_PROTOCOL_VERSION, "2025-06-18"},
+    ) == MODERN_PROTOCOL_VERSION
 
 
 class TestRequestHeaders:
