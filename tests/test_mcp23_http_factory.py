@@ -6,6 +6,7 @@ agreement between discover and real capability negotiation, era-driven
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 import os
 import sys
@@ -25,6 +26,7 @@ from nitrostack import DIContainer, ExecutionContext, injectable, module, tool
 from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION
 from nitrostack.transports.stdio import serve_stdio_streams
+from tests.http_probe import decode, http_client, make_app, post
 
 CLIENT_META = {
     "io.modelcontextprotocol/clientInfo": {"name": "issue23-test", "version": "1.0"},
@@ -97,18 +99,25 @@ def test_single_cors_layer_on_options_mcp():
 @pytest.mark.parametrize("era", ["legacy", "auto", "modern"])
 def test_discover_and_capabilities_agree_on_resources_subscribe(era):
     app = _era_app(era, f"issue23-subscribe-{era}")
-    app.get_combined_app(json_response=True)  # wires protocol_era onto mcp_server
     discover = app.handle_server_discover()
     caps = app.mcp_server.get_capabilities()
     assert discover["capabilities"]["resources"]["subscribe"] == caps.resources.subscribe
-    # Only `modern` rejects `resources/subscribe` (see rejects_deprecated_method).
-    assert caps.resources.subscribe == (era != "modern")
+    assert caps.resources.subscribe == (era == "legacy")
+    extra_server = app.create_configured_mcp_server()
+    assert extra_server.protocol_era == era
+    assert extra_server.get_capabilities().resources.subscribe == (era == "legacy")
+    if era == "auto":
+        assert app.handle_sessionless_initialize()["capabilities"]["resources"]["subscribe"] is False
 
 
 # 3. No private `mcp.server.runner` symbol left in stdio.py.
 def test_stdio_module_has_no_private_mcp_runner_import():
     source = Path("nitrostack/transports/stdio.py").read_text(encoding="utf-8")
-    assert "_serve_modern_stream" not in source
+    tree = ast.parse(source)
+    imports = [node for node in ast.walk(tree)
+               if isinstance(node, ast.ImportFrom) and node.module == "mcp.server.runner"]
+    assert imports
+    assert not [alias.name for node in imports for alias in node.names if alias.name.startswith("_")]
 
 
 # 4. /json/version tracks era instead of a hardcoded 2025 date.
@@ -220,3 +229,76 @@ def test_modern_stdio_notification_does_not_break_the_stream():
 
     payload = asyncio.run(roundtrip())
     assert payload["result"]["content"][0]["text"] == "still-alive"
+
+
+async def _stdio_exchange(server, era, messages, expected_responses):
+    """Keep one stream alive through handshake, notifications, and requests."""
+    async with create_client_server_memory_streams() as (client, streams):
+        client_read, client_write = client
+        server_read, server_write = streams
+        async with anyio.create_task_group() as group:
+            group.start_soon(serve_stdio_streams, server, server_read, server_write, era)
+            for message in messages:
+                await client_write.send(SessionMessage(jsonrpc_message_adapter.validate_python(message)))
+            responses = []
+            while len(responses) < expected_responses:
+                frame = await asyncio.wait_for(client_read.receive(), timeout=3)
+                data = frame.message.model_dump(by_alias=True, mode="json")
+                if "id" in data:
+                    responses.append(data)
+            group.cancel_scope.cancel()
+        return responses
+
+
+@pytest.mark.parametrize("era,style", [
+    ("legacy", "legacy"), ("auto", "legacy"), ("auto", "modern"), ("modern", "modern"),
+])
+def test_stdio_era_roundtrip_and_initialization_capabilities(era, style):
+    app = make_app(era)
+    messages = []
+    if style == "legacy":
+        messages.extend([
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {},
+                "clientInfo": {"name": "probe", "version": "1"},
+            }},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        ])
+    params = {"name": "echo", "arguments": {"value": "stdio"}}
+    if style == "modern":
+        params["_meta"] = {PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL_VERSION, **CLIENT_META}
+    messages.append({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": params})
+    responses = asyncio.run(_stdio_exchange(app.mcp_server, era, messages, 2 if style == "legacy" else 1))
+    if style == "legacy":
+        assert responses[0]["result"]["capabilities"]["resources"]["subscribe"] == (era == "legacy")
+    assert responses[-1]["result"]["structuredContent"]["value"] == "stdio"
+
+
+def test_modern_stdio_rejects_initialize_and_then_serves_a_request():
+    app = make_app("modern")
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {},
+            "clientInfo": {"name": "probe", "version": "1"},
+        }},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {
+            "_meta": {PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL_VERSION, **CLIENT_META},
+        }},
+    ]
+    responses = asyncio.run(_stdio_exchange(app.mcp_server, "modern", messages, 2))
+    assert responses[0]["error"]["code"] == -32601
+    assert responses[1]["result"]["tools"][0]["name"] == "echo"
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+def test_http_initialize_respects_era(era):
+    with http_client(era) as (_, _, client):
+        response = post(client, "initialize", {"protocolVersion": LEGACY_PROTOCOL_VERSION,
+                        "capabilities": {}, "clientInfo": {"name": "probe", "version": "1"}},
+                        modern=False, version=LEGACY_PROTOCOL_VERSION)
+        assert response.status_code == 200, response.text
+        data = decode(response)
+        if era == "modern":
+            assert data["error"]["code"] == -32601
+        else:
+            assert data["result"]["capabilities"]["resources"]["subscribe"] is False
