@@ -207,6 +207,8 @@ class ExecutionContext:
     _visibility_session_key: Any = field(default=None, repr=False, compare=False)
     _visibility_change_callback: Any = field(default=None, repr=False, compare=False)
     _visibility_supported: bool = field(default=False, repr=False, compare=False)
+    spillover_session_key: Optional[str] = field(default=None, repr=False)
+    spillover_invalid_auth: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.correlation_id:
