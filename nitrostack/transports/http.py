@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -41,6 +42,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from nitrostack.transports.landing_page import render_landing_page
 from nitrostack.widgets.preview_page import render_preview_page
 from nitrostack.core.di import DIContainer
+from nitrostack.transports.cors import configured_cors_origins
 from pydantic_core import PydanticUndefined
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -56,10 +58,10 @@ from nitrostack.protocol.version import (
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.transports.headers import (
     CORS_ALLOW_HEADER_NAMES,
+    CORS_EXPOSE_HEADER_NAMES,
     SSE_SUBSCRIPTIONS_PATH,
     strip_legacy_session_headers_asgi,
 )
-from nitrostack.transports.cors import McpCorsMiddleware
 from nitrostack.transports.subscriptions import subscriptions_listen_endpoint
 from nitrostack.transports.proxy import public_url_for_request
 from nitrostack.core.log_emitter import install_log_handler
@@ -490,6 +492,7 @@ def build_http_app(
     if server is not None:
         server.http_engine = http_engine
         server.sessionful = http_engine == "sessionful"
+        server.protocol_era = protocol_era
 
     security_settings = None
     if not enable_cors:
@@ -662,7 +665,7 @@ def build_http_app(
         return JSONResponse(
             {
                 "Browser": meta["name"],
-                "Protocol-Version": "2025-06-18",
+                "Protocol-Version": protocol_version_for_era(protocol_era),
                 "User-Agent": f"NitroStack/{meta['version']}",
                 "webSocketDebuggerUrl": "",
                 "transport": "mcp",
@@ -741,14 +744,23 @@ def build_http_app(
         Middleware(ExactEndpointSlashMiddleware, endpoint=endpoint),
     ]
     if enable_cors:
-        # CORS policy lives in transports/cors.py (MCP_CORS_ALLOWED_ORIGINS, Mcp-* headers).
-        # Mcp-Session-Id is exposed only on the sessionful (legacy) engine.
+        expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
+        if http_engine == "sessionful":
+            expose_headers.append(LEGACY_SESSION_HEADER)
+        # Single CORS layer for `/mcp`: the sidecar that used to add a second
+        # one has been removed (#22), so `MCP_CORS_ALLOWED_ORIGINS` is honored
+        # here and nowhere else.
+        allow_origins = list(configured_cors_origins()) or ["*"]
         middleware.insert(
             0,
             Middleware(
-                McpCorsMiddleware,
-                expose_session_id=http_engine == "sessionful",
-                fallback_allow_headers=CORS_ALLOW_HEADERS,
+                CORSMiddleware,
+                allow_origins=allow_origins,
+                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                # SEP-2243 permits application-defined Mcp-Param-* names.
+                # Starlette mirrors requested names when '*' is enabled.
+                allow_headers=[*CORS_ALLOW_HEADERS, "*"],
+                expose_headers=expose_headers,
             ),
         )
 

@@ -64,15 +64,37 @@ async def serve_stdio_streams(
     async with server.lifespan(server) as lifespan_state:
         try:
             if era == "modern":
-                from mcp.server.runner import _serve_modern_stream
-
-                await _serve_modern_stream(
-                    server,
-                    read_stream,
-                    write_stream,
-                    lifespan_state=lifespan_state,
-                    raise_exceptions=False,
+                # A per-request envelope loop (no `initialize` handshake) built from
+                # documented, public `mcp.server.runner` building blocks, so this does
+                # not depend on a leading-underscore internal that mcp is free to
+                # remove without notice.
+                from mcp.server.runner import (
+                    Connection,
+                    JSONRPCDispatcher,
+                    LATEST_MODERN_VERSION,
+                    NotifyOnlyOutbound,
+                    ServerRunner,
+                    aclose_shielded,
+                    modern_on_request,
                 )
+
+                dispatcher: JSONRPCDispatcher = JSONRPCDispatcher(read_stream, write_stream)
+                outbound = NotifyOnlyOutbound(dispatcher)
+
+                async def _on_notify(dctx, method, params):
+                    # Fresh per-notification `Connection`, mirroring the request path:
+                    # notifications carry no envelope of their own at this era.
+                    connection = Connection.from_envelope(
+                        LATEST_MODERN_VERSION, None, None, outbound=outbound
+                    )
+                    try:
+                        await ServerRunner(server, connection, lifespan_state).on_notify(
+                            dctx, method, params
+                        )
+                    finally:
+                        await aclose_shielded(connection)
+
+                await dispatcher.run(modern_on_request(server, lifespan_state), _on_notify)
             else:
                 await serve_loop(
                     server,
@@ -87,5 +109,6 @@ async def serve_stdio_streams(
 
 async def run_stdio(server: "Server[Any]", era: ProtocolEra) -> None:
     """Serve official mcp 2.x on process stdin/stdout for the active era."""
+    server.protocol_era = era
     async with stdio_server() as (read_stream, write_stream):
         await serve_stdio_streams(server, read_stream, write_stream, era)

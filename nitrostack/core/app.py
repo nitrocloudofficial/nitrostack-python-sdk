@@ -66,6 +66,7 @@ from nitrostack.protocol.version import (
     resolve_http_engine,
     resolve_protocol_era_resolution,
     wire_mode_for_era,
+    supports_resource_subscriptions,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
 from nitrostack.protocol.cache_hints import (
@@ -869,10 +870,14 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
+        # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
+        # `server/discover` and real capability negotiation never disagree.
+        resources_subscribe = supports_resource_subscriptions(self.protocol_era)
         return build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
+            resources_subscribe=resources_subscribe,
             advertise_tasks=self._advertise_tasks_extension(),
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
@@ -904,6 +909,7 @@ class McpApplication:
         return build_list_endpoint_cache_hint_meta()
 
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
+        server.protocol_era = self.protocol_era
         async def _list_tools(
             ctx: ServerRequestContext,
             _params: Optional[PaginatedRequestParams],
@@ -967,7 +973,7 @@ class McpApplication:
             return _read_contents_to_result(uri, await self._read_resource(uri))
 
         async def _subscribe_resource(_ctx: ServerRequestContext, params: SubscribeRequestParams):
-            if rejects_deprecated_method("resources/subscribe", self.protocol_era):
+            if not supports_resource_subscriptions(self.protocol_era):
                 message = deprecated_method_message("resources/subscribe")
                 raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             if str(params.uri) not in self._resources:
@@ -975,6 +981,8 @@ class McpApplication:
             return types.EmptyResult()
 
         async def _unsubscribe_resource(_ctx: ServerRequestContext, _params: UnsubscribeRequestParams):
+            if not supports_resource_subscriptions(self.protocol_era):
+                raise MCPError(types.METHOD_NOT_FOUND, "Resource subscriptions are not supported in this era")
             return types.EmptyResult()
 
         async def _list_prompts(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
