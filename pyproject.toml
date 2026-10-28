@@ -21,7 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+token-encryption = ["cryptography>=41"]
 dev = [
+    "cryptography>=41",
     "pytest-cov>=4.1.0",
     "pytest>=8",
     "pytest-asyncio>=0.23",

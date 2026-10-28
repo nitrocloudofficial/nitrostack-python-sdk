@@ -104,6 +104,27 @@ from nitrostack.auth.pkce import (
     validate_pkce_support,
     verify_pkce,
 )
+from nitrostack.auth.client import (
+    AuthorizationFlow,
+    ClientRegistration,
+    OAuth2Client,
+    OAuth2ClientConfig,
+    OAuthClientError,
+    get_well_known_metadata_uris,
+    parse_www_authenticate_header,
+)
+from nitrostack.auth.token_store import (
+    FileTokenStore,
+    MemoryTokenStore,
+    StoredToken,
+    TokenStore,
+    TokenStoreError,
+    calculate_expiration,
+    create_default_token_store,
+    get_default_store_path,
+    is_token_expired,
+    token_response_to_stored,
+)
 from nitrostack.auth.scopes import (
     has_all_scopes,
     has_any_scope,
@@ -140,6 +161,23 @@ from nitrostack.transports import wrap_stateless_transport, StatelessIngressPipe
 
 
 __all__ = [
+    "AuthorizationFlow",
+    "ClientRegistration",
+    "OAuth2Client",
+    "OAuth2ClientConfig",
+    "OAuthClientError",
+    "FileTokenStore",
+    "MemoryTokenStore",
+    "StoredToken",
+    "TokenStore",
+    "TokenStoreError",
+    "calculate_expiration",
+    "create_default_token_store",
+    "get_default_store_path",
+    "get_well_known_metadata_uris",
+    "is_token_expired",
+    "parse_www_authenticate_header",
+    "token_response_to_stored",
     "tool",
     "resource",
     "prompt",

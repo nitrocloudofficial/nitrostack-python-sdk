@@ -367,6 +367,13 @@ cd examples
 MCP_TRANSPORT_TYPE=http MCP_STATELESS=true NITROSTACK_APP_MODE=universal python widgets_example.py
 ```
 
+### OAuth client
+
+Use `OAuth2Client` for authorization-code/PKCE and client-credentials flows,
+managed token storage, refresh, discovery, registration and revocation. Tokens
+stay in memory unless a file store is explicitly configured. See the
+[OAuth client guide](docs/oauth-client.md) for examples and security responsibilities.
+
 ### Running Tests
 To run the automated test suite, execute:
 ```bash

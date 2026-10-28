@@ -593,6 +593,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -600,11 +601,16 @@ dev = [
     { name = "pytest-timeout" },
     { name = "tox" },
 ]
+token-encryption = [
+    { name = "cryptography" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
+    { name = "cryptography", marker = "extra == 'dev'", specifier = ">=41" },
+    { name = "cryptography", marker = "extra == 'token-encryption'", specifier = ">=41" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=2,<3" },
     { name = "packaging", specifier = ">=23.0.0" },
@@ -619,7 +625,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.20.0" },
     { name = "watchfiles", specifier = ">=0.18.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["token-encryption", "dev"]
 
 [[package]]
 name = "opentelemetry-api"
