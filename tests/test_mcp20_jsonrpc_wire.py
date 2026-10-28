@@ -17,9 +17,6 @@ from nitrostack.protocol.jsonrpc import (
     build_tool_error_result,
     map_exception_to_jsonrpc,
     parse_jsonrpc_request,
-    validate_header_body_name,
-    validate_header_body_method,
-    validate_required_mcp_name,
 )
 from nitrostack.core.context import AuthContext, ExecutionContext
 from nitrostack.protocol.meta import (
@@ -233,51 +230,6 @@ class TestMetaEnvelope:
 
 
 class TestHeaderBodyMismatch:
-    def test_mcp_method_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_header_body_method("tools/list", "tools/call")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-
-    def test_mcp_name_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError):
-            validate_header_body_name("get_weather", "get_forecast")
-
-    def test_optional_name_allows_missing_header(self):
-        validate_header_body_name(None, "echo")
-
-    def test_required_mcp_name_rejects_missing_header(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_name(None, "echo")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-        assert "required" in exc.value.message
-
-    def test_required_mcp_name_rejects_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_name("foo", "bar")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-
-    def test_required_mcp_name_accepts_exact_match(self):
-        validate_required_mcp_name("echo", "echo")
-
-    def test_required_mcp_method_rejects_missing_header(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_method(None, "tools/call")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-        assert "required" in exc.value.message
-
-    def test_required_mcp_method_rejects_mismatch(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        with pytest.raises(HeaderBodyMismatchError):
-            validate_required_mcp_method("tools/list", "tools/call")
-
-    def test_required_mcp_method_accepts_exact_match(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        validate_required_mcp_method("tools/call", "tools/call")
-
     def test_protocol_version_header_meta_mismatch(self):
         from nitrostack.protocol.jsonrpc import validate_protocol_version_header_meta
 

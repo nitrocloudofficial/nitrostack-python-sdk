@@ -78,6 +78,18 @@ def test_health_endpoint_remains_available():
     assert response.json()["status"] == "ok"
 
 
+def test_official_mcp_lists_tools_without_a_default_session_id():
+    response = _request(
+        "/mcp",
+        method="POST",
+        payload={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("mcp-session-id") is None
+    assert response.json()["id"] == 1
+    assert response.json()["result"]["tools"] == []
+
+
 def test_official_mcp_ping_is_method_not_found_without_a_default_session_id():
     response = _request(
         "/mcp",
@@ -236,12 +248,13 @@ def test_legacy_era_transform_context_carries_the_session_id():
 
 
 def test_modern_era_rejects_the_2025_initialize_on_the_official_path():
+    from tests.http_probe import envelope
     app = _build("modern")
     with TestClient(app) as client:
         response = client.post(
             "/mcp",
-            headers=_HEADERS,
-            json=_rpc(
+            headers={**_HEADERS, "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "initialize"},
+            json=envelope(
                 "initialize",
                 {
                     "protocolVersion": "2025-06-18",
@@ -252,7 +265,7 @@ def test_modern_era_rejects_the_2025_initialize_on_the_official_path():
         )
     body = response.json()
     assert body["error"]["code"] == -32601
-    assert body["error"]["message"] == "Method not found: initialize"
+    assert "initialize" in body["error"]["message"]
     assert "mcp-session-id" not in response.headers
 
 

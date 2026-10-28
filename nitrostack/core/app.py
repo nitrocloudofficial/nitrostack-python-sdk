@@ -457,7 +457,7 @@ def _read_contents_to_result(uri: str, items: List[ReadResourceContents]) -> typ
                     uri=uri, mimeType=mime, text=str(item.content), **extra
                 )
             )
-    return types.ReadResourceResult(contents=contents)
+    return types.ReadResourceResult(contents=contents, resultType="complete")
 
 
 def _http_headers_from_request_ctx(rc: Any) -> Dict[str, str]:
@@ -960,12 +960,9 @@ class McpApplication:
         return self.protocol_era not in ("auto", "modern")
 
     def _advertise_tasks_extension(self) -> bool:
-        if not self._tasks_visible_on_wire():
-            return False
-        return any(
-            entry.config.task_support in ("optional", "required")
-            for entry in self._tools.values()
-        )
+        # Legacy task handlers do not implement the complete 2026 extension.
+        # Advertising it is deferred to the dedicated tasks issue.
+        return False
 
     def _custom_extensions(self) -> Optional[Dict[str, str]]:
         extensions = getattr(self.server_config, "extensions", None)
@@ -1018,28 +1015,6 @@ class McpApplication:
         out.setdefault("resultType", "complete")
         return out
 
-    def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
-        """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
-        from nitrostack.protocol.discovery import build_sessionless_initialize_result
-
-        has_widgets = any(
-            getattr(entry, "component", None) is not None
-            for entry in getattr(self, "_tools", {}).values()
-        )
-        version = protocol_version_for_era(
-            getattr(self, "protocol_era", None),
-            self.server_config.protocol_version,
-        )
-        return build_sessionless_initialize_result(
-            server_name=self.server_config.name,
-            server_version=self.server_config.version,
-            requested_version=requested_version,
-            protocol_version=version,
-            advertise_tasks=self._advertise_tasks_extension(),
-            advertise_app=has_widgets,
-            custom_extensions=self._custom_extensions(),
-        )
-
     def _list_endpoint_cache_meta(self) -> Dict[str, Any]:
         return build_list_endpoint_cache_hint_meta()
 
@@ -1074,6 +1049,7 @@ class McpApplication:
             return types.ListToolsResult(
                 tools=tools,
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _ping(_ctx: ServerRequestContext, _params: Optional[RequestParams]):
@@ -1099,7 +1075,7 @@ class McpApplication:
                         },
                         isError=False,
                     )
-                return result
+                return result.model_copy(update={"result_type": result.result_type or "complete"})
             finally:
                 request_ctx.reset(token)
 
@@ -1107,6 +1083,7 @@ class McpApplication:
             return types.ListResourcesResult(
                 resources=[self._build_resource_definition(entry) for entry in self._resources.values()],
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _list_resource_templates(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
@@ -1114,6 +1091,7 @@ class McpApplication:
                 resource_templates=[
                     self._build_resource_template_definition(entry) for entry in self._resource_templates
                 ],
+                resultType="complete",
             )
 
         async def _read_resource(ctx: ServerRequestContext, params: ReadResourceRequestParams):
@@ -1137,14 +1115,17 @@ class McpApplication:
             return types.ListPromptsResult(
                 prompts=[self._build_prompt_definition(entry) for entry in self._prompts.values()],
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _get_prompt(ctx: ServerRequestContext, params: GetPromptRequestParams):
             arguments = params.arguments or {}
-            return await self._get_prompt(
+            result = await self._get_prompt(
                 params.name,
                 {str(key): str(value) for key, value in arguments.items()},
             )
+            return result.model_copy(update={"result_type": result.result_type or "complete"})
+
         server.add_request_handler("ping", RequestParams, _ping)
         async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
             return self.handle_server_discover(getattr(ctx, "protocol_version", None))
@@ -1214,7 +1195,6 @@ class McpApplication:
 
         self._register_task_handlers(server)
         self._register_initialized_handler(server)
-        server.discover_handler = self.handle_server_discover
         server.middleware.insert(1, self._request_scope_middleware)
 
     def _build_transform_context(self, rc: Any, *, invoker: Any) -> TransformContext:
