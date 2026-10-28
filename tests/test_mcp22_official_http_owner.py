@@ -268,9 +268,10 @@ def test_cors_honours_the_configured_origin_allowlist(monkeypatch):
             headers={**_HEADERS, "Origin": "https://app.example.com"},
             json=_rpc("ping"),
         )
-    assert allowed.status_code == 204
+    assert allowed.status_code == 200
     assert allowed.headers["access-control-allow-origin"] == "https://app.example.com"
     assert "mcp-param-city" in allowed.headers["access-control-allow-headers"].lower()
+    assert denied.status_code == 400
     assert denied.headers.get("access-control-allow-origin") != "*"
     assert denied.headers.get("access-control-allow-origin") != "https://evil.example.com"
     assert post.headers["access-control-allow-origin"] == "https://app.example.com"
@@ -283,10 +284,8 @@ def test_cors_exposes_session_id_only_on_the_legacy_wire(monkeypatch):
     for era, exposed in (("legacy", True), ("auto", False)):
         app = _build(era)
         with TestClient(app) as client:
-            response = client.options(
-                "/mcp",
-                headers={"Origin": "http://x.test", "Access-Control-Request-Method": "POST"},
-            )
+            response = client.get("/mcp/health", headers={"Origin": "http://x.test"})
+        assert response.status_code == 200
         expose = response.headers.get("access-control-expose-headers", "")
         assert ("Mcp-Session-Id" in expose) is exposed, era
 

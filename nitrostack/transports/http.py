@@ -757,7 +757,9 @@ def build_http_app(
                 CORSMiddleware,
                 allow_origins=allow_origins,
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-                allow_headers=CORS_ALLOW_HEADERS,
+                # SEP-2243 permits application-defined Mcp-Param-* names.
+                # Starlette mirrors requested names when '*' is enabled.
+                allow_headers=[*CORS_ALLOW_HEADERS, "*"],
                 expose_headers=expose_headers,
             ),
         )
