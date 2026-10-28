@@ -129,3 +129,33 @@ python -m pip install -e ".[dev]"
 The existing GitHub workflow provides the Linux Python 3.10/3.11/3.12 matrix.
 Its status must be checked separately on the pushed commit. No reviewer reply
 was posted as part of the implementation; a response is prepared for user review.
+
+## Rebase after PR #34 merged (2026-10-28)
+
+PR #34 merged normally as `805db05`. PR #36 was rebased onto current develop
+`63ecd9240d98bbe06c879089dd887494c7e99293`, which also includes the upstream
+SecretValue work. The previous head `71e47f1` is preserved locally as
+`backup/pr36-before-develop-rebase-20261028`.
+
+The rebased branch preserves the migrated tests and single Starlette CORS layer.
+Conflicts with the merged foundation's older tests/custom CORS layer were
+resolved while retaining browser-defined Mcp-Param headers and origin checks.
+Comparison against the previously tested merged foundation plus new develop
+found no functional differences beyond these retained corrections.
+
+Complete collection succeeds with **866 tests**. Exact-source local full suites
+at rebased implementation head `682630b`, using MCP **2.2.0**, report:
+
+| Platform | Python | Result | Coverage |
+|---|---|---|---|
+| Ubuntu / WSL | 3.10.21 | 866 passed | 86.11% |
+| Ubuntu / WSL | 3.11.16 | 866 passed | 86.11% |
+| Ubuntu / WSL | 3.12.14 | 866 passed | 86.11% |
+| Windows | 3.12.14 | 866 passed | 86.11% |
+
+No ignored files, deselections, skips or xfails were used. `git diff --check`
+passes. Logs are retained locally in `.pytest_cache/rebase-linux-3.10.log`,
+`rebase-linux-3.11.log`, `rebase-linux-3.12.log` and
+`rebase-windows-full.tmp.log`. The hosted CI results above apply to the old head;
+hosted CI must be checked again on the rebased published head. PR #34 is no
+longer an unmerged dependency. PR #37 remains stacked on this PR until #36 lands.
