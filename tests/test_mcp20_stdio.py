@@ -135,8 +135,11 @@ def test_modern_stdio_rejects_initialize(monkeypatch):
             },
         )
     )
+    # Modern has no `initialize` handshake handler at all (rejected via the
+    # public `modern_on_request` dispatch path, not a bespoke error message),
+    # so this surfaces as a standard JSON-RPC method-not-found.
     assert "error" in payload
-    assert "initialize" in payload["error"]["message"]
+    assert payload["error"]["code"] == -32601
 
 
 def test_legacy_stdio_still_answers_initialize(monkeypatch):
@@ -172,6 +175,7 @@ def test_dual_http_and_stdio_share_the_same_tools(monkeypatch):
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "Mcp-Method": "tools/list",
+                "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
             },
             json={
                 "jsonrpc": "2.0",

@@ -66,6 +66,7 @@ from nitrostack.protocol.version import (
     resolve_http_engine,
     resolve_protocol_era_resolution,
     wire_mode_for_era,
+    supports_resource_subscriptions,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
 from nitrostack.protocol.cache_hints import (
@@ -442,7 +443,7 @@ def _read_contents_to_result(uri: str, items: List[ReadResourceContents]) -> typ
                     uri=uri, mimeType=mime, text=str(item.content), **extra
                 )
             )
-    return types.ReadResourceResult(contents=contents)
+    return types.ReadResourceResult(contents=contents, resultType="complete")
 
 
 def _http_headers_from_request_ctx(rc: Any) -> Dict[str, str]:
@@ -846,10 +847,9 @@ class McpApplication:
     # ------------------------------------------------------------------
 
     def _advertise_tasks_extension(self) -> bool:
-        return any(
-            entry.config.task_support in ("optional", "required")
-            for entry in self._tools.values()
-        )
+        # Legacy task handlers do not implement the complete 2026 extension.
+        # Advertising it is deferred to the dedicated tasks issue.
+        return False
 
     def _custom_extensions(self) -> Optional[Dict[str, str]]:
         extensions = getattr(self.server_config, "extensions", None)
@@ -869,32 +869,14 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
+        # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
+        # `server/discover` and real capability negotiation never disagree.
+        resources_subscribe = supports_resource_subscriptions(self.protocol_era)
         return build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
-            advertise_tasks=self._advertise_tasks_extension(),
-            advertise_app=has_widgets,
-            custom_extensions=self._custom_extensions(),
-        )
-
-    def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
-        """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
-        from nitrostack.protocol.discovery import build_sessionless_initialize_result
-
-        has_widgets = any(
-            getattr(entry, "component", None) is not None
-            for entry in getattr(self, "_tools", {}).values()
-        )
-        version = protocol_version_for_era(
-            getattr(self, "protocol_era", None),
-            self.server_config.protocol_version,
-        )
-        return build_sessionless_initialize_result(
-            server_name=self.server_config.name,
-            server_version=self.server_config.version,
-            requested_version=requested_version,
-            protocol_version=version,
+            resources_subscribe=resources_subscribe,
             advertise_tasks=self._advertise_tasks_extension(),
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
@@ -904,6 +886,7 @@ class McpApplication:
         return build_list_endpoint_cache_hint_meta()
 
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
+        server.protocol_era = self.protocol_era
         async def _list_tools(
             ctx: ServerRequestContext,
             _params: Optional[PaginatedRequestParams],
@@ -931,6 +914,7 @@ class McpApplication:
             return types.ListToolsResult(
                 tools=tools,
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
@@ -947,12 +931,13 @@ class McpApplication:
                     },
                     isError=False,
                 )
-            return result
+            return result.model_copy(update={"result_type": result.result_type or "complete"})
 
         async def _list_resources(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListResourcesResult(
                 resources=[self._build_resource_definition(entry) for entry in self._resources.values()],
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _list_resource_templates(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
@@ -960,6 +945,7 @@ class McpApplication:
                 resource_templates=[
                     self._build_resource_template_definition(entry) for entry in self._resource_templates
                 ],
+                resultType="complete",
             )
 
         async def _read_resource(ctx: ServerRequestContext, params: ReadResourceRequestParams):
@@ -967,7 +953,7 @@ class McpApplication:
             return _read_contents_to_result(uri, await self._read_resource(uri))
 
         async def _subscribe_resource(_ctx: ServerRequestContext, params: SubscribeRequestParams):
-            if rejects_deprecated_method("resources/subscribe", self.protocol_era):
+            if not supports_resource_subscriptions(self.protocol_era):
                 message = deprecated_method_message("resources/subscribe")
                 raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             if str(params.uri) not in self._resources:
@@ -975,20 +961,24 @@ class McpApplication:
             return types.EmptyResult()
 
         async def _unsubscribe_resource(_ctx: ServerRequestContext, _params: UnsubscribeRequestParams):
+            if not supports_resource_subscriptions(self.protocol_era):
+                raise MCPError(types.METHOD_NOT_FOUND, "Resource subscriptions are not supported in this era")
             return types.EmptyResult()
 
         async def _list_prompts(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListPromptsResult(
                 prompts=[self._build_prompt_definition(entry) for entry in self._prompts.values()],
                 _meta=self._list_endpoint_cache_meta(),
+                resultType="complete",
             )
 
         async def _get_prompt(ctx: ServerRequestContext, params: GetPromptRequestParams):
             arguments = params.arguments or {}
-            return await self._get_prompt(
+            result = await self._get_prompt(
                 params.name,
                 {str(key): str(value) for key, value in arguments.items()},
             )
+            return result.model_copy(update={"result_type": result.result_type or "complete"})
 
         async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
             return self.handle_server_discover(getattr(ctx, "protocol_version", None))
@@ -1050,7 +1040,6 @@ class McpApplication:
 
         self._register_task_handlers(server)
         self._register_initialized_handler(server)
-        server.discover_handler = self.handle_server_discover
         server.middleware.insert(1, self._request_scope_middleware)
 
     def _build_transform_context(self, rc: Any, *, invoker: Any) -> TransformContext:

@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -41,6 +42,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from nitrostack.transports.landing_page import render_landing_page
 from nitrostack.widgets.preview_page import render_preview_page
 from nitrostack.core.di import DIContainer
+from nitrostack.transports.cors import configured_cors_origins
 from pydantic_core import PydanticUndefined
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -56,10 +58,10 @@ from nitrostack.protocol.version import (
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.transports.headers import (
     CORS_ALLOW_HEADER_NAMES,
+    CORS_EXPOSE_HEADER_NAMES,
     SSE_SUBSCRIPTIONS_PATH,
     strip_legacy_session_headers_asgi,
 )
-from nitrostack.transports.cors import McpCorsMiddleware
 from nitrostack.transports.subscriptions import subscriptions_listen_endpoint
 from nitrostack.transports.proxy import public_url_for_request
 from nitrostack.core.log_emitter import install_log_handler
@@ -274,17 +276,19 @@ class HeaderCompatMiddleware:
     ``drop_session_headers`` is set.
 
     ``MCP-Protocol-Version`` is never deleted. Duplicate casings are collapsed
-    to one ``mcp-protocol-version`` entry and the client value is kept so later
-    version checks see what the client sent.
+    to lowercase names and client values are preserved so the official
+    transport can reject duplicate or inconsistent version claims.
 
     Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
     This middleware only normalizes transport headers; JSON-RPC dispatch remains
     owned by the official MCP Streamable HTTP manager.
     """
 
-    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
+    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False,
+                 require_protocol_version: bool = False) -> None:
         self.app = app
         self.drop_session_headers = drop_session_headers
+        self.require_protocol_version = require_protocol_version
 
     @staticmethod
     def _normalize_accept(value: Optional[str]) -> Optional[str]:
@@ -304,7 +308,7 @@ class HeaderCompatMiddleware:
 
     @staticmethod
     def _canonicalize_protocol_version(headers: List[Any]) -> List[Any]:
-        """Keep the protocol version value; emit one lowercase header name."""
+        """Normalize casing without hiding duplicates from MCP's validator."""
         version_values: List[bytes] = []
         kept: List[Any] = []
         for key, value in headers:
@@ -314,7 +318,7 @@ class HeaderCompatMiddleware:
                 kept.append((key, value))
         if not version_values:
             return headers
-        kept.append((b"mcp-protocol-version", version_values[0]))
+        kept.extend((b"mcp-protocol-version", value) for value in version_values)
         return kept
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -323,6 +327,19 @@ class HeaderCompatMiddleware:
             return
 
         headers: List[Any] = list(scope.get("headers") or [])
+        if self.require_protocol_version and scope.get("method") == "POST" and not any(
+            key.lower() == b"mcp-protocol-version" and value.strip() for key, value in headers
+        ):
+            # The official manager selects its strict path using this header.
+            # Reject before that selection without reading/replaying the body
+            # or interpreting a method. All JSON-RPC dispatch stays in MCP.
+            response = JSONResponse(
+                {"jsonrpc": "2.0", "id": None, "error": {
+                    "code": -32020, "message": "MCP-Protocol-Version header is required",
+                }}, status_code=400,
+            )
+            await response(scope, receive, send)
+            return
         if self.drop_session_headers:
             headers = strip_legacy_session_headers_asgi(headers)
         headers = self._canonicalize_protocol_version(headers)
@@ -490,6 +507,7 @@ def build_http_app(
     if server is not None:
         server.http_engine = http_engine
         server.sessionful = http_engine == "sessionful"
+        server.protocol_era = protocol_era
 
     security_settings = None
     if not enable_cors:
@@ -526,7 +544,8 @@ def build_http_app(
     # Wraps only the Streamable HTTP mount, so `/mcp/health` and the legacy SSE
     # routes keep their own (correct) content negotiation.
     mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(
-        handle_streamable_http, drop_session_headers=stateless
+        handle_streamable_http, drop_session_headers=stateless,
+        require_protocol_version=protocol_era == "modern",
     )
     session_cap: Optional[SessionCapMiddleware] = None
     if max_sessions and not stateless:
@@ -662,7 +681,7 @@ def build_http_app(
         return JSONResponse(
             {
                 "Browser": meta["name"],
-                "Protocol-Version": "2025-06-18",
+                "Protocol-Version": protocol_version_for_era(protocol_era),
                 "User-Agent": f"NitroStack/{meta['version']}",
                 "webSocketDebuggerUrl": "",
                 "transport": "mcp",
@@ -741,14 +760,23 @@ def build_http_app(
         Middleware(ExactEndpointSlashMiddleware, endpoint=endpoint),
     ]
     if enable_cors:
-        # CORS policy lives in transports/cors.py (MCP_CORS_ALLOWED_ORIGINS, Mcp-* headers).
-        # Mcp-Session-Id is exposed only on the sessionful (legacy) engine.
+        expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
+        if http_engine == "sessionful":
+            expose_headers.append(LEGACY_SESSION_HEADER)
+        # Single CORS layer for `/mcp`: the sidecar that used to add a second
+        # one has been removed (#22), so `MCP_CORS_ALLOWED_ORIGINS` is honored
+        # here and nowhere else.
+        allow_origins = list(configured_cors_origins()) or ["*"]
         middleware.insert(
             0,
             Middleware(
-                McpCorsMiddleware,
-                expose_session_id=http_engine == "sessionful",
-                fallback_allow_headers=CORS_ALLOW_HEADERS,
+                CORSMiddleware,
+                allow_origins=allow_origins,
+                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                # SEP-2243 permits application-defined Mcp-Param-* names.
+                # Starlette mirrors requested names when '*' is enabled.
+                allow_headers=[*CORS_ALLOW_HEADERS, "*"],
+                expose_headers=expose_headers,
             ),
         )
 

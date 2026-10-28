@@ -1,6 +1,5 @@
 """Tests for MCP 2.0 JSON-RPC wire specification."""
 
-import asyncio
 import json
 
 import pytest
@@ -18,9 +17,6 @@ from nitrostack.protocol.jsonrpc import (
     build_tool_error_result,
     map_exception_to_jsonrpc,
     parse_jsonrpc_request,
-    validate_header_body_name,
-    validate_header_body_method,
-    validate_required_mcp_name,
 )
 from nitrostack.core.context import AuthContext, ExecutionContext
 from nitrostack.protocol.meta import (
@@ -31,6 +27,45 @@ from nitrostack.protocol.meta import (
     split_params_and_meta,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
+from tests.http_probe import decode, http_client, post
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+def test_official_http_rejects_unknown_protocol_header(era):
+    with http_client(era) as (_, _, client):
+        response = post(client, version="1999-01-01")
+        assert response.status_code == 400, response.text
+        assert "result" not in decode(response)
+
+
+@pytest.mark.parametrize("era,version", [
+    ("auto", "2025-06-18"), ("auto", "2025-11-25"), ("auto", "2026-07-28"),
+    ("modern", "2026-07-28"),
+])
+def test_official_http_accepts_supported_protocol(era, version):
+    with http_client(era) as (_, _, client):
+        response = post(client, modern=version == MODERN_PROTOCOL_VERSION, version=version)
+        assert response.status_code == 200, response.text
+        assert decode(response)["result"]["tools"][0]["name"] == "echo"
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+@pytest.mark.parametrize("wrong_header", [{"Mcp-Method": "tools/list"}, {"Mcp-Name": "wrong"}])
+def test_official_http_checks_method_and_name_headers(era, wrong_header):
+    with http_client(era) as (_, _, client):
+        response = post(client, "tools/call", {"name": "echo", "arguments": {}},
+                        extra_headers=wrong_header)
+        assert response.status_code == 400, response.text
+        assert decode(response)["error"]["code"] == HEADER_BODY_MISMATCH
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+def test_protocol_header_and_envelope_must_agree_in_official_runner(era):
+    with http_client(era) as (_, _, client):
+        response = post(client, extra_headers={"MCP-Protocol-Version": "2025-06-18"})
+        # The 2025 header selects the SDK's legacy HTTP error mapping.
+        assert response.status_code == 200, response.text
+        assert decode(response)["error"]["code"] == HEADER_BODY_MISMATCH
 
 
 class TestErrorCodes:
@@ -195,51 +230,6 @@ class TestMetaEnvelope:
 
 
 class TestHeaderBodyMismatch:
-    def test_mcp_method_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_header_body_method("tools/list", "tools/call")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-
-    def test_mcp_name_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError):
-            validate_header_body_name("get_weather", "get_forecast")
-
-    def test_optional_name_allows_missing_header(self):
-        validate_header_body_name(None, "echo")
-
-    def test_required_mcp_name_rejects_missing_header(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_name(None, "echo")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-        assert "required" in exc.value.message
-
-    def test_required_mcp_name_rejects_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_name("foo", "bar")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-
-    def test_required_mcp_name_accepts_exact_match(self):
-        validate_required_mcp_name("echo", "echo")
-
-    def test_required_mcp_method_rejects_missing_header(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_required_mcp_method(None, "tools/call")
-        assert int(exc.value.code) == HEADER_BODY_MISMATCH
-        assert "required" in exc.value.message
-
-    def test_required_mcp_method_rejects_mismatch(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        with pytest.raises(HeaderBodyMismatchError):
-            validate_required_mcp_method("tools/list", "tools/call")
-
-    def test_required_mcp_method_accepts_exact_match(self):
-        from nitrostack.protocol.jsonrpc import validate_required_mcp_method
-
-        validate_required_mcp_method("tools/call", "tools/call")
-
     def test_protocol_version_header_meta_mismatch(self):
         from nitrostack.protocol.jsonrpc import validate_protocol_version_header_meta
 

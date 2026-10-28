@@ -207,6 +207,11 @@ def needs_sessionful_engine(era: ProtocolEra) -> bool:
     return era == "legacy"
 
 
+def supports_resource_subscriptions(era: Optional[ProtocolEra]) -> bool:
+    """Only the legacy compatibility era serves resource subscriptions."""
+    return era == "legacy"
+
+
 def http_engine_for_era(era: ProtocolEra) -> HttpEngine:
     """
     Select the /mcp HTTP engine for an era.
