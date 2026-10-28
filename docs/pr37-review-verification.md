@@ -116,3 +116,50 @@ The branch remains stacked on #34 and #36 until they land. PR #37 must target
 develop when its updates are published. No push, PR-base edit, reviewer reply or
 merge is included in this implementation step. Hosted CI must be checked on the
 eventual pushed head.
+
+## Rebase after PR #34 merged (2026-10-28)
+
+PR #34 merged normally as `805db05`. Both dependent branches now contain
+develop `63ecd9240d98bbe06c879089dd887494c7e99293`, including upstream SecretValue
+changes. PR #36 was rebased first; PR #37's issue-specific commits were replayed
+onto that rebased foundation. The original local PR #37 head is preserved as
+`backup/pr37-before-develop-rebase-20261028`. The original published head was
+still `e458282`; publishing uses an explicit force-with-lease against that head.
+
+PR #37 now targets develop. It still includes PR #36 until that PR merges, but
+the already-merged PR #34 commits are no longer outstanding dependency changes.
+Tree comparison against the previously validated implementation plus new develop
+shows no functional changes lost during the rebase.
+
+Complete collection succeeds with **954 tests**, including the 99 wire cases.
+Exact-source runs at rebased head `a577fe7` use MCP **2.2.0**:
+
+| Platform | Python | Complete suite | Coverage |
+|---|---|---|---|
+| Ubuntu / WSL | 3.10.21 | 954 passed | 86.32% |
+| Ubuntu / WSL | 3.11.16 | 954 passed | 86.30% |
+| Ubuntu / WSL | 3.12.14 | 954 passed | 86.30% |
+| Windows | 3.12.14 | 953 passed, 1 socket failure on first run | 86.30% |
+
+The Windows failure is `test_discovery_dcr_404_when_disabled_or_missing_client_id`
+with WinError 10053, matching the intermittent baseline-reproduced failure
+documented above. A complete repeat is recorded separately below. No exclusions,
+skips or xfails were added. Logs are retained in
+`.pytest_cache/rebase-linux-3.10.log`, `rebase-linux-3.11.log`,
+`rebase-linux-3.12.log`, `rebase-windows-full.tmp.log` and
+`rebase-windows-repeat.tmp.log`. Hosted CI must be checked on the new published
+head; the old 914-test results above are historical.
+
+The complete Windows repeat reported **952 passed, 2 failed** (86.30% coverage),
+both unchanged live OAuth discovery socket tests:
+`test_discovery_server_idempotent_start_and_dcr_http` and
+`test_discovery_dcr_404_when_disabled_or_missing_client_id`, with WinError 10053.
+These Windows full suites are not claimed green. No OAuth source or test changes
+were introduced by this rebase, and none of these tests were excluded.
+
+A fresh archive of current develop `63ecd92`, tested with the same Windows
+Python/MCP environment, reproduced **both** failures: **72 passed, 2 failed**.
+The command was `python -m pytest tests/test_oauth.py tests/test_secret_value.py
+-o addopts= -q --timeout=60 --tb=short`. The log is
+`.pytest_cache/rebase-develop-windows.log`. Import-path inspection confirmed the
+archive's package was loaded rather than the editable feature checkout.
