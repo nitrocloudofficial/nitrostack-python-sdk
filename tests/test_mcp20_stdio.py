@@ -175,6 +175,7 @@ def test_dual_http_and_stdio_share_the_same_tools(monkeypatch):
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "Mcp-Method": "tools/list",
+                "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
             },
             json={
                 "jsonrpc": "2.0",

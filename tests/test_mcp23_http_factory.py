@@ -107,7 +107,13 @@ def test_discover_and_capabilities_agree_on_resources_subscribe(era):
     assert extra_server.protocol_era == era
     assert extra_server.get_capabilities().resources.subscribe == (era == "legacy")
     if era == "auto":
-        assert app.handle_sessionless_initialize()["capabilities"]["resources"]["subscribe"] is False
+        with http_client("auto", app=app) as (_, _, client):
+            response = post(client, "initialize", {
+                "protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {},
+                "clientInfo": {"name": "issue23", "version": "1"},
+            }, modern=False, version=LEGACY_PROTOCOL_VERSION)
+            assert response.status_code == 200
+            assert decode(response)["result"]["capabilities"]["resources"]["subscribe"] is False
 
 
 # 3. No private `mcp.server.runner` symbol left in stdio.py.
