@@ -108,14 +108,18 @@ class BaseSearchTransform(CatalogTransform):
 
     # ---- handlers --------------------------------------------------------
 
-    def _catalog(self) -> List[Any]:
-        if self._registry is None:
+    def _catalog(self, ctx: Optional[TransformContext] = None) -> List[Any]:
+        if ctx is not None and ctx.visible_tools is not None:
+            tools = list(ctx.visible_tools)
+        elif self._registry is not None:
+            tools = self._registry.list_tools()
+        else:
             return []
-        tools = [t for t in self._registry.list_tools() if t.name not in self._synthetic]
+        tools = [t for t in tools if t.name not in self._synthetic]
         return sorted(tools, key=lambda t: t.name)
 
     async def _handle_search(self, args: SearchToolsInput, ctx: TransformContext) -> Dict[str, Any]:
-        catalog = self._catalog()
+        catalog = self._catalog(ctx)
         notes: List[str] = []
 
         if is_browse_query(args.query):

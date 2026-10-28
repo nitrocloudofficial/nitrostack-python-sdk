@@ -202,6 +202,10 @@ class ExecutionContext:
     rpc_meta: Optional["RequestMeta"] = None
     mcp_headers: Dict[str, str] = field(default_factory=dict)
     mcp_param_headers: Dict[str, str] = field(default_factory=dict)
+    _tool_visibility_controller: Any = field(default=None, repr=False, compare=False)
+    _visibility_session_key: Any = field(default=None, repr=False, compare=False)
+    _visibility_change_callback: Any = field(default=None, repr=False, compare=False)
+    _visibility_supported: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.correlation_id:
@@ -213,3 +217,19 @@ class ExecutionContext:
         if self.auth is None:
             return None
         return self.auth.subject
+
+    def enable_tools(self, names: List[str]) -> None:
+        """Enable registered tools for this verified transport session."""
+        self._change_tool_visibility(names, visible=True)
+
+    def disable_tools(self, names: List[str]) -> None:
+        """Disable registered tools for this verified transport session."""
+        self._change_tool_visibility(names, visible=False)
+
+    def _change_tool_visibility(self, names: List[str], *, visible: bool) -> None:
+        if not self._visibility_supported or self._tool_visibility_controller is None:
+            self.logger.warn("Tool visibility changes require a sessionful transport session")
+            return
+        changed = self._tool_visibility_controller.change(self, names, visible=visible)
+        if changed and self._visibility_change_callback is not None:
+            self._visibility_change_callback(self)

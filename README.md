@@ -315,6 +315,15 @@ server = ServerConfig(name="my-server", transport_type="http", max_sessions=100,
 
 `ServerConfig.protocol_era` is used only when `MCP_STATELESS` and `NITRO_MCP_PROTOCOL_VERSION` are both unset. Unknown tokens become `auto`, same as an unknown env value.
 
+### Per-session tool visibility
+
+Tools can declare `visibility="hidden"` and `default_visible=False`, then handlers can
+call `context.enable_tools(["admin_tool"])` or `context.disable_tools([...])`. Overrides
+are scoped by transport session ID and verified token subject, with a bounded TTL/LRU
+store. Dynamic visibility requires a sessionful transport. The default `auto` era is
+sessionless, so changes warn and do nothing there; the SDK does not fall back to
+subject-only state because it would share overrides across that subject's sessions.
+
 ---
 
 ## Developing & Testing
