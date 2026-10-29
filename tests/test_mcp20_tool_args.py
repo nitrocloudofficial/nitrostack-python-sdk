@@ -80,7 +80,7 @@ def test_strip_empty_and_none():
     assert strip_tool_arguments({}) == {}
 
 
-def _echo_app(seen: dict, *, task_support: str = "optional"):
+def _echo_app(seen: dict, *, task_support: str = "optional", protocol_era: str = "auto"):
     @injectable()
     class EchoController:
         @tool(
@@ -101,7 +101,7 @@ def _echo_app(seen: dict, *, task_support: str = "optional"):
     class EchoModule:
         pass
 
-    @mcp_app(module=EchoModule, server=ServerConfig(name="strip-tool-args"))
+    @mcp_app(module=EchoModule, server=ServerConfig(name="strip-tool-args", protocol_era=protocol_era))
     class EchoApp:
         pass
 
@@ -131,7 +131,7 @@ def test_handler_input_never_contains_meta():
 
 def test_task_path_strips_arguments_before_handler():
     seen: dict = {}
-    app = _echo_app(seen, task_support="optional")
+    app = _echo_app(seen, task_support="optional", protocol_era="legacy")
     created = asyncio.run(
         app._call_tool(
             "echo",

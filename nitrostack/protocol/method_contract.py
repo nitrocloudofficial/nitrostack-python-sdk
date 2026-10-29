@@ -1,8 +1,8 @@
 """SEP-2243 method contracts for the 2026 method surface.
 
-Official v2 owns this table once mounted. Until then the sidecar validator
-reads one row per method: required ``Mcp-Method``, optional ``Mcp-Name`` field,
-and whether ``auto`` requires the method header.
+The official MCP SDK owns request dispatch. This table records the method/header
+contract used by the 2026 protocol checks: required ``Mcp-Method``, optional
+``Mcp-Name`` field, and whether ``auto`` requires the method header.
 """
 
 from __future__ import annotations
@@ -63,10 +63,6 @@ MODERN_METHOD_CONTRACTS: tuple[MethodContract, ...] = (
     _contract("prompts/get", name_field=NAME_FIELD_NAME),
     _contract("notifications/prompts/list_changed"),
     _contract("completion/complete"),
-    _contract("tasks/get"),
-    _contract("tasks/cancel"),
-    _contract("tasks/result"),
-    _contract("tasks/list"),
     _contract("logging/setLevel"),
 )
 
@@ -82,8 +78,6 @@ NAME_SCOPED_METHODS: frozenset[str] = frozenset(
 # (``initialize``, ``notifications/initialized``) are not in this table:
 # ``modern`` rejects them as method-not-found; ``auto`` still answers them.
 DEPRECATED_MODERN_METHODS: dict[str, str] = {
-    "tasks/result": "Method 'tasks/result' is not supported in MCP 2026-07-28; use 'tasks/get'.",
-    "tasks/list": "Method 'tasks/list' is not supported in modern stateless MCP 2026-07-28.",
     "resources/subscribe": (
         "Method 'resources/subscribe' is not supported in stateless MCP 2026-07-28; "
         "use SSE subscriptions/listen."

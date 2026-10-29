@@ -845,7 +845,15 @@ class McpApplication:
     # Protocol handler wiring (owned low-level `mcp.server.lowlevel.Server`)
     # ------------------------------------------------------------------
 
+    def _tasks_visible_on_wire(self) -> bool:
+        # Tasks remain available to in-process callers and the legacy wire only.
+        # MCP 2026 has no complete tasks surface (notably tasks/update), so
+        # nothing on the 2026 wire may advertise this partial implementation.
+        return self.protocol_era not in ("auto", "modern")
+
     def _advertise_tasks_extension(self) -> bool:
+        if not self._tasks_visible_on_wire():
+            return False
         return any(
             entry.config.task_support in ("optional", "required")
             for entry in self._tools.values()
@@ -1118,10 +1126,11 @@ class McpApplication:
         cfg = entry.config
         input_schema = self._tool_input_schema(entry.input_model)
 
+        tasks_visible = self._tasks_visible_on_wire()
         meta: Dict[str, Any] = {
             "is_initial": cfg.is_initial,
             "visibility": cfg.visibility,
-            "task_support": cfg.task_support,
+            **({"task_support": cfg.task_support} if tasks_visible else {}),
             **(cfg.metadata or {}),
         }
 
@@ -1163,7 +1172,7 @@ class McpApplication:
         )
 
         execution = None
-        if cfg.task_support and cfg.task_support != "forbidden":
+        if tasks_visible and cfg.task_support and cfg.task_support != "forbidden":
             execution = types.ToolExecution(taskSupport=cfg.task_support)
 
         tool_kwargs: Dict[str, Any] = {
@@ -1451,6 +1460,11 @@ class McpApplication:
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
         if cfg.task_support == "forbidden" and task_metadata is not None:
             raise MCPError(
                 types.METHOD_NOT_FOUND,
@@ -1722,6 +1736,10 @@ class McpApplication:
         return GetTaskResult(**payload)
 
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
+        if self.protocol_era in ("auto", "modern"):
+            server.has_task_support = False
+            return
+
         async def handle_list_tasks(req):
             if rejects_deprecated_method("tasks/list", self.protocol_era):
                 message = deprecated_method_message("tasks/list")

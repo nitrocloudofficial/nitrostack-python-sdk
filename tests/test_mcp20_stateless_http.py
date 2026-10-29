@@ -1722,7 +1722,8 @@ class TestSep2243AllModernMethods:
         assert "resources/read" in methods
         assert "prompts/get" in methods
         assert "completion/complete" in methods
-        assert "tasks/get" in methods
+        # Tasks are hidden on the 2026 wire until tasks/update exists.
+        assert not any(m.startswith("tasks/") for m in methods)
         assert "tools/call" in methods
 
 
