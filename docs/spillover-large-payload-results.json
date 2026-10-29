@@ -1,272 +1,72 @@
 {
-  "description": "In-process registered MCP tool/resource handlers, not a network client",
+  "description": "Reproducible large outputs generated inside tools and checked through official HTTP transport",
+  "test_module": "tests/test_spillover_transport.py",
+  "test_name": "test_large_payloads_over_http",
+  "command": "python -m pytest tests/test_spillover_transport.py -q",
+  "backends": [
+    "memory",
+    "file"
+  ],
   "threshold_bytes": 65536,
   "max_payload_bytes": 10485760,
   "checks_passed": 24,
-  "results": [
+  "verified_on": "2026-10-29",
+  "mcp_version": "2.3.0",
+  "assertions": [
+    "UTF-8 original size",
+    "preview at most 2048 bytes",
+    "exact full resource content",
+    "another HTTP session denied"
+  ],
+  "cases": [
     {
-      "backend": "memory",
-      "case": "threshold_exact_64KiB",
-      "original_bytes": 65536,
-      "outcome": "unchanged",
-      "elapsed_ms": 2.93,
-      "passed": true
+      "case": "threshold",
+      "expectation": "64 KiB returned unchanged"
     },
     {
-      "backend": "memory",
-      "case": "threshold_plus_one",
-      "original_bytes": 65537,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 577,
-      "response_bytes": 1773,
-      "sha256": "008ffc88d3c96a9f307524eb361e47c5222a887fc45fa0c1fb8d429c5c23b430",
-      "cross_caller_denied": true,
-      "elapsed_ms": 4.54,
-      "passed": true
+      "case": "threshold-plus-one",
+      "expectation": "64 KiB plus one byte spills"
     },
     {
-      "backend": "memory",
-      "case": "ascii_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 579,
-      "response_bytes": 1781,
-      "sha256": "9bc1b2a288b26af7257a36277ae3816a7d4f16e89c1e7e77d0a5c48bad62b360",
-      "cross_caller_denied": true,
-      "elapsed_ms": 5.64,
-      "passed": true
+      "case": "1MiB",
+      "expectation": "1 MiB spills and is retrieved byte-for-byte"
     },
     {
-      "backend": "memory",
-      "case": "ascii_5MiB",
-      "original_bytes": 5242880,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 579,
-      "response_bytes": 1781,
-      "sha256": "a37b6bc45a8dbe582dd575143facb838ef5a1ae26237a26d382c501eddb75c6f",
-      "cross_caller_denied": true,
-      "elapsed_ms": 17.4,
-      "passed": true
+      "case": "5MiB",
+      "expectation": "5 MiB spills and is retrieved byte-for-byte"
     },
     {
-      "backend": "memory",
-      "case": "ascii_maximum_10MiB",
-      "original_bytes": 10485760,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 580,
-      "response_bytes": 1785,
-      "sha256": "27b0e54c675579a42826940047ec915d3b282115f6d5636e94e61c060599f5d3",
-      "cross_caller_denied": true,
-      "elapsed_ms": 29.67,
-      "passed": true
+      "case": "10MiB",
+      "expectation": "10 MiB spills and is retrieved byte-for-byte"
     },
     {
-      "backend": "memory",
-      "case": "emoji_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 1088,
-      "response_bytes": 2801,
-      "sha256": "9657fb102a5331c7bf86fb73146da1e764ec73c38a151bedc1da3f647c066cfc",
-      "cross_caller_denied": true,
-      "elapsed_ms": 7.48,
-      "passed": true
+      "case": "unicode",
+      "expectation": "Multibyte UTF-8 size and retrieval match"
     },
     {
-      "backend": "memory",
-      "case": "list_100000_rows",
-      "original_bytes": 4788891,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 302,
-      "response_bytes": 1236,
-      "sha256": "1dbeae5b14df824da05459b9d5326dbccaa8ec88432a5308b07d101f68d1595a",
-      "cross_caller_denied": true,
-      "elapsed_ms": 73.38,
-      "passed": true
+      "case": "escaped",
+      "expectation": "Escaped text has a bounded preview and exact retrieval"
     },
     {
-      "backend": "memory",
-      "case": "dict_50000_entries",
-      "original_bytes": 2738891,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 326,
-      "response_bytes": 1284,
-      "sha256": "dae161f499a75e532e499eabf2b180db2321d8338cb6406b0bd545528bbed2d0",
-      "cross_caller_denied": true,
-      "elapsed_ms": 34.82,
-      "passed": true
+      "case": "rows",
+      "expectation": "100,000-row list spills and is retrieved exactly"
     },
     {
-      "backend": "memory",
-      "case": "nested_6MiB",
-      "original_bytes": 6291479,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 576,
-      "response_bytes": 1785,
-      "sha256": "30ba6722cb9edbe507a74b0a9a897fa304e28dd94bb118295a5dd84536a1aad1",
-      "cross_caller_denied": true,
-      "elapsed_ms": 164.35,
-      "passed": true
+      "case": "dictionary",
+      "expectation": "50,000-entry dictionary spills and is retrieved exactly"
     },
     {
-      "backend": "memory",
-      "case": "escaped_string_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 1091,
-      "response_bytes": 3573,
-      "sha256": "2a884297403f5cbdbc3e25775cc27f85b408c149e2ad8fc5bf3a190a3d82fac3",
-      "cross_caller_denied": true,
-      "elapsed_ms": 6.62,
-      "passed": true
+      "case": "nested",
+      "expectation": "Approximately 6 MiB nested data is retrieved exactly"
     },
     {
-      "backend": "memory",
-      "case": "over_maximum_by_one",
-      "original_bytes": 10485761,
-      "outcome": "rejected_at_storage_limit",
-      "elapsed_ms": 18.84,
-      "passed": true
+      "case": "too-large",
+      "expectation": "10 MiB plus one byte is rejected without a large fallback"
     },
     {
-      "backend": "memory",
-      "case": "oversized_20MiB",
-      "original_bytes": 20971520,
-      "outcome": "rejected_at_storage_limit",
-      "elapsed_ms": 16.94,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "threshold_exact_64KiB",
-      "original_bytes": 65536,
-      "outcome": "unchanged",
-      "elapsed_ms": 0.48,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "threshold_plus_one",
-      "original_bytes": 65537,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 577,
-      "response_bytes": 1773,
-      "sha256": "008ffc88d3c96a9f307524eb361e47c5222a887fc45fa0c1fb8d429c5c23b430",
-      "cross_caller_denied": true,
-      "elapsed_ms": 54.06,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "ascii_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 579,
-      "response_bytes": 1781,
-      "sha256": "9bc1b2a288b26af7257a36277ae3816a7d4f16e89c1e7e77d0a5c48bad62b360",
-      "cross_caller_denied": true,
-      "elapsed_ms": 96.76,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "ascii_5MiB",
-      "original_bytes": 5242880,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 579,
-      "response_bytes": 1781,
-      "sha256": "a37b6bc45a8dbe582dd575143facb838ef5a1ae26237a26d382c501eddb75c6f",
-      "cross_caller_denied": true,
-      "elapsed_ms": 328.19,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "ascii_maximum_10MiB",
-      "original_bytes": 10485760,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 580,
-      "response_bytes": 1785,
-      "sha256": "27b0e54c675579a42826940047ec915d3b282115f6d5636e94e61c060599f5d3",
-      "cross_caller_denied": true,
-      "elapsed_ms": 820.87,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "emoji_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 1088,
-      "response_bytes": 2801,
-      "sha256": "9657fb102a5331c7bf86fb73146da1e764ec73c38a151bedc1da3f647c066cfc",
-      "cross_caller_denied": true,
-      "elapsed_ms": 556.92,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "list_100000_rows",
-      "original_bytes": 4788891,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 302,
-      "response_bytes": 1236,
-      "sha256": "1dbeae5b14df824da05459b9d5326dbccaa8ec88432a5308b07d101f68d1595a",
-      "cross_caller_denied": true,
-      "elapsed_ms": 846.87,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "dict_50000_entries",
-      "original_bytes": 2738891,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 326,
-      "response_bytes": 1284,
-      "sha256": "dae161f499a75e532e499eabf2b180db2321d8338cb6406b0bd545528bbed2d0",
-      "cross_caller_denied": true,
-      "elapsed_ms": 852.21,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "nested_6MiB",
-      "original_bytes": 6291479,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 576,
-      "response_bytes": 1785,
-      "sha256": "30ba6722cb9edbe507a74b0a9a897fa304e28dd94bb118295a5dd84536a1aad1",
-      "cross_caller_denied": true,
-      "elapsed_ms": 1299.25,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "escaped_string_1MiB",
-      "original_bytes": 1048576,
-      "outcome": "spilled_and_verified",
-      "preview_bytes": 1091,
-      "response_bytes": 3573,
-      "sha256": "2a884297403f5cbdbc3e25775cc27f85b408c149e2ad8fc5bf3a190a3d82fac3",
-      "cross_caller_denied": true,
-      "elapsed_ms": 1001.99,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "over_maximum_by_one",
-      "original_bytes": 10485761,
-      "outcome": "rejected_at_storage_limit",
-      "elapsed_ms": 36.82,
-      "passed": true
-    },
-    {
-      "backend": "file",
-      "case": "oversized_20MiB",
-      "original_bytes": 20971520,
-      "outcome": "rejected_at_storage_limit",
-      "elapsed_ms": 13.4,
-      "passed": true
+      "case": "20MiB",
+      "expectation": "20 MiB is rejected without a large fallback"
     }
-  ]
+  ],
+  "note": "Threshold and rejection cases assert unchanged output or a bounded error, respectively. Timing measurements from the previous in-process script have been replaced by committed transport tests."
 }

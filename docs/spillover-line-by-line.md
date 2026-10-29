@@ -40,13 +40,13 @@ These lines connect this operation to the storage and resource flow described ab
 - **Line 10:** `generate_preview,` — Import or re-export `generate_preview` from `nitrostack.core.interceptors` as part of the import block above.
 - **Line 11:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
 - **Line 12:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 152:** `"DataSpilloverInterceptor",` — List `"DataSpilloverInterceptor"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 153:** `"FileSpilloverStore",` — List `"FileSpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 154:** `"MemorySpilloverStore",` — List `"MemorySpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 155:** `"PayloadTooLargeError",` — List `"PayloadTooLargeError"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 156:** `"SpilloverEntry",` — List `"SpilloverEntry"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 157:** `"SpilloverStore",` — List `"SpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
-- **Line 158:** `"generate_preview",` — List `"generate_preview"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 157:** `"DataSpilloverInterceptor",` — List `"DataSpilloverInterceptor"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 158:** `"FileSpilloverStore",` — List `"FileSpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 159:** `"MemorySpilloverStore",` — List `"MemorySpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 160:** `"PayloadTooLargeError",` — List `"PayloadTooLargeError"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 161:** `"SpilloverEntry",` — List `"SpilloverEntry"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 162:** `"SpilloverStore",` — List `"SpilloverStore"` as a supported public export so wildcard imports and API discovery include it.
+- **Line 163:** `"generate_preview",` — List `"generate_preview"` as a supported public export so wildcard imports and API discovery include it.
 
 ## `nitrostack/core/app.py`
 
@@ -56,107 +56,107 @@ Explains 61 added or replacement lines. Open the source beside this document to 
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 43:** `from nitrostack.core.interceptors.data_spillover import (` — Import the named APIs from `nitrostack.core.interceptors.data_spillover` so this file can use the shared SDK, library, or test implementation.
-- **Line 44:** `DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult,` — Import or re-export `DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult` from `nitrostack.core.interceptors.data_spillover` as part of the import block above.
-- **Line 45:** `bind_spillover_context, caller_owner,` — Import or re-export `bind_spillover_context, caller_owner` from `nitrostack.core.interceptors.data_spillover` as part of the import block above.
-- **Line 46:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 51:** `from nitrostack.core.interceptors.data_spillover import (` — Import the named APIs from `nitrostack.core.interceptors.data_spillover` so this file can use the shared SDK, library, or test implementation.
+- **Line 52:** `DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult,` — Import or re-export `DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult` from `nitrostack.core.interceptors.data_spillover` as part of the import block above.
+- **Line 53:** `bind_spillover_context, caller_owner,` — Import or re-export `bind_spillover_context, caller_owner` from `nitrostack.core.interceptors.data_spillover` as part of the import block above.
+- **Line 54:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
 ### `McpApplication.__init__`
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 605:** `self._spillover = SpilloverRegistry()` — Set `self._spillover` to the application-owned registry shared by its tool and resource handlers: call `SpilloverRegistry` with the arguments shown to perform the current operation.
+- **Line 618:** `self._spillover = SpilloverRegistry()` — Set `self._spillover` to the application-owned registry shared by its tool and resource handlers: call `SpilloverRegistry` with the arguments shown to perform the current operation.
 ### `McpApplication._bootstrap`
 
 This addition discovers opted-in tool interceptors after providers are ready and registers their stores before MCP handlers are exposed.
 
-- **Line 677:** `for entry in self._tools.values():` — Iterate `entry` through `self._tools.values()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
-- **Line 678:** `for candidate in getattr(entry.method, "_mcp_interceptors", []):` — Iterate `candidate` through `getattr(entry.method, '_mcp_interceptors', [])`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
-- **Line 679:** `interceptor = container.resolve(candidate) if isinstance(candidate, type) else candidate` — Set `interceptor`: select `container.resolve(candidate)` when `isinstance(candidate, type)` is true; otherwise select `candidate`.
-- **Line 680:** `if isinstance(interceptor, DataSpilloverInterceptor):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 681:** `self._spillover.register(interceptor)` — Bind this interceptor's uri prefix to its configured store in the application-owned resource registry.
+- **Line 701:** `for entry in self._tools.values():` — Iterate `entry` through `self._tools.values()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 702:** `for candidate in getattr(entry.method, "_mcp_interceptors", []):` — Iterate `candidate` through `getattr(entry.method, '_mcp_interceptors', [])`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 703:** `interceptor = container.resolve(candidate) if isinstance(candidate, type) else candidate` — Set `interceptor`: select `container.resolve(candidate)` when `isinstance(candidate, type)` is true; otherwise select `candidate`.
+- **Line 704:** `if isinstance(interceptor, DataSpilloverInterceptor):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
+- **Line 705:** `self._spillover.register(interceptor)` — Bind this interceptor's uri prefix to its configured store in the application-owned resource registry.
 ### `McpApplication._build_tool_definition`
 
 This addition allows a decorated tool to advertise its original output shape or the spillover envelope. Root-level definitions are preserved so existing schema references keep resolving.
 
-- **Line 1127:** `if self._has_spillover(entry.method):` — Check check whether this tool has the spillover interceptor before advertising an additional valid result shape. The indented body handles this case; other results continue past it.
-- **Line 1128:** `output_schema = {` — Set `output_schema`: evaluate `{'type': 'object', 'anyOf': [output_schema, SPILLOVER_SCHEMA], **({'$defs': output_schema['$defs']} if '$defs' in output_schema else {})}`.
-- **Line 1129:** `"type": "object", "anyOf": [output_schema, SPILLOVER_SCHEMA],` — Continue building `output_schema` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 1130:** `**({"$defs": output_schema["$defs"]} if "$defs" in output_schema else {}),` — Continue building `output_schema` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 1131:** `}` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 1193:** `if self._has_spillover(entry.method):` — Check check whether this tool has the spillover interceptor before advertising an additional valid result shape. The indented body handles this case; other results continue past it.
+- **Line 1194:** `output_schema = {` — Set `output_schema`: evaluate `{'type': 'object', 'anyOf': [output_schema, SPILLOVER_SCHEMA], **({'$defs': output_schema['$defs']} if '$defs' in output_schema else {})}`.
+- **Line 1195:** `"type": "object", "anyOf": [output_schema, SPILLOVER_SCHEMA],` — Continue building `output_schema` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 1196:** `**({"$defs": output_schema["$defs"]} if "$defs" in output_schema else {}),` — Continue building `output_schema` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 1197:** `}` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
 ### `McpApplication._has_spillover`
 
 Inspect the interceptors attached to a tool, resolving class-based registrations through the existing dependency-injection container. This determines whether the advertised output schema must also allow the spillover envelope.
 
-- **Line 1176:** `def _has_spillover(self, method: Callable) -> bool:` — Define this callable. Inspect the interceptors attached to a tool, resolving class-based registrations through the existing dependency-injection container. This determines whether the advertised output schema must also allow the spillover envelope.
-- **Line 1177:** `container = DIContainer.get_instance()` — Set `container`: call `DIContainer.get_instance` with the arguments shown to perform the current operation.
-- **Line 1178:** `return any(` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
-- **Line 1179:** `isinstance(container.resolve(item) if isinstance(item, type) else item,` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
-- **Line 1180:** `DataSpilloverInterceptor)` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
-- **Line 1181:** `for item in getattr(method, "_mcp_interceptors", [])` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
-- **Line 1182:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 1183:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 1242:** `def _has_spillover(self, method: Callable) -> bool:` — Define this callable. Inspect the interceptors attached to a tool, resolving class-based registrations through the existing dependency-injection container. This determines whether the advertised output schema must also allow the spillover envelope.
+- **Line 1243:** `container = DIContainer.get_instance()` — Set `container`: call `DIContainer.get_instance` with the arguments shown to perform the current operation.
+- **Line 1244:** `return any(` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 1245:** `isinstance(container.resolve(item) if isinstance(item, type) else item,` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 1246:** `DataSpilloverInterceptor)` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 1247:** `for item in getattr(method, "_mcp_interceptors", [])` — Return from this operation: call `any` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 1248:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 1249:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `McpApplication._bind_spillover`
 
 Prepare caller information only when this application has spillover routes. Reuse the SDK verified JWT context, or introspect an opaque token through an already configured OAuthService, then bind anonymous-session and failed-authentication state.
 
-- **Line 1184:** `async def _bind_spillover(self, context: ExecutionContext, rc: Any) -> None:` — Define an asynchronous operation that callers await. Prepare caller information only when this application has spillover routes. Reuse the SDK verified JWT context, or introspect an opaque token through an already configured OAuthService, then bind anonymous-session and failed-authentication state.
-- **Line 1185:** `if not self._spillover.routes:` — Check evaluate `not self._spillover.routes`. The indented body handles this case; other results continue past it.
-- **Line 1186:** `return` — Return from this operation: evaluate `None`. No following statements in this call execute.
-- **Line 1187:** `# OAuth guards may verify opaque tokens as well as the shared JWT path.` — Comment explaining the intent of the following operation; Python does not execute it.
-- **Line 1188:** `from nitrostack.auth.request import authorization_token_from_request, auth_context_from_payload` — Import the named APIs from `nitrostack.auth.request` so this file can use the shared SDK, library, or test implementation.
-- **Line 1189:** `from nitrostack.auth.oauth import OAuthService` — Import the named APIs from `nitrostack.auth.oauth` so this file can use the shared SDK, library, or test implementation.
-- **Line 1190:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 1191:** `token = authorization_token_from_request(rc)` — Set `token`: extract a bearer token using the SDK's established header/envelope precedence without trusting unsigned identity fields.
-- **Line 1192:** `container = DIContainer.get_instance()` — Set `container`: call `DIContainer.get_instance` with the arguments shown to perform the current operation.
-- **Line 1193:** `if context.auth is None and token and container.has_value(OAuthService):` — Check evaluate `context.auth is None and token and container.has_value(OAuthService)`. The indented body handles this case; other results continue past it.
-- **Line 1194:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
-- **Line 1195:** `payload = await container.resolve(OAuthService).introspect_token(token)` — Set `payload` to the complete serialized result as immutable bytes: await ask the configured OAuth service to verify the opaque token and return claims.
-- **Line 1196:** `if payload.get("active"):` — Check look up the requested entry under the supplied ownership constraint. The indented body handles this case; other results continue past it.
-- **Line 1197:** `context.auth = auth_context_from_payload(payload)` — Set `context.auth`: convert verified JWT or introspection claims into the common AuthContext used by tool and resource handlers.
-- **Line 1198:** `except Exception:` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
-- **Line 1199:** `pass  # Invalid credentials remain denied by caller_owner.` — Perform no operation in this intentionally empty class or handled-error branch.
-- **Line 1200:** `bind_spillover_context(context, rc, self._spillover)` — Bind trusted session information and the invalid-token marker onto this execution context.
-- **Line 1201:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 1250:** `async def _bind_spillover(self, context: ExecutionContext, rc: Any) -> None:` — Define an asynchronous operation that callers await. Prepare caller information only when this application has spillover routes. Reuse the SDK verified JWT context, or introspect an opaque token through an already configured OAuthService, then bind anonymous-session and failed-authentication state.
+- **Line 1251:** `if not self._spillover.routes:` — Check evaluate `not self._spillover.routes`. The indented body handles this case; other results continue past it.
+- **Line 1252:** `return` — Return from this operation: evaluate `None`. No following statements in this call execute.
+- **Line 1253:** `# OAuth guards may verify opaque tokens as well as the shared JWT path.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 1254:** `from nitrostack.auth.request import authorization_token_from_request, auth_context_from_payload` — Import the named APIs from `nitrostack.auth.request` so this file can use the shared SDK, library, or test implementation.
+- **Line 1255:** `from nitrostack.auth.oauth import OAuthService` — Import the named APIs from `nitrostack.auth.oauth` so this file can use the shared SDK, library, or test implementation.
+- **Line 1256:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 1257:** `token = authorization_token_from_request(rc)` — Set `token`: extract a bearer token using the SDK's established header/envelope precedence without trusting unsigned identity fields.
+- **Line 1258:** `container = DIContainer.get_instance()` — Set `container`: call `DIContainer.get_instance` with the arguments shown to perform the current operation.
+- **Line 1259:** `if context.auth is None and token and container.has_value(OAuthService):` — Check evaluate `context.auth is None and token and container.has_value(OAuthService)`. The indented body handles this case; other results continue past it.
+- **Line 1260:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 1261:** `payload = await container.resolve(OAuthService).introspect_token(token)` — Set `payload` to the complete serialized result as immutable bytes: await ask the configured OAuth service to verify the opaque token and return claims.
+- **Line 1262:** `if payload.get("active"):` — Check look up the requested entry under the supplied ownership constraint. The indented body handles this case; other results continue past it.
+- **Line 1263:** `context.auth = auth_context_from_payload(payload)` — Set `context.auth`: convert verified JWT or introspection claims into the common AuthContext used by tool and resource handlers.
+- **Line 1264:** `except Exception:` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
+- **Line 1265:** `pass  # Invalid credentials remain denied by caller_owner.` — Perform no operation in this intentionally empty class or handled-error branch.
+- **Line 1266:** `bind_spillover_context(context, rc, self._spillover, self.protocol_era)` — Bind trusted session information and the invalid-token marker onto this execution context.
+- **Line 1267:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `McpApplication._pipeline_stages`
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 1202:** `def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 1268:** `def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
 ### `McpApplication._to_call_tool_result`
 
 The new early return converts a spillover wrapper directly to MCP, before ordinary result and widget transformation logic can reinterpret it.
 
-- **Line 1217:** `if isinstance(result, SpilloverResult):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 1218:** `return result.to_mcp()` — Return from this operation: convert only the internal spillover wrapper into the small MCP envelope and resource link, bypassing ordinary widget data handling. No following statements in this call execute.
-### `McpApplication._call_tool.background_execution`
+- **Line 1289:** `if isinstance(result, SpilloverResult):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
+- **Line 1290:** `return result.to_mcp()` — Return from this operation: convert only the internal spillover wrapper into the small MCP envelope and resource link, bypassing ordinary widget data handling. No following statements in this call execute.
+### `McpApplication._call_real_tool.background_execution`
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 1417:** `await self._bind_spillover(task_ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
-### `McpApplication._call_tool`
+- **Line 1537:** `await self._bind_spillover(task_ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
+### `McpApplication._call_real_tool`
 
-The added bindings capture trusted caller/session information for ordinary calls and background tasks before their interceptors execute.
+These lines connect this operation to the storage and resource flow described above.
 
-- **Line 1472:** `await self._bind_spillover(ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
+- **Line 1592:** `await self._bind_spillover(ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
 ### `McpApplication._read_resource`
 
 The added route dispatch resolves spillover URIs first, rebuilds verified caller information, checks ownership through the store, and returns the exact saved bytes as text with their MIME type. Missing, invalid, expired, and unauthorized entries become ResourceNotFoundError.
 
-- **Line 1505:** `for prefix, store in self._spillover.routes.items():` — Iterate `(prefix, store)` through `self._spillover.routes.items()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
-- **Line 1506:** `if uri.startswith(prefix):` — Check call `uri.startswith` with the arguments shown to perform the current operation. The indented body handles this case; other results continue past it.
-- **Line 1507:** `ctx = ExecutionContext(request_id=str(uuid.uuid4()))` — Set `ctx`: construct a fresh per-call context; its request ID identifies the operation while identity is populated separately from trusted request sources.
-- **Line 1508:** `rc = request_ctx.get(None)` — Set `rc`: read the current request from the ContextVar, using None if no request is bound; this does not read a stored payload.
-- **Line 1509:** `_apply_request_envelope(ctx, rc)` — Populate the execution context with verified jwt identity and existing mcp request metadata through the sdk's shared request binding.
-- **Line 1510:** `await self._bind_spillover(ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
-- **Line 1511:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
-- **Line 1512:** `entry = await store.get(uri[len(prefix):], owner=caller_owner(ctx))` — Set `entry`: await look up the requested entry under the supplied ownership constraint.
-- **Line 1513:** `except (PermissionError, ValueError):` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
-- **Line 1514:** `raise ResourceNotFoundError(uri) from None` — Stop this operation and use the existing SDK not-found error without revealing whether a different owner has the requested data. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 1515:** `if entry is None:` — Check evaluate `entry is None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
-- **Line 1516:** `raise ResourceNotFoundError(uri)` — Stop this operation and use the existing SDK not-found error without revealing whether a different owner has the requested data. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 1517:** `return [ReadResourceContents(` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
-- **Line 1518:** `content=entry.payload.decode("utf-8"), mime_type=entry.mime_type,` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
-- **Line 1519:** `)]` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
+- **Line 1625:** `for prefix, store in self._spillover.routes.items():` — Iterate `(prefix, store)` through `self._spillover.routes.items()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 1626:** `if uri.startswith(prefix):` — Check call `uri.startswith` with the arguments shown to perform the current operation. The indented body handles this case; other results continue past it.
+- **Line 1627:** `ctx = ExecutionContext(request_id=str(uuid.uuid4()))` — Set `ctx`: construct a fresh per-call context; its request ID identifies the operation while identity is populated separately from trusted request sources.
+- **Line 1628:** `rc = request_ctx.get(None)` — Set `rc`: read the current request from the ContextVar, using None if no request is bound; this does not read a stored payload.
+- **Line 1629:** `_apply_request_envelope(ctx, rc)` — Populate the execution context with verified jwt identity and existing mcp request metadata through the sdk's shared request binding.
+- **Line 1630:** `await self._bind_spillover(ctx, rc)` — Await resolve configured oauth identity when necessary and bind the trusted session/invalid-auth marker for spillover access checks.
+- **Line 1631:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 1632:** `entry = await store.get(uri[len(prefix):], owner=caller_owner(ctx))` — Set `entry`: await look up the requested entry under the supplied ownership constraint.
+- **Line 1633:** `except (PermissionError, ValueError):` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
+- **Line 1634:** `raise ResourceNotFoundError(uri) from None` — Stop this operation and use the existing SDK not-found error without revealing whether a different owner has the requested data. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 1635:** `if entry is None:` — Check evaluate `entry is None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 1636:** `raise ResourceNotFoundError(uri)` — Stop this operation and use the existing SDK not-found error without revealing whether a different owner has the requested data. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 1637:** `return [ReadResourceContents(` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
+- **Line 1638:** `content=entry.payload.decode("utf-8"), mime_type=entry.mime_type,` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
+- **Line 1639:** `)]` — Return from this operation: evaluate `[ReadResourceContents(content=entry.payload.decode('utf-8'), mime_type=entry.mime_type)]`. No following statements in this call execute.
 
 ## `nitrostack/core/context.py`
 
@@ -166,8 +166,8 @@ Explains 2 added or replacement lines. Open the source beside this document to f
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 200:** `spillover_session_key: Optional[str] = field(default=None, repr=False)` — Set `spillover_session_key` to the private session identity carried into the interceptor: declare a dataclass field with the displayed default; repr=False keeps private session/auth markers out of generated representations.
-- **Line 201:** `spillover_invalid_auth: bool = field(default=False, repr=False)` — Set `spillover_invalid_auth` to the marker preventing invalid credentials from falling back to anonymous access: declare a dataclass field with the displayed default; repr=False keeps private session/auth markers out of generated representations.
+- **Line 205:** `spillover_session_key: Optional[str] = field(default=None, repr=False)` — Set `spillover_session_key` to the private session identity carried into the interceptor: declare a dataclass field with the displayed default; repr=False keeps private session/auth markers out of generated representations.
+- **Line 206:** `spillover_invalid_auth: bool = field(default=False, repr=False)` — Set `spillover_invalid_auth` to the marker preventing invalid credentials from falling back to anonymous access: declare a dataclass field with the displayed default; repr=False keeps private session/auth markers out of generated representations.
 
 ## `nitrostack/core/errors.py`
 
@@ -208,7 +208,7 @@ These lines connect this operation to the storage and resource flow described ab
 
 ## `nitrostack/core/interceptors/data_spillover.py`
 
-Explains 168 added or replacement lines. Open the source beside this document to follow the exact line numbers.
+Explains 186 added or replacement lines. Open the source beside this document to follow the exact line numbers.
 
 ### `Module setup and shared constants`
 
@@ -234,206 +234,224 @@ These lines connect this operation to the storage and resource flow described ab
 - **Line 18:** `from nitrostack.core.context import ExecutionContext` — Import the named APIs from `nitrostack.core.context` so this file can use the shared SDK, library, or test implementation.
 - **Line 19:** `from nitrostack.protocol.mrtr import InputRequiredResult` — Import the named APIs from `nitrostack.protocol.mrtr` so this file can use the shared SDK, library, or test implementation.
 - **Line 20:** `from nitrostack.core.interceptors.spillover import MemorySpilloverStore, SpilloverStore` — Import the named APIs from `nitrostack.core.interceptors.spillover` so this file can use the shared SDK, library, or test implementation.
-- **Line 21:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 22:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 21:** `from nitrostack.protocol.version import wire_mode_for_era` — Import the named APIs from `nitrostack.protocol.version` so this file can use the shared SDK, library, or test implementation.
+- **Line 22:** `from nitrostack.runtime.caller import session_id_from_request_context` — Import the named APIs from `nitrostack.runtime.caller` so this file can use the shared SDK, library, or test implementation.
+- **Line 23:** `from nitrostack.runtime.request_ctx import RequestContext, stdio_connection_id` — Import the named APIs from `nitrostack.runtime.request_ctx` so this file can use the shared SDK, library, or test implementation.
+- **Line 24:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 25:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `generate_preview`
 
 Build a small description of the original result: type, total count, and either five head elements or a string prefix. If nested values make that description too large, replace them with shortened text and repeatedly halve it until the serialized UTF-8 preview fits its budget.
 
-- **Line 23:** `def generate_preview(value: Any, *, max_bytes: int = 2048) -> dict:` — Define this callable. Build a small description of the original result: type, total count, and either five head elements or a string prefix. If nested values make that description too large, replace them with shortened text and repeatedly halve it until the serialized UTF-8 preview fits its budget.
-- **Line 24:** `"""Include head items and counts, shrinking even deeply nested values to fit."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
-- **Line 25:** `if max_bytes < 128:` — Check evaluate `max_bytes < 128`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
-- **Line 26:** `raise ValueError("Preview budget must be at least 128 bytes")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 27:** `if isinstance(value, list):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 28:** `preview = {"type": "list", "count": len(value), "head": value[:5], "truncated": len(value) > 5}` — Set `preview`: evaluate `{'type': 'list', 'count': len(value), 'head': value[:5], 'truncated': len(value) > 5}`.
-- **Line 29:** `elif isinstance(value, dict):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
-- **Line 30:** `preview = {"type": "dict", "count": len(value), "head": dict(islice(value.items(), 5)),` — Set `preview`: evaluate `{'type': 'dict', 'count': len(value), 'head': dict(islice(value.items(), 5)), 'truncated': len(value) > 5}`.
-- **Line 31:** `"truncated": len(value) > 5}` — Continue building `preview` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 32:** `else:` — Enter the alternative path only when the preceding condition did not match.
-- **Line 33:** `text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)` — Set `text`: select `value` when `isinstance(value, str)` is true; otherwise select `json.dumps(value, ensure_ascii=False, default=str)`.
-- **Line 34:** `preview = {"type": "string", "count": len(text), "text": text[:512], "truncated": len(text) > 512}` — Set `preview`: evaluate `{'type': 'string', 'count': len(text), 'text': text[:512], 'truncated': len(text) > 512}`.
-- **Line 35:** `encoded = json.dumps(preview, ensure_ascii=False, default=str).encode("utf-8")` — Set `encoded`: convert text into the selected byte encoding, so storage and limits operate on bytes.
-- **Line 36:** `if len(encoded) > max_bytes:` — Check evaluate `len(encoded) > max_bytes`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
-- **Line 37:** `text = json.dumps(preview.get("head", preview.get("text")), ensure_ascii=False, default=str)` — Set `text`: serialize the value to JSON text; ensure_ascii=False preserves Unicode and UTF-8 encoding determines the actual byte count.
-- **Line 38:** `preview.pop("head", None)` — Remove the named mapping entry and return it when needed.
-- **Line 39:** `preview["text"] = text[:512]` — Set `preview['text']`: evaluate `text[:512]`.
-- **Line 40:** `preview["truncated"] = True` — Set `preview['truncated']`: use the literal `True`.
-- **Line 41:** `while len(json.dumps(preview, ensure_ascii=False, default=str).encode("utf-8")) > max_bytes:` — Repeat the indented operation while `len(json.dumps(preview, ensure_ascii=False, default=str).encode('utf-8')) > max_bytes` remains true; each iteration reduces the preview or frees capacity so the loop can finish.
-- **Line 42:** `preview["text"] = preview["text"][:len(preview["text"]) // 2]` — Set `preview['text']`: evaluate `preview['text'][:len(preview['text']) // 2]`.
-- **Line 43:** `return preview` — Return from this operation: evaluate `preview`. No following statements in this call execute.
-- **Line 44:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 45:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 26:** `def generate_preview(value: Any, *, max_bytes: int = 2048) -> dict:` — Define this callable. Build a small description of the original result: type, total count, and either five head elements or a string prefix. If nested values make that description too large, replace them with shortened text and repeatedly halve it until the serialized UTF-8 preview fits its budget.
+- **Line 27:** `"""Include head items and counts, shrinking even deeply nested values to fit."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 28:** `if max_bytes < 128:` — Check evaluate `max_bytes < 128`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 29:** `raise ValueError("Preview budget must be at least 128 bytes")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 30:** `if isinstance(value, list):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
+- **Line 31:** `preview = {"type": "list", "count": len(value), "head": value[:5], "truncated": len(value) > 5}` — Set `preview`: evaluate `{'type': 'list', 'count': len(value), 'head': value[:5], 'truncated': len(value) > 5}`.
+- **Line 32:** `elif isinstance(value, dict):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 33:** `preview = {"type": "dict", "count": len(value), "head": dict(islice(value.items(), 5)),` — Set `preview`: evaluate `{'type': 'dict', 'count': len(value), 'head': dict(islice(value.items(), 5)), 'truncated': len(value) > 5}`.
+- **Line 34:** `"truncated": len(value) > 5}` — Continue building `preview` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 35:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 36:** `text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)` — Set `text`: select `value` when `isinstance(value, str)` is true; otherwise select `json.dumps(value, ensure_ascii=False, default=str)`.
+- **Line 37:** `preview = {"type": "string", "count": len(text), "text": text[:512], "truncated": len(text) > 512}` — Set `preview`: evaluate `{'type': 'string', 'count': len(text), 'text': text[:512], 'truncated': len(text) > 512}`.
+- **Line 38:** `encoded = json.dumps(preview, ensure_ascii=False, default=str).encode("utf-8")` — Set `encoded`: convert text into the selected byte encoding, so storage and limits operate on bytes.
+- **Line 39:** `if len(encoded) > max_bytes:` — Check evaluate `len(encoded) > max_bytes`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 40:** `text = json.dumps(preview.get("head", preview.get("text")), ensure_ascii=False, default=str)` — Set `text`: serialize the value to JSON text; ensure_ascii=False preserves Unicode and UTF-8 encoding determines the actual byte count.
+- **Line 41:** `preview.pop("head", None)` — Remove the named mapping entry and return it when needed.
+- **Line 42:** `preview["text"] = text[:512]` — Set `preview['text']`: evaluate `text[:512]`.
+- **Line 43:** `preview["truncated"] = True` — Set `preview['truncated']`: use the literal `True`.
+- **Line 44:** `while len(json.dumps(preview, ensure_ascii=False, default=str).encode("utf-8")) > max_bytes:` — Repeat the indented operation while `len(json.dumps(preview, ensure_ascii=False, default=str).encode('utf-8')) > max_bytes` remains true; each iteration reduces the preview or frees capacity so the loop can finish.
+- **Line 45:** `preview["text"] = preview["text"][:len(preview["text"]) // 2]` — Set `preview['text']`: evaluate `preview['text'][:len(preview['text']) // 2]`.
+- **Line 46:** `return preview` — Return from this operation: evaluate `preview`. No following statements in this call execute.
+- **Line 47:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 48:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverResult`
 
 This internal wrapper distinguishes an actual spillover response from an ordinary dictionary returned by a tool. That distinction lets the application bypass widget data transformation and produce the correct MCP resource link.
 
-- **Line 46:** `@dataclass(frozen=True)` — Generate an immutable data container: field initialization and comparisons are provided, while frozen=True prevents field reassignment.
-- **Line 47:** `class SpilloverResult:` — Define this class. This internal wrapper distinguishes an actual spillover response from an ordinary dictionary returned by a tool. That distinction lets the application bypass widget data transformation and produce the correct MCP resource link.
-- **Line 48:** `preview: dict` — Declare `preview` as `dict` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
-- **Line 49:** `resource_uri: str` — Declare `resource_uri` as `str` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
-- **Line 50:** `original_size_bytes: int` — Declare `original_size_bytes` as `int` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
-- **Line 51:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 49:** `@dataclass(frozen=True)` — Generate an immutable data container: field initialization and comparisons are provided, while frozen=True prevents field reassignment.
+- **Line 50:** `class SpilloverResult:` — Define this class. This internal wrapper distinguishes an actual spillover response from an ordinary dictionary returned by a tool. That distinction lets the application bypass widget data transformation and produce the correct MCP resource link.
+- **Line 51:** `preview: dict` — Declare `preview` as `dict` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
+- **Line 52:** `resource_uri: str` — Declare `resource_uri` as `str` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
+- **Line 53:** `original_size_bytes: int` — Declare `original_size_bytes` as `int` in the class contract. This is a type annotation, not an assignment of None; dataclass initialization or the concrete store supplies the runtime value.
+- **Line 54:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverResult.to_mcp`
 
 Translate the internal wrapper into an MCP CallToolResult. The same small envelope is available as text and structured data; a separate resource_link points to the complete data without embedding it.
 
-- **Line 52:** `def to_mcp(self) -> types.CallToolResult:` — Define this callable. Translate the internal wrapper into an MCP CallToolResult. The same small envelope is available as text and structured data; a separate resource_link points to the complete data without embedding it.
-- **Line 53:** `data = dict(preview=self.preview, resource_uri=self.resource_uri,` — Set `data`: call `dict` with the arguments shown to perform the current operation.
-- **Line 54:** `original_size_bytes=self.original_size_bytes)` — Continue building `data` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 55:** `return types.CallToolResult(` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 56:** `content=[` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 57:** `types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, default=str)),` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 58:** `types.ResourceLink(type="resource_link", uri=self.resource_uri,` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 59:** `name="Full tool result"),` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 60:** `],` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 61:** `structuredContent=data, isError=False,` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
-- **Line 62:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 63:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 64:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 55:** `def to_mcp(self) -> types.CallToolResult:` — Define this callable. Translate the internal wrapper into an MCP CallToolResult. The same small envelope is available as text and structured data; a separate resource_link points to the complete data without embedding it.
+- **Line 56:** `data = dict(preview=self.preview, resource_uri=self.resource_uri,` — Set `data`: call `dict` with the arguments shown to perform the current operation.
+- **Line 57:** `original_size_bytes=self.original_size_bytes)` — Continue building `data` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 58:** `return types.CallToolResult(` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 59:** `content=[` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 60:** `types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, default=str)),` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 61:** `types.ResourceLink(type="resource_link", uri=self.resource_uri,` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 62:** `name="Full tool result"),` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 63:** `],` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 64:** `structuredContent=data, isError=False,` — Return from this operation: construct the official MCP tool-result model; wire aliases such as structuredContent are handled by that model. No following statements in this call execute.
+- **Line 65:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 66:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 67:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `Module setup and shared constants`
 
 These lines connect this operation to the storage and resource flow described above.
 
-- **Line 65:** `SPILLOVER_SCHEMA = {` — Set `SPILLOVER_SCHEMA`: evaluate `{'type': 'object', 'properties': {'preview': {'type': 'object'}, 'resource_uri': {'type': 'string'}, 'original_size_bytes': {'type': 'integer', 'minimum': 0}}, 'required': ['preview', 'resource_uri', 'original_size_bytes']}`.
-- **Line 66:** `"type": "object",` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 67:** `"properties": {` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 68:** `"preview": {"type": "object"},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 69:** `"resource_uri": {"type": "string"},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 70:** `"original_size_bytes": {"type": "integer", "minimum": 0},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 71:** `},` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 72:** `"required": ["preview", "resource_uri", "original_size_bytes"],` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 73:** `}` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 74:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 75:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 68:** `SPILLOVER_SCHEMA = {` — Set `SPILLOVER_SCHEMA`: evaluate `{'type': 'object', 'properties': {'preview': {'type': 'object'}, 'resource_uri': {'type': 'string'}, 'original_size_bytes': {'type': 'integer', 'minimum': 0}}, 'required': ['preview', 'resource_uri', 'original_size_bytes']}`.
+- **Line 69:** `"type": "object",` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 70:** `"properties": {` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 71:** `"preview": {"type": "object"},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 72:** `"resource_uri": {"type": "string"},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 73:** `"original_size_bytes": {"type": "integer", "minimum": 0},` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 74:** `},` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 75:** `"required": ["preview", "resource_uri", "original_size_bytes"],` — Continue building `SPILLOVER_SCHEMA` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 76:** `}` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 77:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 78:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverRegistry`
 
-Keep resource-prefix-to-store routing private to one application. Anonymous session keys use weak references so this registry does not keep disconnected session objects alive.
+Keep resource routing private to one application. Production HTTP ownership uses validated transport session IDs, and stdio uses a connection-scoped random ID. Weak references apply only to explicit in-process session contexts.
 
-- **Line 76:** `class SpilloverRegistry:` — Define this class. Keep resource-prefix-to-store routing private to one application. Anonymous session keys use weak references so this registry does not keep disconnected session objects alive.
-- **Line 77:** `"""Per-application routes and weakly held anonymous session identities."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
-- **Line 78:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 79:** `class SpilloverRegistry:` — Define this class. Keep resource routing private to one application. Production HTTP ownership uses validated transport session IDs, and stdio uses a connection-scoped random ID. Weak references apply only to explicit in-process session contexts.
+- **Line 80:** `"""Per-application routes and weakly held anonymous session identities."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 81:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverRegistry.__init__`
 
 Create separate maps for resource routes and weakly referenced anonymous sessions; neither map is global across applications.
 
-- **Line 79:** `def __init__(self):` — Define this callable. Create separate maps for resource routes and weakly referenced anonymous sessions; neither map is global across applications.
-- **Line 80:** `self.routes: dict[str, SpilloverStore] = {}` — Set `self.routes` to the application-private URI-prefix-to-store map: evaluate `{}`.
-- **Line 81:** `self._sessions: dict[int, tuple[weakref.ref, str]] = {}` — Set `self._sessions` to the map from live session object IDs to weak references and random ownership keys: evaluate `{}`.
-- **Line 82:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 82:** `def __init__(self):` — Define this callable. Create separate maps for resource routes and weakly referenced anonymous sessions; neither map is global across applications.
+- **Line 83:** `self.routes: dict[str, SpilloverStore] = {}` — Set `self.routes` to the application-private URI-prefix-to-store map: evaluate `{}`.
+- **Line 84:** `self._sessions: dict[int, tuple[weakref.ref, str]] = {}` — Set `self._sessions` to the map from live session object IDs to weak references and random ownership keys: evaluate `{}`.
+- **Line 85:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverRegistry.register`
 
 Register a prefix and its store while rejecting ambiguous overlapping prefixes. Reusing exactly the same prefix and store is allowed because several tools may share one configured interceptor.
 
-- **Line 83:** `def register(self, interceptor):` — Define this callable. Register a prefix and its store while rejecting ambiguous overlapping prefixes. Reusing exactly the same prefix and store is allowed because several tools may share one configured interceptor.
-- **Line 84:** `prefix, store = interceptor.resource_uri_prefix, interceptor.store` — Set `(prefix, store)`: evaluate `(interceptor.resource_uri_prefix, interceptor.store)`.
-- **Line 85:** `for existing, registered in self.routes.items():` — Iterate `(existing, registered)` through `self.routes.items()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
-- **Line 86:** `if prefix.startswith(existing) or existing.startswith(prefix):` — Check evaluate `prefix.startswith(existing) or existing.startswith(prefix)`. The indented body handles this case; other results continue past it.
-- **Line 87:** `if prefix != existing or store is not registered:` — Check evaluate `prefix != existing or store is not registered`. The indented body handles this case; other results continue past it.
-- **Line 88:** `raise ValueError("Conflicting spillover resource prefixes")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 89:** `self.routes[prefix] = store` — Set `self.routes[prefix]`: evaluate `store`.
-- **Line 90:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 86:** `def register(self, interceptor):` — Define this callable. Register a prefix and its store while rejecting ambiguous overlapping prefixes. Reusing exactly the same prefix and store is allowed because several tools may share one configured interceptor.
+- **Line 87:** `prefix, store = interceptor.resource_uri_prefix, interceptor.store` — Set `(prefix, store)`: evaluate `(interceptor.resource_uri_prefix, interceptor.store)`.
+- **Line 88:** `for existing, registered in self.routes.items():` — Iterate `(existing, registered)` through `self.routes.items()`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 89:** `if prefix.startswith(existing) or existing.startswith(prefix):` — Check evaluate `prefix.startswith(existing) or existing.startswith(prefix)`. The indented body handles this case; other results continue past it.
+- **Line 90:** `if prefix != existing or store is not registered:` — Check evaluate `prefix != existing or store is not registered`. The indented body handles this case; other results continue past it.
+- **Line 91:** `raise ValueError("Conflicting spillover resource prefixes")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 92:** `self.routes[prefix] = store` — Set `self.routes[prefix]`: evaluate `store`.
+- **Line 93:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `SpilloverRegistry.session_key`
 
-Assign a random server-generated key to a live session object, reusing it for later requests on that object. Client-provided session names and identity metadata are never used as ownership proof.
+Resolve ownership using the validated legacy HTTP session ID or the current stdio connection ID. Anonymous sessionless HTTP has no trusted identity. Namespace keys by transport. Only explicit in-process RequestContext objects may use weak object identity.
 
-- **Line 91:** `def session_key(self, rc):` — Define this callable. Assign a random server-generated key to a live session object, reusing it for later requests on that object. Client-provided session names and identity metadata are never used as ownership proof.
-- **Line 92:** `session = getattr(rc, "session", None)` — Set `session`: call `getattr` with the arguments shown to perform the current operation.
-- **Line 93:** `if session is None:` — Check evaluate `session is None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
-- **Line 94:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
-- **Line 95:** `identity = id(session)` — Set `identity`: call `id` with the arguments shown to perform the current operation.
-- **Line 96:** `existing = self._sessions.get(identity)` — Set `existing`: look up a weakly referenced session record using the actual session object's identity.
-- **Line 97:** `if existing is not None and existing[0]() is session:` — Check evaluate `existing is not None and existing[0]() is session`. The indented body handles this case; other results continue past it.
-- **Line 98:** `return existing[1]` — Return from this operation: evaluate `existing[1]`. No following statements in this call execute.
-- **Line 99:** `key = uuid.uuid4().hex` — Set `key`: evaluate `uuid.uuid4().hex`.
-- **Line 100:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
-- **Line 101:** `reference = weakref.ref(session, lambda _: self._sessions.pop(identity, None))` — Set `reference`: retain a non-owning reference and install cleanup when the session is garbage-collected.
-- **Line 102:** `except TypeError:` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
-- **Line 103:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
-- **Line 104:** `self._sessions[identity] = (reference, key)` — Set `self._sessions[identity]`: evaluate `(reference, key)`.
-- **Line 105:** `return key` — Return from this operation: evaluate `key`. No following statements in this call execute.
-- **Line 106:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 107:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 94:** `def session_key(self, rc, era=None):` — Define this callable. Resolve ownership using the validated legacy HTTP session ID or the current stdio connection ID. Anonymous sessionless HTTP has no trusted identity. Namespace keys by transport. Only explicit in-process RequestContext objects may use weak object identity.
+- **Line 95:** `request = getattr(rc, "request", None)` — Set `request`: call `getattr` with the arguments shown to perform the current operation.
+- **Line 96:** `if getattr(request, "scope", {}).get("type") == "http":` — Check evaluate `getattr(request, 'scope', {}).get('type') == 'http'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 97:** `# Only routed requests reach here: the official manager has validated` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 98:** `# this ID. SDK session proxies themselves are per-request objects.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 99:** `if wire_mode_for_era(era or "auto") != "sessionful":` — Check evaluate `wire_mode_for_era(era or 'auto') != 'sessionful'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 100:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
+- **Line 101:** `session_id = session_id_from_request_context(rc)` — Set `session_id`: call `session_id_from_request_context` with the arguments shown to perform the current operation.
+- **Line 102:** `return "http:" + session_id if session_id else None` — Return from this operation: select `'http:' + session_id` when `session_id` is true; otherwise select `None`. No following statements in this call execute.
+- **Line 103:** `connection_id = stdio_connection_id.get()` — Set `connection_id`: look up the requested entry under the supplied ownership constraint.
+- **Line 104:** `if connection_id is not None:` — Check evaluate `connection_id is not None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 105:** `return "stdio:" + connection_id` — Return from this operation: evaluate `'stdio:' + connection_id`. No following statements in this call execute.
+- **Line 106:** `# Explicit in-process contexts retain their weakly-held test/session key.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 107:** `# Never infer ownership from an official SDK request's proxy identity.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 108:** `if not isinstance(rc, RequestContext):` — Check evaluate `not isinstance(rc, RequestContext)`. The indented body handles this case; other results continue past it.
+- **Line 109:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
+- **Line 110:** `session = getattr(rc, "session", None)` — Set `session`: call `getattr` with the arguments shown to perform the current operation.
+- **Line 111:** `if session is None:` — Check evaluate `session is None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 112:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
+- **Line 113:** `identity = id(session)` — Set `identity`: call `id` with the arguments shown to perform the current operation.
+- **Line 114:** `existing = self._sessions.get(identity)` — Set `existing`: look up a weakly referenced session record using the actual session object's identity.
+- **Line 115:** `if existing is not None and existing[0]() is session:` — Check evaluate `existing is not None and existing[0]() is session`. The indented body handles this case; other results continue past it.
+- **Line 116:** `return existing[1]` — Return from this operation: evaluate `existing[1]`. No following statements in this call execute.
+- **Line 117:** `key = "in-process:" + uuid.uuid4().hex` — Set `key`: evaluate `'in-process:' + uuid.uuid4().hex`.
+- **Line 118:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 119:** `reference = weakref.ref(session, lambda _: self._sessions.pop(identity, None))` — Set `reference`: retain a non-owning reference and install cleanup when the session is garbage-collected.
+- **Line 120:** `except TypeError:` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
+- **Line 121:** `return None` — Return from this operation: use the literal `None`. No following statements in this call execute.
+- **Line 122:** `self._sessions[identity] = (reference, key)` — Set `self._sessions[identity]`: evaluate `(reference, key)`.
+- **Line 123:** `return key` — Return from this operation: evaluate `key`. No following statements in this call execute.
+- **Line 124:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 125:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `caller_owner`
 
 Build a SHA-256 fingerprint from trusted identity dimensions. Authenticated ownership includes issuer, subject, client identity, and tenant; otherwise use the private session key. Invalid credentials and absent trusted identity fail closed.
 
-- **Line 108:** `def caller_owner(context: ExecutionContext) -> str:` — Define this callable. Build a SHA-256 fingerprint from trusted identity dimensions. Authenticated ownership includes issuer, subject, client identity, and tenant; otherwise use the private session key. Invalid credentials and absent trusted identity fail closed.
-- **Line 109:** `auth = context.auth` — Set `auth`: evaluate `context.auth`.
-- **Line 110:** `if auth is not None and (auth.subject or auth.client_id):` — Check evaluate `auth is not None and (auth.subject or auth.client_id)`. The indented body handles this case; other results continue past it.
-- **Line 111:** `identity = ["principal", auth.iss, auth.subject, auth.client_id,` — Set `identity`: evaluate `['principal', auth.iss, auth.subject, auth.client_id, tenant_from_claims(auth.claims)]`.
-- **Line 112:** `tenant_from_claims(auth.claims)]` — Continue building `identity` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 113:** `elif context.spillover_invalid_auth:` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
-- **Line 114:** `raise PermissionError("Verified identity required for spillover")` — Stop this operation and signal that a trusted caller identity could not be established. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 115:** `elif context.spillover_session_key:` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
-- **Line 116:** `identity = ["session", context.spillover_session_key]` — Set `identity`: evaluate `['session', context.spillover_session_key]`.
-- **Line 117:** `else:` — Enter the alternative path only when the preceding condition did not match.
-- **Line 118:** `raise PermissionError("Spillover requires a verified caller or trusted MCP session")` — Stop this operation and signal that a trusted caller identity could not be established. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 119:** `return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()` — Return from this operation: return the SHA-256 digest as a stable hexadecimal owner identifier. No following statements in this call execute.
-- **Line 120:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 121:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 126:** `def caller_owner(context: ExecutionContext) -> str:` — Define this callable. Build a SHA-256 fingerprint from trusted identity dimensions. Authenticated ownership includes issuer, subject, client identity, and tenant; otherwise use the private session key. Invalid credentials and absent trusted identity fail closed.
+- **Line 127:** `auth = context.auth` — Set `auth`: evaluate `context.auth`.
+- **Line 128:** `if auth is not None and (auth.subject or auth.client_id):` — Check evaluate `auth is not None and (auth.subject or auth.client_id)`. The indented body handles this case; other results continue past it.
+- **Line 129:** `identity = ["principal", auth.iss, auth.subject, auth.client_id,` — Set `identity`: evaluate `['principal', auth.iss, auth.subject, auth.client_id, tenant_from_claims(auth.claims)]`.
+- **Line 130:** `tenant_from_claims(auth.claims)]` — Continue building `identity` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 131:** `elif context.spillover_invalid_auth:` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 132:** `raise PermissionError("Verified identity required for spillover")` — Stop this operation and signal that a trusted caller identity could not be established. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 133:** `elif context.spillover_session_key:` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 134:** `identity = ["session", context.spillover_session_key]` — Set `identity`: evaluate `['session', context.spillover_session_key]`.
+- **Line 135:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 136:** `raise PermissionError("Spillover requires a verified caller or trusted MCP session")` — Stop this operation and signal that a trusted caller identity could not be established. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 137:** `return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()` — Return from this operation: return the SHA-256 digest as a stable hexadecimal owner identifier. No following statements in this call execute.
+- **Line 138:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 139:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `bind_spillover_context`
 
 Copy the registry-derived session key into the execution context and mark a supplied-but-unverified token. The interceptor runs after guards, so an auth guard can still establish verified identity before ownership is resolved.
 
-- **Line 122:** `def bind_spillover_context(context, rc, registry):` — Define this callable. Copy the registry-derived session key into the execution context and mark a supplied-but-unverified token. The interceptor runs after guards, so an auth guard can still establish verified identity before ownership is resolved.
-- **Line 123:** `context.spillover_session_key = registry.session_key(rc)` — Set `context.spillover_session_key`: obtain the server-generated anonymous ownership key for this live session, or None when no supported session is available.
-- **Line 124:** `context.spillover_invalid_auth = bool(` — Set `context.spillover_invalid_auth`: call `bool` with the arguments shown to perform the current operation.
-- **Line 125:** `authorization_token_from_request(rc) and context.auth is None` — Continue building `context.spillover_invalid_auth` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
-- **Line 126:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 127:** `(blank)` — Blank separator for readability; it performs no operation.
-- **Line 128:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 140:** `def bind_spillover_context(context, rc, registry, era=None):` — Define this callable. Copy the registry-derived session key into the execution context and mark a supplied-but-unverified token. The interceptor runs after guards, so an auth guard can still establish verified identity before ownership is resolved.
+- **Line 141:** `context.spillover_session_key = registry.session_key(rc, era)` — Set `context.spillover_session_key`: obtain the server-generated anonymous ownership key for this live session, or None when no supported session is available.
+- **Line 142:** `context.spillover_invalid_auth = bool(` — Set `context.spillover_invalid_auth`: call `bool` with the arguments shown to perform the current operation.
+- **Line 143:** `authorization_token_from_request(rc) and context.auth is None` — Continue building `context.spillover_invalid_auth` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 144:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 145:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 146:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `DataSpilloverInterceptor`
 
 The opt-in interceptor waits for a tool result, preserves control/error responses, serializes successful data, and compares its UTF-8 size with the configured threshold. Only an oversized successful result is stored and replaced with a preview wrapper.
 
-- **Line 129:** `class DataSpilloverInterceptor:` — Define this class. The opt-in interceptor waits for a tool result, preserves control/error responses, serializes successful data, and compares its UTF-8 size with the configured threshold. Only an oversized successful result is stored and replaced with a preview wrapper.
+- **Line 147:** `class DataSpilloverInterceptor:` — Define this class. The opt-in interceptor waits for a tool result, preserves control/error responses, serializes successful data, and compares its UTF-8 size with the configured threshold. Only an oversized successful result is stored and replaced with a preview wrapper.
 ### `DataSpilloverInterceptor.__init__`
 
 Validate the threshold and absolute URI prefix, preserve the supplied store, and allocate a default bounded RAM store only when none was supplied.
 
-- **Line 130:** `def __init__(` — Define this callable. Validate the threshold and absolute URI prefix, preserve the supplied store, and allocate a default bounded RAM store only when none was supplied.
-- **Line 131:** `self, threshold_bytes: int = 64 * 1024, store: SpilloverStore | None = None,` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
-- **Line 132:** `resource_uri_prefix: str = "resource://data-spillover/",` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
-- **Line 133:** `):` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
-- **Line 134:** `if type(threshold_bytes) is not int or threshold_bytes < 0:` — Check evaluate `type(threshold_bytes) is not int or threshold_bytes < 0`. The indented body handles this case; other results continue past it.
-- **Line 135:** `raise ValueError("Spillover threshold must be a nonnegative integer")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 136:** `parts = urlsplit(resource_uri_prefix)` — Set `parts`: parse the configured resource prefix into URI components so relative addresses, query strings, and fragments can be rejected.
-- **Line 137:** `if (not parts.scheme or not parts.netloc or parts.query or parts.fragment` — Check evaluate `not parts.scheme or not parts.netloc or parts.query or parts.fragment or (not resource_uri_prefix.endswith('/'))`. The indented body handles this case; other results continue past it.
-- **Line 138:** `or not resource_uri_prefix.endswith("/")):` — Check evaluate `not parts.scheme or not parts.netloc or parts.query or parts.fragment or (not resource_uri_prefix.endswith('/'))`. The indented body handles this case; other results continue past it.
-- **Line 139:** `raise ValueError("Resource prefix must be an absolute URI ending in '/'")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
-- **Line 140:** `self.threshold_bytes = threshold_bytes` — Set `self.threshold_bytes` to the boundary above which a successful result spills: evaluate `threshold_bytes`.
-- **Line 141:** `self.store = store if store is not None else MemorySpilloverStore()` — Set `self.store` to the storage backend selected for this interceptor: select `store` when `store is not None` is true; otherwise select `MemorySpilloverStore()`.
-- **Line 142:** `self.resource_uri_prefix = resource_uri_prefix` — Set `self.resource_uri_prefix` to the prefix prepended to generated store IDs: evaluate `resource_uri_prefix`.
-- **Line 143:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 148:** `def __init__(` — Define this callable. Validate the threshold and absolute URI prefix, preserve the supplied store, and allocate a default bounded RAM store only when none was supplied.
+- **Line 149:** `self, threshold_bytes: int = 64 * 1024, store: SpilloverStore | None = None,` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 150:** `resource_uri_prefix: str = "resource://data-spillover/",` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 151:** `):` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 152:** `if type(threshold_bytes) is not int or threshold_bytes < 0:` — Check evaluate `type(threshold_bytes) is not int or threshold_bytes < 0`. The indented body handles this case; other results continue past it.
+- **Line 153:** `raise ValueError("Spillover threshold must be a nonnegative integer")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 154:** `parts = urlsplit(resource_uri_prefix)` — Set `parts`: parse the configured resource prefix into URI components so relative addresses, query strings, and fragments can be rejected.
+- **Line 155:** `if (not parts.scheme or not parts.netloc or parts.query or parts.fragment` — Check evaluate `not parts.scheme or not parts.netloc or parts.query or parts.fragment or (not resource_uri_prefix.endswith('/'))`. The indented body handles this case; other results continue past it.
+- **Line 156:** `or not resource_uri_prefix.endswith("/")):` — Check evaluate `not parts.scheme or not parts.netloc or parts.query or parts.fragment or (not resource_uri_prefix.endswith('/'))`. The indented body handles this case; other results continue past it.
+- **Line 157:** `raise ValueError("Resource prefix must be an absolute URI ending in '/'")` — Stop this operation and reject an invalid configuration, unsafe ID/path, or capacity-exceeding operation. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 158:** `self.threshold_bytes = threshold_bytes` — Set `self.threshold_bytes` to the boundary above which a successful result spills: evaluate `threshold_bytes`.
+- **Line 159:** `self.store = store if store is not None else MemorySpilloverStore()` — Set `self.store` to the storage backend selected for this interceptor: select `store` when `store is not None` is true; otherwise select `MemorySpilloverStore()`.
+- **Line 160:** `self.resource_uri_prefix = resource_uri_prefix` — Set `self.resource_uri_prefix` to the prefix prepended to generated store IDs: evaluate `resource_uri_prefix`.
+- **Line 161:** `(blank)` — Blank separator for readability; it performs no operation.
 ### `DataSpilloverInterceptor.intercept`
 
 This is the interceptor execution path. It calls the next pipeline stage once, returns small results by identity, stores oversized results under the caller fingerprint, then returns the preview/URI/original-size wrapper.
 
-- **Line 144:** `async def intercept(self, context, next_fn):` — Define an asynchronous operation that callers await. This is the interceptor execution path. It calls the next pipeline stage once, returns small results by identity, stores oversized results under the caller fingerprint, then returns the preview/URI/original-size wrapper.
-- **Line 145:** `result = await next_fn()` — Set `result`: await execute the next interceptor or the actual tool handler exactly once and obtain its result.
-- **Line 146:** `if isinstance(result, (InputRequiredResult, SpilloverResult)):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 147:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
-- **Line 148:** `if isinstance(result, dict) and result.get("resultType") == "input_required":` — Check evaluate `isinstance(result, dict) and result.get('resultType') == 'input_required'`. The indented body handles this case; other results continue past it.
-- **Line 149:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
-- **Line 150:** `value = result` — Set `value`: evaluate `result`.
-- **Line 151:** `if isinstance(value, types.CallToolResult):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 152:** `if value.is_error or value.result_type == "input_required":` — Check evaluate `value.is_error or value.result_type == 'input_required'`. The indented body handles this case; other results continue past it.
-- **Line 153:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
-- **Line 154:** `value = value.model_dump(mode="json", by_alias=True, exclude_none=True)` — Set `value`: convert the Pydantic model into JSON-compatible data, using the requested wire aliases.
-- **Line 155:** `elif isinstance(value, dict) and value.get("isError"):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
-- **Line 156:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
-- **Line 157:** `elif isinstance(value, BaseModel):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
-- **Line 158:** `value = value.model_dump(mode="json")` — Set `value`: convert the Pydantic model into JSON-compatible data, using the requested wire aliases.
-- **Line 159:** `if isinstance(value, str):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
-- **Line 160:** `payload, mime = value.encode("utf-8"), "text/plain"` — Set `(payload, mime)`: evaluate `(value.encode('utf-8'), 'text/plain')`.
-- **Line 161:** `else:` — Enter the alternative path only when the preceding condition did not match.
-- **Line 162:** `payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")` — Set `payload` to the complete serialized result as immutable bytes: convert text into the selected byte encoding, so storage and limits operate on bytes.
-- **Line 163:** `mime = "application/json"` — Set `mime`: use the literal `'application/json'`.
-- **Line 164:** `if len(payload) <= self.threshold_bytes:` — Check evaluate `len(payload) <= self.threshold_bytes`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 162:** `async def intercept(self, context, next_fn):` — Define an asynchronous operation that callers await. This is the interceptor execution path. It calls the next pipeline stage once, returns small results by identity, stores oversized results under the caller fingerprint, then returns the preview/URI/original-size wrapper.
+- **Line 163:** `result = await next_fn()` — Set `result`: await execute the next interceptor or the actual tool handler exactly once and obtain its result.
+- **Line 164:** `if isinstance(result, (InputRequiredResult, SpilloverResult)):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
 - **Line 165:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
-- **Line 166:** `owner = caller_owner(context)` — Set `owner` to the caller fingerprint used for access checks: resolve the trusted caller fingerprint, rejecting missing or failed identity.
-- **Line 167:** `key = await self.store.put(payload, owner=owner, mime_type=mime)` — Set `key`: await save the full payload with its owner and MIME type and obtain an opaque ID.
-- **Line 168:** `return SpilloverResult(generate_preview(value), self.resource_uri_prefix + key, len(payload))` — Return from this operation: call `SpilloverResult` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 166:** `if isinstance(result, dict) and result.get("resultType") == "input_required":` — Check evaluate `isinstance(result, dict) and result.get('resultType') == 'input_required'`. The indented body handles this case; other results continue past it.
+- **Line 167:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
+- **Line 168:** `value = result` — Set `value`: evaluate `result`.
+- **Line 169:** `if isinstance(value, types.CallToolResult):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
+- **Line 170:** `if value.is_error or value.result_type == "input_required":` — Check evaluate `value.is_error or value.result_type == 'input_required'`. The indented body handles this case; other results continue past it.
+- **Line 171:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
+- **Line 172:** `value = value.model_dump(mode="json", by_alias=True, exclude_none=True)` — Set `value`: convert the Pydantic model into JSON-compatible data, using the requested wire aliases.
+- **Line 173:** `elif isinstance(value, dict) and value.get("isError"):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 174:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
+- **Line 175:** `elif isinstance(value, BaseModel):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 176:** `value = value.model_dump(mode="json")` — Set `value`: convert the Pydantic model into JSON-compatible data, using the requested wire aliases.
+- **Line 177:** `if isinstance(value, str):` — Check check the runtime shape before selecting the appropriate serialization or control path. The indented body handles this case; other results continue past it.
+- **Line 178:** `payload, mime = value.encode("utf-8"), "text/plain"` — Set `(payload, mime)`: evaluate `(value.encode('utf-8'), 'text/plain')`.
+- **Line 179:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 180:** `payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")` — Set `payload` to the complete serialized result as immutable bytes: convert text into the selected byte encoding, so storage and limits operate on bytes.
+- **Line 181:** `mime = "application/json"` — Set `mime`: use the literal `'application/json'`.
+- **Line 182:** `if len(payload) <= self.threshold_bytes:` — Check evaluate `len(payload) <= self.threshold_bytes`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 183:** `return result` — Return from this operation: evaluate `result`. No following statements in this call execute.
+- **Line 184:** `owner = caller_owner(context)` — Set `owner` to the caller fingerprint used for access checks: resolve the trusted caller fingerprint, rejecting missing or failed identity.
+- **Line 185:** `key = await self.store.put(payload, owner=owner, mime_type=mime)` — Set `key`: await save the full payload with its owner and MIME type and obtain an opaque ID.
+- **Line 186:** `return SpilloverResult(generate_preview(value), self.resource_uri_prefix + key, len(payload))` — Return from this operation: call `SpilloverResult` with the arguments shown to perform the current operation. No following statements in this call execute.
 
 ## `nitrostack/core/interceptors/spillover.py`
 
@@ -800,6 +818,341 @@ These lines connect this operation to the storage and resource flow described ab
 - **Line 252:** `container.resolve(interceptor_cls)` — Continue building `interceptor` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
 - **Line 253:** `if isinstance(interceptor_cls, type) else interceptor_cls` — Continue building `interceptor` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
 - **Line 254:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+
+## `nitrostack/runtime/request_ctx.py`
+
+Explains 4 added or replacement lines. Open the source beside this document to follow the exact line numbers.
+
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 10:** `# Set by the stdio adapter for one live stream pair, never by client metadata.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 11:** `stdio_connection_id: ContextVar[Optional[str]] = ContextVar(` — Set `stdio_connection_id`: call `ContextVar` with the arguments shown to perform the current operation.
+- **Line 12:** `"nitrostack_stdio_connection_id", default=None` — Continue building `stdio_connection_id` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 13:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+
+## `nitrostack/transports/stdio.py`
+
+Explains 56 added or replacement lines. Open the source beside this document to follow the exact line numbers.
+
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 3:** `import uuid` — Import uuid for the operations described below; importing binds the module names without calling their functions.
+- **Line 4:** `import contextvars` — Import contextvars for the operations described below; importing binds the module names without calling their functions.
+- **Line 7:** `import anyio` — Import anyio for the operations described below; importing binds the module names without calling their functions.
+- **Line 12:** `from nitrostack.runtime.request_ctx import stdio_connection_id` — Import the named APIs from `nitrostack.runtime.request_ctx` so this file can use the shared SDK, library, or test implementation.
+### `_StdioConnectionStream`
+
+Forward messages unchanged while copying their sender context and binding the server-owned stdio connection ID. This preserves authentication and tracing context. No JSON-RPC parsing or dispatch is performed here.
+
+- **Line 52:** `class _StdioConnectionStream:` — Define this class. Forward messages unchanged while copying their sender context and binding the server-owned stdio connection ID. This preserves authentication and tracing context. No JSON-RPC parsing or dispatch is performed here.
+- **Line 53:** `"""Preserve sender context while binding a server-owned connection identity."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 54:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.__init__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 55:** `def __init__(self, stream: Any, connection_id: str) -> None:` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 56:** `self._stream = stream` — Set `self._stream`: evaluate `stream`.
+- **Line 57:** `self._connection_id = connection_id` — Set `self._connection_id`: evaluate `connection_id`.
+- **Line 58:** `self.last_context = None` — Set `self.last_context`: use the literal `None`.
+- **Line 59:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.receive`
+
+Receive one unchanged message, copy its sender context, and bind the stdio connection identity in that copy so the official MCP dispatcher propagates it to the handler.
+
+- **Line 60:** `async def receive(self):` — Define an asynchronous operation that callers await. Receive one unchanged message, copy its sender context, and bind the stdio connection identity in that copy so the official MCP dispatcher propagates it to the handler.
+- **Line 61:** `message = await self._stream.receive()` — Set `message`: await call `self._stream.receive` with the arguments shown to perform the current operation.
+- **Line 62:** `sender_context = getattr(self._stream, "last_context", None)` — Set `sender_context`: call `getattr` with the arguments shown to perform the current operation.
+- **Line 63:** `self.last_context = sender_context.copy() if sender_context is not None else contextvars.copy_context()` — Set `self.last_context`: select `sender_context.copy()` when `sender_context is not None` is true; otherwise select `contextvars.copy_context()`.
+- **Line 64:** `self.last_context.run(stdio_connection_id.set, self._connection_id)` — Call `self.last_context.run` with the arguments shown to perform the current operation.
+- **Line 65:** `return message` — Return from this operation: evaluate `message`. No following statements in this call execute.
+- **Line 66:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.__aiter__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 67:** `def __aiter__(self):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 68:** `return self` — Return from this operation: evaluate `self`. No following statements in this call execute.
+- **Line 69:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.__anext__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 70:** `async def __anext__(self):` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 71:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 72:** `return await self.receive()` — Return from this operation: await call `self.receive` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 73:** `except anyio.EndOfStream:` — Handle only the exception types shown; the following body translates the failure or applies the documented fallback.
+- **Line 74:** `raise StopAsyncIteration from None` — Stop this operation and evaluate `StopAsyncIteration`. The surrounding SDK or test catches this error; from None suppresses sensitive internal exception details when present.
+- **Line 75:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.__aenter__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 76:** `async def __aenter__(self):` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 77:** `await self._stream.__aenter__()` — Await call `self._stream.__aenter__` with the arguments shown to perform the current operation.
+- **Line 78:** `return self` — Return from this operation: evaluate `self`. No following statements in this call execute.
+- **Line 79:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.__aexit__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 80:** `async def __aexit__(self, *args):` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 81:** `return await self._stream.__aexit__(*args)` — Return from this operation: await call `self._stream.__aexit__` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 82:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_StdioConnectionStream.aclose`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 83:** `async def aclose(self):` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 84:** `await self._stream.aclose()` — Await call `self._stream.aclose` with the arguments shown to perform the current operation.
+- **Line 85:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 86:** `(blank)` — Blank separator for readability; it performs no operation.
+### `serve_stdio_streams`
+
+Allocate a fresh connection ID, serve the official MCP stream through the context-binding adapter, and reset the connection context in finally even on errors or cancellation.
+
+- **Line 92:** `) -> None:` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 93:** `"""Serve one connection with a trusted identity shared by its requests."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 94:** `connection_id = uuid.uuid4().hex` — Set `connection_id`: evaluate `uuid.uuid4().hex`.
+- **Line 95:** `token = stdio_connection_id.set(connection_id)` — Set `token`: install the chosen request context in this asynchronous context.
+- **Line 96:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 97:** `await _serve_stdio_connection(` — Await call `_serve_stdio_connection` with the arguments shown to perform the current operation.
+- **Line 98:** `server, _StdioConnectionStream(read_stream, connection_id), write_stream, era` — Await call `_serve_stdio_connection` with the arguments shown to perform the current operation.
+- **Line 99:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 100:** `finally:` — Always run cleanup, whether the preceding work succeeded, failed, or was cancelled.
+- **Line 101:** `stdio_connection_id.reset(token)` — Restore the previous request context or empty dependency container.
+- **Line 102:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 103:** `(blank)` — Blank separator for readability; it performs no operation.
+### `_serve_stdio_connection`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 104:** `async def _serve_stdio_connection(` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 105:** `server: "Server[Any]",` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 106:** `read_stream: "ReadStream[SessionMessage | Exception]",` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 107:** `write_stream: "WriteStream[SessionMessage]",` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 108:** `era: ProtocolEra,` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+
+## `tests/spillover_transport_support.py`
+
+Explains 136 added or replacement lines. Open the source beside this document to follow the exact line numbers.
+
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 1:** `"""Real application and protocol clients for spillover transport regressions."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 2:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 3:** `import asyncio` — Import asyncio for the operations described below; importing binds the module names without calling their functions.
+- **Line 4:** `from contextlib import contextmanager` — Import the named APIs from `contextlib` so this file can use the shared SDK, library, or test implementation.
+- **Line 5:** `import json` — Import json for the operations described below; importing binds the module names without calling their functions.
+- **Line 6:** `from pathlib import Path` — Import the named APIs from `pathlib` so this file can use the shared SDK, library, or test implementation.
+- **Line 7:** `import sys` — Import sys for the operations described below; importing binds the module names without calling their functions.
+- **Line 8:** `from typing import Any` — Import the named APIs from `typing` so this file can use the shared SDK, library, or test implementation.
+- **Line 9:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 10:** `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` — Call `sys.path.insert` with the arguments shown to perform the current operation.
+- **Line 11:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 12:** `from pydantic import BaseModel` — Import the named APIs from `pydantic` so this file can use the shared SDK, library, or test implementation.
+- **Line 13:** `from starlette.testclient import TestClient` — Import the named APIs from `starlette.testclient` so this file can use the shared SDK, library, or test implementation.
+- **Line 14:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 15:** `from nitrostack import (` — Import the named APIs from `nitrostack` so this file can use the shared SDK, library, or test implementation.
+- **Line 16:** `DataSpilloverInterceptor, FileSpilloverStore, MemorySpilloverStore,` — Import or re-export `DataSpilloverInterceptor, FileSpilloverStore, MemorySpilloverStore` from `nitrostack` as part of the import block above.
+- **Line 17:** `module, tool, use_interceptors,` — Import or re-export `module, tool, use_interceptors` from `nitrostack` as part of the import block above.
+- **Line 18:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 19:** `from nitrostack.core.app import McpApplication, ServerConfig, mcp_app` — Import the named APIs from `nitrostack.core.app` so this file can use the shared SDK, library, or test implementation.
+- **Line 20:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 21:** `MODERN_META = {` — Set `MODERN_META`: evaluate `{'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': {'name': 'spillover-client', 'version': '1'}, 'io.modelcontextprotocol/clientCapabilities': {}}`.
+- **Line 22:** `"io.modelcontextprotocol/protocolVersion": "2026-07-28",` — Continue building `MODERN_META` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 23:** `"io.modelcontextprotocol/clientInfo": {"name": "spillover-client", "version": "1"},` — Continue building `MODERN_META` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 24:** `"io.modelcontextprotocol/clientCapabilities": {},` — Continue building `MODERN_META` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 25:** `}` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 26:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 27:** `(blank)` — Blank separator for readability; it performs no operation.
+### `PayloadInput`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 28:** `class PayloadInput(BaseModel):` — Define this class. Group the methods below into the provider or test configuration shown.
+- **Line 29:** `value: Any = None` — Set `value`: use the literal `None`.
+- **Line 30:** `case: str | None = None` — Set `case`: use the literal `None`.
+- **Line 31:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 32:** `(blank)` — Blank separator for readability; it performs no operation.
+### `large_value`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 33:** `def large_value(case):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 34:** `if case == "threshold":` — Check evaluate `case == 'threshold'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 35:** `return "x" * 65536` — Return from this operation: evaluate `'x' * 65536`. No following statements in this call execute.
+- **Line 36:** `if case == "threshold-plus-one":` — Check evaluate `case == 'threshold-plus-one'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 37:** `return "x" * 65537` — Return from this operation: evaluate `'x' * 65537`. No following statements in this call execute.
+- **Line 38:** `if case.endswith("MiB"):` — Check call `case.endswith` with the arguments shown to perform the current operation. The indented body handles this case; other results continue past it.
+- **Line 39:** `return "x" * (int(case[:-3]) * 1024 * 1024)` — Return from this operation: evaluate `'x' * (int(case[:-3]) * 1024 * 1024)`. No following statements in this call execute.
+- **Line 40:** `if case == "unicode":` — Check evaluate `case == 'unicode'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 41:** `return "é🚀" * 200000` — Return from this operation: evaluate `'é🚀' * 200000`. No following statements in this call execute.
+- **Line 42:** `if case == "escaped":` — Check evaluate `case == 'escaped'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 43:** `return '\\"\n\t' * 100000` — Return from this operation: evaluate `'\\"\n\t' * 100000`. No following statements in this call execute.
+- **Line 44:** `if case == "rows":` — Check evaluate `case == 'rows'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 45:** `return [{"row": i, "value": "row"} for i in range(100000)]` — Return from this operation: evaluate `[{'row': i, 'value': 'row'} for i in range(100000)]`. No following statements in this call execute.
+- **Line 46:** `if case == "dictionary":` — Check evaluate `case == 'dictionary'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 47:** `return {str(i): i for i in range(50000)}` — Return from this operation: evaluate `{str(i): i for i in range(50000)}`. No following statements in this call execute.
+- **Line 48:** `if case == "nested":` — Check evaluate `case == 'nested'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 49:** `return [{"chunks": ["x" * (1024 * 1024)] * 6}]` — Return from this operation: evaluate `[{'chunks': ['x' * (1024 * 1024)] * 6}]`. No following statements in this call execute.
+- **Line 50:** `return "x" * (10 * 1024 * 1024 + 1)` — Return from this operation: evaluate `'x' * (10 * 1024 * 1024 + 1)`. No following statements in this call execute.
+- **Line 51:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 52:** `(blank)` — Blank separator for readability; it performs no operation.
+### `build_app`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 53:** `def build_app(backend, root, era="legacy", threshold=64 * 1024,` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 54:** `prefix="resource://data-spillover/"):` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 55:** `options = dict(max_bytes=10 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)` — Set `options`: call `dict` with the arguments shown to perform the current operation.
+- **Line 56:** `store = MemorySpilloverStore(**options) if backend == "memory" else FileSpilloverStore(root, **options)` — Set `store`: select `MemorySpilloverStore(**options)` when `backend == 'memory'` is true; otherwise select `FileSpilloverStore(root, **options)`.
+- **Line 57:** `interceptor = DataSpilloverInterceptor(threshold, store, prefix)` — Set `interceptor`: call `DataSpilloverInterceptor` with the arguments shown to perform the current operation.
+- **Line 58:** `(blank)` — Blank separator for readability; it performs no operation.
+### `build_app.Tools`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 59:** `class Tools:` — Define this class. Group the methods below into the provider or test configuration shown.
+- **Line 60:** `@tool("payload", "Return a payload", PayloadInput, task_support="optional")` — Publish this method as an MCP tool with its input validation and optional task/output metadata.
+- **Line 61:** `@use_interceptors(interceptor)` — Attach this interceptor configuration to the tool method; execution is deferred until the tool pipeline runs.
+### `build_app.Tools.payload`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 62:** `async def payload(self, input, context):` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 63:** `return large_value(input.case) if input.case is not None else input.value` — Return from this operation: select `large_value(input.case)` when `input.case is not None` is true; otherwise select `input.value`. No following statements in this call execute.
+- **Line 64:** `(blank)` — Blank separator for readability; it performs no operation.
+### `build_app`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 65:** `@module(name="spillover-wire", providers=[Tools])` — Register the test provider as part of an SDK module so application bootstrap discovers its decorated tool.
+### `build_app.Root`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 66:** `class Root:` — Define this class. Group the methods below into the provider or test configuration shown.
+- **Line 67:** `pass` — Perform no operation in this intentionally empty class or handled-error branch.
+- **Line 68:** `(blank)` — Blank separator for readability; it performs no operation.
+### `build_app`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 69:** `@mcp_app(module=Root, server=ServerConfig(name="spillover-wire", protocol_era=era))` — Apply this decorator to the following definition when the module is imported.
+### `build_app.App`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 70:** `class App:` — Define this class. Group the methods below into the provider or test configuration shown.
+- **Line 71:** `pass` — Perform no operation in this intentionally empty class or handled-error branch.
+- **Line 72:** `(blank)` — Blank separator for readability; it performs no operation.
+### `build_app`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 73:** `return McpApplication(App)` — Return from this operation: call `McpApplication` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 74:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 75:** `(blank)` — Blank separator for readability; it performs no operation.
+### `HttpPeer`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 76:** `class HttpPeer:` — Define this class. Group the methods below into the provider or test configuration shown.
+### `HttpPeer.__init__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 77:** `def __init__(self, client, era="legacy", token=None):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 78:** `self.client, self.era = client, era` — Set `(self.client, self.era)`: evaluate `(client, era)`.
+- **Line 79:** `self.headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}` — Set `self.headers`: evaluate `{'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}`.
+- **Line 80:** `if token:` — Check evaluate `token`. The indented body handles this case; other results continue past it.
+- **Line 81:** `self.headers["Authorization"] = "Bearer " + token` — Set `self.headers['Authorization']`: evaluate `'Bearer ' + token`.
+- **Line 82:** `self.next_id = 1` — Set `self.next_id`: use the literal `1`.
+- **Line 83:** `if era == "legacy":` — Check evaluate `era == 'legacy'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 84:** `response = self.rpc("initialize", {` — Set `response`: call `self.rpc` with the arguments shown to perform the current operation.
+- **Line 85:** `"protocolVersion": "2025-06-18", "capabilities": {},` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 86:** `"clientInfo": {"name": "spillover-client", "version": "1"},` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 87:** `})` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 88:** `assert "result" in response` — Assert `'result' in response`. A false result fails this test immediately, checking the behavior described for `__init__` rather than silently accepting a regression.
+- **Line 89:** `self.headers["mcp-session-id"] = self.last_response.headers["mcp-session-id"]` — Set `self.headers['mcp-session-id']`: evaluate `self.last_response.headers['mcp-session-id']`.
+- **Line 90:** `initialized = client.post("/mcp", headers=self.headers, json={` — Set `initialized`: call `client.post` with the arguments shown to perform the current operation.
+- **Line 91:** `"jsonrpc": "2.0", "method": "notifications/initialized",` — Continue building `initialized` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 92:** `})` — Continue building `initialized` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 93:** `assert initialized.status_code == 202` — Assert `initialized.status_code == 202`. A false result fails this test immediately, checking the behavior described for `__init__` rather than silently accepting a regression.
+- **Line 94:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 95:** `self.headers["MCP-Protocol-Version"] = "2026-07-28"` — Set `self.headers['MCP-Protocol-Version']`: use the literal `'2026-07-28'`.
+- **Line 96:** `(blank)` — Blank separator for readability; it performs no operation.
+### `HttpPeer.rpc`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 97:** `def rpc(self, method, params):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 98:** `params = dict(params)` — Set `params`: call `dict` with the arguments shown to perform the current operation.
+- **Line 99:** `headers = {**self.headers, "Mcp-Method": method}` — Set `headers`: evaluate `{**self.headers, 'Mcp-Method': method}`.
+- **Line 100:** `if method == "tools/call":` — Check evaluate `method == 'tools/call'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 101:** `headers["Mcp-Name"] = params["name"]` — Set `headers['Mcp-Name']`: evaluate `params['name']`.
+- **Line 102:** `elif method == "resources/read":` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 103:** `headers["Mcp-Name"] = params["uri"]` — Set `headers['Mcp-Name']`: evaluate `params['uri']`.
+- **Line 104:** `if self.era != "legacy":` — Check evaluate `self.era != 'legacy'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 105:** `params["_meta"] = {**params.get("_meta", {}), **MODERN_META}` — Set `params['_meta']`: evaluate `{**params.get('_meta', {}), **MODERN_META}`.
+- **Line 106:** `self.last_response = self.client.post("/mcp", headers=headers, json={` — Set `self.last_response`: call `self.client.post` with the arguments shown to perform the current operation.
+- **Line 107:** `"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params,` — Continue building `self.last_response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 108:** `})` — Continue building `self.last_response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 109:** `self.next_id += 1` — Update `self.next_id` using `Add` and `1`; this adjusts the running counter or controlled test clock.
+- **Line 110:** `assert self.last_response.status_code == 200, self.last_response.text` — Assert `self.last_response.status_code == 200`. A false result fails this test immediately, checking the behavior described for `rpc` rather than silently accepting a regression.
+- **Line 111:** `return self.last_response.json()` — Return from this operation: call `self.last_response.json` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 112:** `(blank)` — Blank separator for readability; it performs no operation.
+### `HttpPeer.call`
+
+Invoke the SDK tool-call handler while installing an explicit request context. Always reset the ContextVar afterward; task tests use the same application path with explicit task metadata.
+
+- **Line 113:** `def call(self, value, **extra):` — Define this callable. Invoke the SDK tool-call handler while installing an explicit request context. Always reset the ContextVar afterward; task tests use the same application path with explicit task metadata.
+- **Line 114:** `return self.rpc("tools/call", {"name": "payload", "arguments": {"value": value}, **extra})` — Return from this operation: call `self.rpc` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 115:** `(blank)` — Blank separator for readability; it performs no operation.
+### `HttpPeer.read`
+
+Invoke the registered resource-read handler under a chosen caller context and return the resource text. The finally block restores context even when access is denied.
+
+- **Line 116:** `def read(self, uri):` — Define this callable. Invoke the registered resource-read handler under a chosen caller context and return the resource text. The finally block restores context even when access is denied.
+- **Line 117:** `return self.rpc("resources/read", {"uri": uri})` — Return from this operation: call `self.rpc` with the arguments shown to perform the current operation. No following statements in this call execute.
+- **Line 118:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 119:** `(blank)` — Blank separator for readability; it performs no operation.
+### `http_app`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 120:** `@contextmanager` — Apply this decorator to the following definition when the module is imported.
+- **Line 121:** `def http_app(backend, root, **options):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 122:** `app = build_app(backend, root, **options)` — Set `app`: call `build_app` with the arguments shown to perform the current operation.
+- **Line 123:** `with TestClient(app.get_combined_app(json_response=True)) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 124:** `yield client` — Evaluate `(yield client)`.
+- **Line 125:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 126:** `(blank)` — Blank separator for readability; it performs no operation.
+### `stdio_main`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 127:** `async def stdio_main():` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 128:** `from nitrostack.transports.stdio import run_stdio, safe_stdio_transport` — Import the named APIs from `nitrostack.transports.stdio` so this file can use the shared SDK, library, or test implementation.
+- **Line 129:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 130:** `with safe_stdio_transport():` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 131:** `app = build_app(sys.argv[1], sys.argv[2], era="auto", threshold=16)` — Set `app`: call `build_app` with the arguments shown to perform the current operation.
+- **Line 132:** `await run_stdio(app.mcp_server, "auto")` — Await call `run_stdio` with the arguments shown to perform the current operation.
+- **Line 133:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 134:** `(blank)` — Blank separator for readability; it performs no operation.
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 135:** `if __name__ == "__main__":` — Check evaluate `__name__ == '__main__'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 136:** `asyncio.run(stdio_main())` — Create an event loop, execute this test scenario to completion, and close the loop.
 
 ## `tests/test_spillover.py`
 
@@ -1502,45 +1855,403 @@ Reject negative or non-integral byte thresholds and prefixes that are relative o
 - **Line 387:** `with pytest.raises(ValueError):` — Require the operation inside this block to raise the specified exception; a successful unsafe operation causes the test to fail.
 - **Line 388:** `DataSpilloverInterceptor(**kwargs)` — Call `dataspilloverinterceptor` with the arguments shown to perform the current operation.
 
+## `tests/test_spillover_transport.py`
+
+Explains 265 added or replacement lines. Open the source beside this document to follow the exact line numbers.
+
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 1:** `"""Independent spillover verification through official HTTP and stdio transports."""` — Document the module, class, or operation in a docstring; this explains its contract without changing control flow.
+- **Line 2:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 3:** `import asyncio` — Import asyncio for the operations described below; importing binds the module names without calling their functions.
+- **Line 4:** `from concurrent.futures import ThreadPoolExecutor` — Import the named APIs from `concurrent.futures` so this file can use the shared SDK, library, or test implementation.
+- **Line 5:** `import json` — Import json for the operations described below; importing binds the module names without calling their functions.
+- **Line 6:** `import os` — Import os for the operations described below; importing binds the module names without calling their functions.
+- **Line 7:** `from pathlib import Path` — Import the named APIs from `pathlib` so this file can use the shared SDK, library, or test implementation.
+- **Line 8:** `import subprocess` — Import subprocess for the operations described below; importing binds the module names without calling their functions.
+- **Line 9:** `import sys` — Import sys for the operations described below; importing binds the module names without calling their functions.
+- **Line 10:** `import time` — Import time for the operations described below; importing binds the module names without calling their functions.
+- **Line 11:** `from types import SimpleNamespace` — Import the named APIs from `types` so this file can use the shared SDK, library, or test implementation.
+- **Line 12:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 13:** `import anyio` — Import anyio for the operations described below; importing binds the module names without calling their functions.
+- **Line 14:** `from mcp.shared.memory import create_client_server_memory_streams` — Import the named APIs from `mcp.shared.memory` so this file can use the shared SDK, library, or test implementation.
+- **Line 15:** `from mcp.shared.message import SessionMessage` — Import the named APIs from `mcp.shared.message` so this file can use the shared SDK, library, or test implementation.
+- **Line 16:** `from mcp_types import jsonrpc_message_adapter` — Import the named APIs from `mcp_types` so this file can use the shared SDK, library, or test implementation.
+- **Line 17:** `import pytest` — Import pytest for the operations described below; importing binds the module names without calling their functions.
+- **Line 18:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 19:** `from nitrostack import DIContainer` — Import the named APIs from `nitrostack` so this file can use the shared SDK, library, or test implementation.
+- **Line 20:** `from nitrostack.auth.jwt import JWTModule, JWTService` — Import the named APIs from `nitrostack.auth.jwt` so this file can use the shared SDK, library, or test implementation.
+- **Line 21:** `from nitrostack.runtime.request_ctx import stdio_connection_id` — Import the named APIs from `nitrostack.runtime.request_ctx` so this file can use the shared SDK, library, or test implementation.
+- **Line 22:** `from nitrostack.transports.stdio import serve_stdio_streams` — Import the named APIs from `nitrostack.transports.stdio` so this file can use the shared SDK, library, or test implementation.
+- **Line 23:** `from tests.spillover_transport_support import MODERN_META, HttpPeer, build_app, http_app, large_value` — Import the named APIs from `tests.spillover_transport_support` so this file can use the shared SDK, library, or test implementation.
+- **Line 24:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 25:** `ROOT = Path(__file__).resolve().parents[1]` — Set `ROOT`: evaluate `Path(__file__).resolve().parents[1]`.
+- **Line 26:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 27:** `(blank)` — Blank separator for readability; it performs no operation.
+### `clean_context`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 28:** `@pytest.fixture(autouse=True)` — Register reusable pytest setup; autouse fixtures apply automatically, and parameters select both storage backends.
+- **Line 29:** `def clean_context(monkeypatch):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 30:** `DIContainer.reset()` — Restore the previous request context or empty dependency container.
+- **Line 31:** `for key in ("NITRO_MCP_PROTOCOL_VERSION", "MCP_STATELESS"):` — Iterate `key` through `('NITRO_MCP_PROTOCOL_VERSION', 'MCP_STATELESS')`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 32:** `monkeypatch.delenv(key, raising=False)` — Call `monkeypatch.delenv` with the arguments shown to perform the current operation.
+- **Line 33:** `yield` — Evaluate `(yield)`.
+- **Line 34:** `DIContainer.reset()` — Restore the previous request context or empty dependency container.
+- **Line 35:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 36:** `(blank)` — Blank separator for readability; it performs no operation.
+### `backend`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 37:** `@pytest.fixture(params=["memory", "file"])` — Register reusable pytest setup; autouse fixtures apply automatically, and parameters select both storage backends.
+- **Line 38:** `def backend(request):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 39:** `return request.param` — Return from this operation: evaluate `request.param`. No following statements in this call execute.
+- **Line 40:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 41:** `(blank)` — Blank separator for readability; it performs no operation.
+### `envelope`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 42:** `def envelope(response):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 43:** `result = response["result"]` — Set `result`: evaluate `response['result']`.
+- **Line 44:** `assert result.get("isError", False) is False` — Assert `result.get('isError', False) is False`. A false result fails this test immediately, checking the behavior described for `envelope` rather than silently accepting a regression.
+- **Line 45:** `data = result["structuredContent"]` — Set `data`: evaluate `result['structuredContent']`.
+- **Line 46:** `assert len(json.dumps(data["preview"], ensure_ascii=False).encode()) <= 2048` — Assert `len(json.dumps(data['preview'], ensure_ascii=False).encode()) <= 2048`. A false result fails this test immediately, checking the behavior described for `envelope` rather than silently accepting a regression.
+- **Line 47:** `assert result["content"][1]["type"] == "resource_link"` — Assert `result['content'][1]['type'] == 'resource_link'`. A false result fails this test immediately, checking the behavior described for `envelope` rather than silently accepting a regression.
+- **Line 48:** `assert result["content"][1]["uri"] == data["resource_uri"]` — Assert `result['content'][1]['uri'] == data['resource_uri']`. A false result fails this test immediately, checking the behavior described for `envelope` rather than silently accepting a regression.
+- **Line 49:** `return data` — Return from this operation: evaluate `data`. No following statements in this call execute.
+- **Line 50:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 51:** `(blank)` — Blank separator for readability; it performs no operation.
+### `assert_full`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 52:** `def assert_full(peer, data, value):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 53:** `expected = (value if isinstance(value, str) else json.dumps(` — Set `expected`: convert text into the selected byte encoding, so storage and limits operate on bytes.
+- **Line 54:** `value, ensure_ascii=False, separators=(",", ":"),` — Continue building `expected` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 55:** `)).encode()` — Continue building `expected` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 56:** `assert data["original_size_bytes"] == len(expected)` — Assert `data['original_size_bytes'] == len(expected)`. A false result fails this test immediately, checking the behavior described for `assert_full` rather than silently accepting a regression.
+- **Line 57:** `contents = peer.read(data["resource_uri"])["result"]["contents"][0]` — Set `contents`: evaluate `peer.read(data['resource_uri'])['result']['contents'][0]`.
+- **Line 58:** `assert contents["text"].encode() == expected` — Assert `contents['text'].encode() == expected`. A false result fails this test immediately, checking the behavior described for `assert_full` rather than silently accepting a regression.
+- **Line 59:** `assert contents["mimeType"] == ("text/plain" if isinstance(value, str) else "application/json")` — Assert `contents['mimeType'] == ('text/plain' if isinstance(value, str) else 'application/json')`. A false result fails this test immediately, checking the behavior described for `assert_full` rather than silently accepting a regression.
+- **Line 60:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 61:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_anonymous_http_roundtrip_and_session_isolation`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 62:** `def test_anonymous_http_roundtrip_and_session_isolation(backend, tmp_path):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 63:** `with http_app(backend, tmp_path, threshold=16) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 64:** `alice, bob = HttpPeer(client), HttpPeer(client)` — Set `(alice, bob)`: evaluate `(HttpPeer(client), HttpPeer(client))`.
+- **Line 65:** `value = {"rows": ["é🚀" * 100]}` — Set `value`: evaluate `{'rows': ['é🚀' * 100]}`.
+- **Line 66:** `data = envelope(alice.call(value))` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 67:** `assert_full(alice, data, value)` — Call `assert_full` with the arguments shown to perform the current operation.
+- **Line 68:** `assert "error" in bob.read(data["resource_uri"])` — Assert `'error' in bob.read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_anonymous_http_roundtrip_and_session_isolation` rather than silently accepting a regression.
+- **Line 69:** `original = bob.headers["mcp-session-id"]` — Set `original`: evaluate `bob.headers['mcp-session-id']`.
+- **Line 70:** `bob.headers["mcp-session-id"] = "not-server-issued"` — Set `bob.headers['mcp-session-id']`: use the literal `'not-server-issued'`.
+- **Line 71:** `response = client.post("/mcp", headers=bob.headers, json={` — Set `response`: call `client.post` with the arguments shown to perform the current operation.
+- **Line 72:** `"jsonrpc": "2.0", "id": 99, "method": "resources/read",` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 73:** `"params": {"uri": data["resource_uri"]},` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 74:** `})` — Continue building `response` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 75:** `assert response.status_code == 404` — Assert `response.status_code == 404`. A false result fails this test immediately, checking the behavior described for `test_anonymous_http_roundtrip_and_session_isolation` rather than silently accepting a regression.
+- **Line 76:** `bob.headers["mcp-session-id"] = original` — Set `bob.headers['mcp-session-id']`: evaluate `original`.
+- **Line 77:** `# Expired/deleted transport sessions cannot recover anonymous payloads.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 78:** `deleted = client.delete("/mcp", headers=alice.headers)` — Set `deleted`: remove only the requested owner-matching record.
+- **Line 79:** `assert deleted.status_code == 200` — Assert `deleted.status_code == 200`. A false result fails this test immediately, checking the behavior described for `test_anonymous_http_roundtrip_and_session_isolation` rather than silently accepting a regression.
+- **Line 80:** `assert "error" in HttpPeer(client).read(data["resource_uri"])` — Assert `'error' in HttpPeer(client).read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_anonymous_http_roundtrip_and_session_isolation` rather than silently accepting a regression.
+- **Line 81:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 82:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_verified_identity_reconnect_and_auth_isolation`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 83:** `@pytest.mark.parametrize("era", ["legacy", "modern", "auto"])` — Ask pytest to run this test once for each supplied case, so distinct shapes or invalid inputs are checked independently.
+- **Line 84:** `def test_verified_identity_reconnect_and_auth_isolation(backend, tmp_path, monkeypatch, era):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 85:** `monkeypatch.setenv("JWT_SECRET", "spillover-wire-regression-secret")` — Call `monkeypatch.setenv` with the arguments shown to perform the current operation.
+- **Line 86:** `JWTModule.for_root(secret_env_var="JWT_SECRET")` — Call `jwtmodule.for_root` with the arguments shown to perform the current operation.
+- **Line 87:** `jwt = DIContainer.get_instance().resolve(JWTService)` — Set `jwt`: resolve the filesystem path or dependency token against its owning API.
+- **Line 88:** `claims = {"sub": "alice", "iss": "issuer-a", "client_id": "client-a", "tenant_id": "tenant-a"}` — Set `claims`: evaluate `{'sub': 'alice', 'iss': 'issuer-a', 'client_id': 'client-a', 'tenant_id': 'tenant-a'}`.
+- **Line 89:** `token = jwt.create_token(claims)` — Set `token`: call `jwt.create_token` with the arguments shown to perform the current operation.
+- **Line 90:** `with http_app(backend, tmp_path, era=era, threshold=16) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 91:** `alice = HttpPeer(client, era, token)` — Set `alice`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 92:** `data = envelope(alice.call("private-value" * 100))` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 93:** `assert_full(HttpPeer(client, era, token), data, "private-value" * 100)` — Call `assert_full` with the arguments shown to perform the current operation.
+- **Line 94:** `for field in ("sub", "iss", "client_id", "tenant_id"):` — Iterate `field` through `('sub', 'iss', 'client_id', 'tenant_id')`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 95:** `other = jwt.create_token({**claims, field: "another"})` — Set `other`: call `jwt.create_token` with the arguments shown to perform the current operation.
+- **Line 96:** `assert "error" in HttpPeer(client, era, other).read(data["resource_uri"])` — Assert `'error' in HttpPeer(client, era, other).read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_verified_identity_reconnect_and_auth_isolation` rather than silently accepting a regression.
+- **Line 97:** `invalid = HttpPeer(client, era, "invalid-signature")` — Set `invalid`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 98:** `assert "error" in invalid.read(data["resource_uri"])` — Assert `'error' in invalid.read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_verified_identity_reconnect_and_auth_isolation` rather than silently accepting a regression.
+- **Line 99:** `assert invalid.call("private-value" * 100)["result"]["isError"] is True` — Assert `invalid.call('private-value' * 100)['result']['isError'] is True`. A false result fails this test immediately, checking the behavior described for `test_verified_identity_reconnect_and_auth_isolation` rather than silently accepting a regression.
+- **Line 100:** `assert "error" in HttpPeer(client, era).read(data["resource_uri"])` — Assert `'error' in HttpPeer(client, era).read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_verified_identity_reconnect_and_auth_isolation` rather than silently accepting a regression.
+- **Line 101:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 102:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_anonymous_sessionless_cannot_create_owner`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 103:** `@pytest.mark.parametrize("era", ["modern", "auto"])` — Ask pytest to run this test once for each supplied case, so distinct shapes or invalid inputs are checked independently.
+- **Line 104:** `def test_anonymous_sessionless_cannot_create_owner(backend, tmp_path, era):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 105:** `with http_app(backend, tmp_path, era=era, threshold=16) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 106:** `peer = HttpPeer(client, era)` — Set `peer`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 107:** `denied = peer.call("private-value" * 100)["result"]` — Set `denied`: evaluate `peer.call('private-value' * 100)['result']`.
+- **Line 108:** `assert denied["isError"] is True` — Assert `denied['isError'] is True`. A false result fails this test immediately, checking the behavior described for `test_anonymous_sessionless_cannot_create_owner` rather than silently accepting a regression.
+- **Line 109:** `assert "structuredContent" not in denied` — Assert `'structuredContent' not in denied`. A false result fails this test immediately, checking the behavior described for `test_anonymous_sessionless_cannot_create_owner` rather than silently accepting a regression.
+- **Line 110:** `# Unsigned metadata is not a substitute for a trusted transport identity.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 111:** `denied = peer.rpc("tools/call", {` — Set `denied`: call `peer.rpc` with the arguments shown to perform the current operation.
+- **Line 112:** `"name": "payload", "arguments": {"value": "private-value" * 100},` — Continue building `denied` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 113:** `"_meta": {"sessionId": "forged", "userId": "alice"},` — Continue building `denied` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 114:** `})` — Continue building `denied` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 115:** `assert denied["result"]["isError"] is True` — Assert `denied['result']['isError'] is True`. A false result fails this test immediately, checking the behavior described for `test_anonymous_sessionless_cannot_create_owner` rather than silently accepting a regression.
+- **Line 116:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 117:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_expired_missing_and_malformed_uris`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 118:** `def test_expired_missing_and_malformed_uris(backend, tmp_path, monkeypatch):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 119:** `clock = [1000.0]` — Set `clock`: evaluate `[1000.0]`.
+- **Line 120:** `monkeypatch.setattr("nitrostack.core.interceptors.spillover.time", SimpleNamespace(time=lambda: clock[0]))` — Replace this dependency for the duration of the pytest fixture.
+- **Line 121:** `with http_app(backend, tmp_path, threshold=16) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 122:** `peer = HttpPeer(client)` — Set `peer`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 123:** `data = envelope(peer.call("private-value" * 100))` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 124:** `clock[0] += 301` — Update `clock[0]` using `Add` and `301`; this adjusts the running counter or controlled test clock.
+- **Line 125:** `for uri in (data["resource_uri"], "resource://data-spillover/" + "0" * 32,` — Iterate `uri` through `(data['resource_uri'], 'resource://data-spillover/' + '0' * 32, 'resource://data-spillover/../escape', 'resource://data-spillover/%2e%2e%2fescape')`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 126:** `"resource://data-spillover/../escape", "resource://data-spillover/%2e%2e%2fescape"):` — Iterate `uri` through `(data['resource_uri'], 'resource://data-spillover/' + '0' * 32, 'resource://data-spillover/../escape', 'resource://data-spillover/%2e%2e%2fescape')`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 127:** `response = peer.read(uri)` — Set `response`: call `peer.read` with the arguments shown to perform the current operation.
+- **Line 128:** `assert "error" in response` — Assert `'error' in response`. A false result fails this test immediately, checking the behavior described for `test_expired_missing_and_malformed_uris` rather than silently accepting a regression.
+- **Line 129:** `assert "private-value" not in json.dumps(response)` — Assert `'private-value' not in json.dumps(response)`. A false result fails this test immediately, checking the behavior described for `test_expired_missing_and_malformed_uris` rather than silently accepting a regression.
+- **Line 130:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 131:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_custom_prefix_and_background_task`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 132:** `def test_custom_prefix_and_background_task(backend, tmp_path):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 133:** `with http_app(backend, tmp_path, threshold=16, prefix="resource://reports/") as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 134:** `peer = HttpPeer(client)` — Set `peer`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 135:** `value = "task-result" * 100` — Set `value`: evaluate `'task-result' * 100`.
+- **Line 136:** `response = peer.call(value, task={"ttl": 60000})["result"]` — Set `response`: evaluate `peer.call(value, task={'ttl': 60000})['result']`.
+- **Line 137:** `task_id = response["structuredContent"]["task"]["taskId"]` — Set `task_id`: evaluate `response['structuredContent']['task']['taskId']`.
+- **Line 138:** `for _ in range(100):` — Iterate `_` through `range(100)`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 139:** `result = peer.rpc("tasks/get", {"taskId": task_id})` — Set `result`: call `peer.rpc` with the arguments shown to perform the current operation.
+- **Line 140:** `assert "result" in result, result` — Assert `'result' in result`. A false result fails this test immediately, checking the behavior described for `test_custom_prefix_and_background_task` rather than silently accepting a regression.
+- **Line 141:** `if result["result"]["status"] == "completed":` — Check evaluate `result['result']['status'] == 'completed'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 142:** `break` — Stop polling as soon as the background task has produced its stored result.
+- **Line 143:** `time.sleep(0.01)` — Call `time.sleep` with the arguments shown to perform the current operation.
+- **Line 144:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 145:** `pytest.fail("Spillover task did not complete")` — Call `pytest.fail` with the arguments shown to perform the current operation.
+- **Line 146:** `completed = result["result"]["result"]` — Set `completed`: evaluate `result['result']['result']`.
+- **Line 147:** `data = envelope({"result": completed})` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 148:** `assert data["resource_uri"].startswith("resource://reports/")` — Assert `data['resource_uri'].startswith('resource://reports/')`. A false result fails this test immediately, checking the behavior described for `test_custom_prefix_and_background_task` rather than silently accepting a regression.
+- **Line 149:** `assert_full(peer, data, value)` — Call `assert_full` with the arguments shown to perform the current operation.
+- **Line 150:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 151:** `(blank)` — Blank separator for readability; it performs no operation.
+### `Module setup and shared constants`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 152:** `CASES = ["threshold", "threshold-plus-one", "1MiB", "5MiB", "10MiB",` — Set `CASES`: evaluate `['threshold', 'threshold-plus-one', '1MiB', '5MiB', '10MiB', 'unicode', 'escaped', 'rows', 'dictionary', 'nested', 'too-large', '20MiB']`.
+- **Line 153:** `"unicode", "escaped", "rows", "dictionary", "nested", "too-large", "20MiB"]` — Continue building `CASES` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 154:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 155:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_large_payloads_over_http`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 156:** `@pytest.mark.parametrize("case", CASES)` — Ask pytest to run this test once for each supplied case, so distinct shapes or invalid inputs are checked independently.
+- **Line 157:** `def test_large_payloads_over_http(backend, tmp_path, case):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 158:** `value = large_value(case)` — Set `value`: call `large_value` with the arguments shown to perform the current operation.
+- **Line 159:** `with http_app(backend, tmp_path) as client:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 160:** `peer = HttpPeer(client)` — Set `peer`: call `HttpPeer` with the arguments shown to perform the current operation.
+- **Line 161:** `response = peer.rpc("tools/call", {"name": "payload", "arguments": {"case": case}})` — Set `response`: call `peer.rpc` with the arguments shown to perform the current operation.
+- **Line 162:** `if case == "threshold":` — Check evaluate `case == 'threshold'`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 163:** `result = response["result"]` — Set `result`: evaluate `response['result']`.
+- **Line 164:** `assert result["content"][0]["text"] == value` — Assert `result['content'][0]['text'] == value`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 165:** `assert "resource_uri" not in result.get("structuredContent", {})` — Assert `'resource_uri' not in result.get('structuredContent', {})`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 166:** `elif case in ("too-large", "20MiB"):` — Test this next case only if previous branches did not match; the condition shown selects the appropriate handling.
+- **Line 167:** `result = response["result"]` — Set `result`: evaluate `response['result']`.
+- **Line 168:** `assert result["isError"] is True` — Assert `result['isError'] is True`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 169:** `assert "max_bytes" in result["content"][0]["text"]` — Assert `'max_bytes' in result['content'][0]['text']`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 170:** `assert len(json.dumps(result)) < 2048` — Assert `len(json.dumps(result)) < 2048`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 171:** `else:` — Enter the alternative path only when the preceding condition did not match.
+- **Line 172:** `data = envelope(response)` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 173:** `assert_full(peer, data, value)` — Call `assert_full` with the arguments shown to perform the current operation.
+- **Line 174:** `assert "error" in HttpPeer(client).read(data["resource_uri"])` — Assert `'error' in HttpPeer(client).read(data['resource_uri'])`. A false result fails this test immediately, checking the behavior described for `test_large_payloads_over_http` rather than silently accepting a regression.
+- **Line 175:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 176:** `(blank)` — Blank separator for readability; it performs no operation.
+### `StdioPeer`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 177:** `class StdioPeer:` — Define this class. Group the methods below into the provider or test configuration shown.
+### `StdioPeer.__init__`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 178:** `def __init__(self, backend, root):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 179:** `self.process = subprocess.Popen(` — Set `self.process`: call `subprocess.Popen` with the arguments shown to perform the current operation.
+- **Line 180:** `[sys.executable, str(ROOT / "tests" / "spillover_transport_support.py"), backend, str(root)],` — Continue building `self.process` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 181:** `cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT)},` — Continue building `self.process` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 182:** `stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,` — Continue building `self.process` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 183:** `text=True, encoding="utf-8",` — Continue building `self.process` with the field, argument, or value shown. It belongs to the assignment begun above rather than a separate assignment.
+- **Line 184:** `)` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 185:** `self.reader = ThreadPoolExecutor(max_workers=1)` — Set `self.reader`: call `ThreadPoolExecutor` with the arguments shown to perform the current operation.
+- **Line 186:** `self.next_id = 1` — Set `self.next_id`: use the literal `1`.
+- **Line 187:** `(blank)` — Blank separator for readability; it performs no operation.
+### `StdioPeer.rpc`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 188:** `def rpc(self, method, params):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 189:** `self.process.stdin.write(json.dumps({` — Write the already serialized document to the exclusive temporary stream.
+- **Line 190:** `"jsonrpc": "2.0", "id": self.next_id, "method": method,` — Write the already serialized document to the exclusive temporary stream.
+- **Line 191:** `"params": {**params, "_meta": MODERN_META},` — Write the already serialized document to the exclusive temporary stream.
+- **Line 192:** `}) + "\n")` — Write the already serialized document to the exclusive temporary stream.
+- **Line 193:** `self.process.stdin.flush()` — Call `self.process.stdin.flush` with the arguments shown to perform the current operation.
+- **Line 194:** `line = self.reader.submit(self.process.stdout.readline).result(timeout=10)` — Set `line`: call `self.reader.submit(self.process.stdout.readline).result` with the arguments shown to perform the current operation.
+- **Line 195:** `response = json.loads(line)` — Set `response`: parse stored JSON text back into Python data.
+- **Line 196:** `assert response["id"] == self.next_id` — Assert `response['id'] == self.next_id`. A false result fails this test immediately, checking the behavior described for `rpc` rather than silently accepting a regression.
+- **Line 197:** `self.next_id += 1` — Update `self.next_id` using `Add` and `1`; this adjusts the running counter or controlled test clock.
+- **Line 198:** `return response` — Return from this operation: evaluate `response`. No following statements in this call execute.
+- **Line 199:** `(blank)` — Blank separator for readability; it performs no operation.
+### `StdioPeer.close`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 200:** `def close(self, *, clean=False):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 201:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 202:** `if clean:` — Check evaluate `clean`. The indented body handles this case; other results continue past it.
+- **Line 203:** `self.process.stdin.close()` — Call `self.process.stdin.close` with the arguments shown to perform the current operation.
+- **Line 204:** `self.process.wait(timeout=10)` — Call `self.process.wait` with the arguments shown to perform the current operation.
+- **Line 205:** `assert self.process.returncode == 0, self.process.stderr.read()` — Assert `self.process.returncode == 0`. A false result fails this test immediately, checking the behavior described for `close` rather than silently accepting a regression.
+- **Line 206:** `assert self.process.stdout.read() == ""` — Assert `self.process.stdout.read() == ''`. A false result fails this test immediately, checking the behavior described for `close` rather than silently accepting a regression.
+- **Line 207:** `finally:` — Always run cleanup, whether the preceding work succeeded, failed, or was cancelled.
+- **Line 208:** `if self.process.poll() is None:` — Check evaluate `self.process.poll() is None`; the branch runs only when this comparison is true. The indented body handles this case; other results continue past it.
+- **Line 209:** `self.process.kill()` — Call `self.process.kill` with the arguments shown to perform the current operation.
+- **Line 210:** `self.process.wait(timeout=5)` — Call `self.process.wait` with the arguments shown to perform the current operation.
+- **Line 211:** `self.reader.shutdown()` — Call `self.reader.shutdown` with the arguments shown to perform the current operation.
+- **Line 212:** `for stream in (self.process.stdin, self.process.stdout, self.process.stderr):` — Iterate `stream` through `(self.process.stdin, self.process.stdout, self.process.stderr)`. Each iteration applies the indented behavior to one entry, interceptor, caller, or test case.
+- **Line 213:** `stream.close()` — Call `stream.close` with the arguments shown to perform the current operation.
+- **Line 214:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 215:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_stdio_roundtrip_connection_isolation_and_shutdown`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 216:** `def test_stdio_roundtrip_connection_isolation_and_shutdown(backend, tmp_path):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 217:** `# Both processes use one disk root sequentially to prove persistence does not` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 218:** `# let a later stdio connection inherit anonymous ownership of an earlier one.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 219:** `first = StdioPeer(backend, tmp_path)` — Set `first`: call `StdioPeer` with the arguments shown to perform the current operation.
+- **Line 220:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 221:** `value = "stdio-result" * 100` — Set `value`: evaluate `'stdio-result' * 100`.
+- **Line 222:** `data = envelope(first.rpc("tools/call", {"name": "payload", "arguments": {"value": value}}))` — Set `data`: call `envelope` with the arguments shown to perform the current operation.
+- **Line 223:** `result = first.rpc("resources/read", {"uri": data["resource_uri"]})` — Set `result`: call `first.rpc` with the arguments shown to perform the current operation.
+- **Line 224:** `assert result["result"]["contents"][0]["text"] == value` — Assert `result['result']['contents'][0]['text'] == value`. A false result fails this test immediately, checking the behavior described for `test_stdio_roundtrip_connection_isolation_and_shutdown` rather than silently accepting a regression.
+- **Line 225:** `first.close(clean=True)` — Call `first.close` with the arguments shown to perform the current operation.
+- **Line 226:** `finally:` — Always run cleanup, whether the preceding work succeeded, failed, or was cancelled.
+- **Line 227:** `first.close()` — Call `first.close` with the arguments shown to perform the current operation.
+- **Line 228:** `second = StdioPeer(backend, tmp_path)` — Set `second`: call `StdioPeer` with the arguments shown to perform the current operation.
+- **Line 229:** `try:` — Begin work whose failure must be handled or whose cleanup must always execute.
+- **Line 230:** `assert "error" in second.rpc("resources/read", {"uri": data["resource_uri"]})` — Assert `'error' in second.rpc('resources/read', {'uri': data['resource_uri']})`. A false result fails this test immediately, checking the behavior described for `test_stdio_roundtrip_connection_isolation_and_shutdown` rather than silently accepting a regression.
+- **Line 231:** `second.close(clean=True)` — Call `second.close` with the arguments shown to perform the current operation.
+- **Line 232:** `finally:` — Always run cleanup, whether the preceding work succeeded, failed, or was cancelled.
+- **Line 233:** `second.close()` — Call `second.close` with the arguments shown to perform the current operation.
+- **Line 234:** `(blank)` — Blank separator for readability; it performs no operation.
+- **Line 235:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 236:** `def test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task(tmp_path):` — Define this callable. Its body below carries out the surrounding operation; this line defines it without running it.
+### `test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task.scenario`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 237:** `async def scenario():` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 238:** `app = build_app("memory", tmp_path, era="auto", threshold=16)` — Set `app`: call `build_app` with the arguments shown to perform the current operation.
+- **Line 239:** `async with create_client_server_memory_streams() as (client, server):` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 240:** `client_read, client_write = client` — Set `(client_read, client_write)`: evaluate `client`.
+- **Line 241:** `seen = []` — Set `seen`: evaluate `[]`.
+- **Line 242:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task.scenario.serve`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 243:** `async def serve():` — Define an asynchronous operation that callers await. Its body below carries out the surrounding operation; this line defines it without running it.
+- **Line 244:** `await serve_stdio_streams(app.mcp_server, *server, "auto")` — Await call `serve_stdio_streams` with the arguments shown to perform the current operation.
+- **Line 245:** `seen.append(stdio_connection_id.get())` — Call `seen.append` with the arguments shown to perform the current operation.
+- **Line 246:** `(blank)` — Blank separator for readability; it performs no operation.
+### `test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task.scenario`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 247:** `async with anyio.create_task_group() as group:` — Continue the current declaration or expression using the exact syntax shown; its purpose is described in the enclosing operation above.
+- **Line 248:** `group.start_soon(serve)` — Call `group.start_soon` with the arguments shown to perform the current operation.
+- **Line 249:** `await client_write.send(SessionMessage(jsonrpc_message_adapter.validate_python({` — Await call `client_write.send` with the arguments shown to perform the current operation.
+- **Line 250:** `"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {` — Await call `client_write.send` with the arguments shown to perform the current operation.
+- **Line 251:** `"name": "payload", "arguments": {"value": "x" * 100}, "_meta": MODERN_META,` — Await call `client_write.send` with the arguments shown to perform the current operation.
+- **Line 252:** `},` — Close the continued expression or signature begun above; this delimiter groups its preceding arguments or fields and adds no separate runtime action.
+- **Line 253:** `})))` — Await call `client_write.send` with the arguments shown to perform the current operation.
+- **Line 254:** `response = await asyncio.wait_for(client_read.receive(), 5)` — Set `response`: await call `asyncio.wait_for` with the arguments shown to perform the current operation.
+- **Line 255:** `assert "resource_uri" in response.message.model_dump_json()` — Assert `'resource_uri' in response.message.model_dump_json()`. A false result fails this test immediately, checking the behavior described for `scenario` rather than silently accepting a regression.
+- **Line 256:** `assert stdio_connection_id.get() is None` — Assert `stdio_connection_id.get() is None`. A false result fails this test immediately, checking the behavior described for `scenario` rather than silently accepting a regression.
+- **Line 257:** `# The same app can serve HTTP concurrently without borrowing the` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 258:** `# anonymous identity belonging to this stdio connection.` — Comment explaining the intent of the following operation; Python does not execute it.
+- **Line 259:** `from starlette.testclient import TestClient` — Import the named APIs from `starlette.testclient` so this file can use the shared SDK, library, or test implementation.
+- **Line 260:** `with TestClient(app.get_combined_app(json_response=True)) as http:` — Enter the shown context manager. Locks are released and file streams are closed even if the protected operation raises an exception.
+- **Line 261:** `assert HttpPeer(http, "auto").call("x" * 100)["result"]["isError"] is True` — Assert `HttpPeer(http, 'auto').call('x' * 100)['result']['isError'] is True`. A false result fails this test immediately, checking the behavior described for `scenario` rather than silently accepting a regression.
+- **Line 262:** `await client_write.aclose()` — Await call `client_write.aclose` with the arguments shown to perform the current operation.
+- **Line 263:** `assert seen == [None]` — Assert `seen == [None]`. A false result fails this test immediately, checking the behavior described for `scenario` rather than silently accepting a regression.
+- **Line 264:** `assert stdio_connection_id.get() is None` — Assert `stdio_connection_id.get() is None`. A false result fails this test immediately, checking the behavior described for `scenario` rather than silently accepting a regression.
+### `test_stdio_identity_is_reset_after_shutdown_and_not_inherited_by_other_task`
+
+These lines connect this operation to the storage and resource flow described above.
+
+- **Line 265:** `asyncio.run(scenario())` — Create an event loop, execute this test scenario to completion, and close the loop.
+
 ## README usage examples, line by line
 
 The README contains additional example code rather than runtime SDK implementation. The Python and JSON examples added for this feature are explained here too.
 
-- **README line 699:** `from pydantic import BaseModel` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
-- **README line 700:** `from nitrostack import DataSpilloverInterceptor, MemorySpilloverStore, tool, use_interceptors` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
-- **README line 701:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
-- **README line 702:** `spillover = DataSpilloverInterceptor(` — Create one configured interceptor instance that the tool decorator below will reuse for calls.
-- **README line 703:** `threshold_bytes=64 * 1024,` — Set the spill threshold to 64 × 1024 = 65,536 serialized bytes. Equal-sized results remain unchanged; larger results move into the store.
-- **README line 704:** `store=MemorySpilloverStore(` — Choose RAM storage, which provides TTL and LRU eviction and does not survive a process restart.
-- **README line 705:** `max_bytes=10 * 1024 * 1024,` — Allow one decoded stored result to occupy at most 10 MiB; exceeding this raises PayloadTooLargeError rather than evicting enough entries to accept it.
-- **README line 706:** `max_total_bytes=100 * 1024 * 1024,` — Set a 100 MiB store capacity. RAM counts payload bytes; the file store counts actual JSON document bytes including base64 and metadata overhead.
-- **README line 707:** `ttl_seconds=300,` — Keep each result available for five minutes from its insertion time. Reads never extend this lifetime.
-- **README line 708:** `),` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
-- **README line 709:** `resource_uri_prefix="resource://data-spillover/",` — Use the default MCP resource-address namespace; the store-generated opaque ID is appended to this prefix.
-- **README line 710:** `)` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
-- **README line 711:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
-- **README line 712:** `class ReportInput(BaseModel):` — Define the Pydantic model used to validate the incoming report tool arguments.
-- **README line 713:** `count: int = 10000` — Accept an integer row count and default it to 10,000 when the client omits the argument.
-- **README line 714:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
-- **README line 715:** `class ReportTools:` — Group the report method in a provider/controller class that must be registered in the user application module.
-- **README line 716:** `@tool(name="report", description="Generate a report", input_schema=ReportInput)` — Expose the report method as an MCP tool, publish its description, and use ReportInput for argument validation.
-- **README line 717:** `@use_interceptors(spillover)` — Attach the configured spillover instance to this method. The pipeline will run it around each report call.
-- **README line 718:** `async def report(self, input: ReportInput, context):` — Declare the asynchronous report handler. The SDK passes validated input and an execution context containing caller information.
-- **README line 719:** `return [{"row": index} for index in range(input.count)]` — Build the complete list of row dictionaries. The interceptor measures the returned JSON, saves it if oversized, and replaces it with a small preview and URI.
-- **README line 730:** `{` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
-- **README line 731:** `"jsonrpc": "2.0",` — Identify the request as a JSON-RPC 2.0 message.
-- **README line 732:** `"id": 2,` — Assign the client's request identifier so it can associate the resource response with this request.
-- **README line 733:** `"method": "resources/read",` — Ask the MCP server to read a resource rather than invoke the original tool again.
-- **README line 734:** `"params": {"uri": "resource://data-spillover/<id-from-tool-result>"}` — Supply the exact resource_uri returned by the earlier tool result. The angle-bracket text is a placeholder, and knowing a URI alone does not bypass caller ownership checks.
-- **README line 735:** `}` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
-- **README line 746:** `from nitrostack import FileSpilloverStore` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
-- **README line 747:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
-- **README line 748:** `store = FileSpilloverStore(` — Create the disk-backed alternative; pass this instance as the interceptor's store when persistence is desired.
-- **README line 749:** `".nitrostack/spillover",` — Choose a storage directory relative to the running server's working directory. The store resolves it to an absolute root and confines generated files there.
-- **README line 750:** `max_bytes=10 * 1024 * 1024,` — Allow one decoded stored result to occupy at most 10 MiB; exceeding this raises PayloadTooLargeError rather than evicting enough entries to accept it.
-- **README line 751:** `max_total_bytes=100 * 1024 * 1024,` — Set a 100 MiB store capacity. RAM counts payload bytes; the file store counts actual JSON document bytes including base64 and metadata overhead.
-- **README line 752:** `ttl_seconds=300,` — Keep each result available for five minutes from its insertion time. Reads never extend this lifetime.
-- **README line 753:** `)` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
+- **README line 437:** `from pydantic import BaseModel` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
+- **README line 438:** `from nitrostack import DataSpilloverInterceptor, MemorySpilloverStore, tool, use_interceptors` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
+- **README line 439:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
+- **README line 440:** `spillover = DataSpilloverInterceptor(` — Create one configured interceptor instance that the tool decorator below will reuse for calls.
+- **README line 441:** `threshold_bytes=64 * 1024,` — Set the spill threshold to 64 × 1024 = 65,536 serialized bytes. Equal-sized results remain unchanged; larger results move into the store.
+- **README line 442:** `store=MemorySpilloverStore(` — Choose RAM storage, which provides TTL and LRU eviction and does not survive a process restart.
+- **README line 443:** `max_bytes=10 * 1024 * 1024,` — Allow one decoded stored result to occupy at most 10 MiB; exceeding this raises PayloadTooLargeError rather than evicting enough entries to accept it.
+- **README line 444:** `max_total_bytes=100 * 1024 * 1024,` — Set a 100 MiB store capacity. RAM counts payload bytes; the file store counts actual JSON document bytes including base64 and metadata overhead.
+- **README line 445:** `ttl_seconds=300,` — Keep each result available for five minutes from its insertion time. Reads never extend this lifetime.
+- **README line 446:** `),` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
+- **README line 447:** `resource_uri_prefix="resource://data-spillover/",` — Use the default MCP resource-address namespace; the store-generated opaque ID is appended to this prefix.
+- **README line 448:** `)` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
+- **README line 449:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
+- **README line 450:** `class ReportInput(BaseModel):` — Define the Pydantic model used to validate the incoming report tool arguments.
+- **README line 451:** `count: int = 10000` — Accept an integer row count and default it to 10,000 when the client omits the argument.
+- **README line 452:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
+- **README line 453:** `class ReportTools:` — Group the report method in a provider/controller class that must be registered in the user application module.
+- **README line 454:** `@tool(name="report", description="Generate a report", input_schema=ReportInput)` — Expose the report method as an MCP tool, publish its description, and use ReportInput for argument validation.
+- **README line 455:** `@use_interceptors(spillover)` — Attach the configured spillover instance to this method. The pipeline will run it around each report call.
+- **README line 456:** `async def report(self, input: ReportInput, context):` — Declare the asynchronous report handler. The SDK passes validated input and an execution context containing caller information.
+- **README line 457:** `return [{"row": index} for index in range(input.count)]` — Build the complete list of row dictionaries. The interceptor measures the returned JSON, saves it if oversized, and replaces it with a small preview and URI.
+- **README line 468:** `{` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
+- **README line 469:** `"jsonrpc": "2.0",` — Identify the request as a JSON-RPC 2.0 message.
+- **README line 470:** `"id": 2,` — Assign the client's request identifier so it can associate the resource response with this request.
+- **README line 471:** `"method": "resources/read",` — Ask the MCP server to read a resource rather than invoke the original tool again.
+- **README line 472:** `"params": {"uri": "resource://data-spillover/<id-from-tool-result>"}` — Supply the exact resource_uri returned by the earlier tool result. The angle-bracket text is a placeholder, and knowing a URI alone does not bypass caller ownership checks.
+- **README line 473:** `}` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
+- **README line 484:** `from nitrostack import FileSpilloverStore` — Import the public SDK or Pydantic APIs used by the example; users do not need private implementation imports.
+- **README line 485:** `(blank)` — Separate the example into readable declarations; this line has no runtime effect.
+- **README line 486:** `store = FileSpilloverStore(` — Create the disk-backed alternative; pass this instance as the interceptor's store when persistence is desired.
+- **README line 487:** `".nitrostack/spillover",` — Choose a storage directory relative to the running server's working directory. The store resolves it to an absolute root and confines generated files there.
+- **README line 488:** `max_bytes=10 * 1024 * 1024,` — Allow one decoded stored result to occupy at most 10 MiB; exceeding this raises PayloadTooLargeError rather than evicting enough entries to accept it.
+- **README line 489:** `max_total_bytes=100 * 1024 * 1024,` — Set a 100 MiB store capacity. RAM counts payload bytes; the file store counts actual JSON document bytes including base64 and metadata overhead.
+- **README line 490:** `ttl_seconds=300,` — Keep each result available for five minutes from its insertion time. Reads never extend this lifetime.
+- **README line 491:** `)` — Close the surrounding constructor call or JSON object. This punctuation completes the example syntax without adding a separate operation.
 
 ## Changes to existing behavior
 
@@ -1548,19 +2259,29 @@ The README contains additional example code rather than runtime SDK implementati
 - Undecorated tools retain their original behavior and output schema. Decorated tools advertise an alternative spillover envelope when they already have an output schema.
 - Resource-not-found is the common outward error for expired, unknown, malformed, or unauthorized spillover addresses. A storage write error becomes the existing tool-error response; the large result is not sent as a fallback.
 - Widgets receive ordinary data as before until a result spills. A spilled result bypasses the widget transformer because its envelope is not the original tool data.
-- The previous feature branch and stash are preserved. The implementation branch is feature/issue-67-data-spillover.
 
-Total Python lines explained: **879**. The README adds usage examples and operational constraints; it is documentation, rather than another executable implementation.
+Total Python lines explained: **1358**. The README adds usage examples and operational constraints; it is documentation, rather than another executable implementation.
 
-## Verification results
+## Production transport identity
 
-- Spillover acceptance tests: **38 passed, 1 skipped**. The real symlink test is skipped because this Windows account cannot create symlinks. A separate test simulates symlink detection and passes.
-- Initial focused regression set (spillover, pipeline ordering, testing harness, tool schemas): **46 passed, 1 skipped**, before the additional task/OAuth/expiry acceptance tests were added.
-- Full suite with coverage, after refreshing the editable SDK version metadata: **868 passed, 1 failed, 1 skipped**, with **85.80%** total coverage. This exceeds the repository's configured 50% coverage floor.
-- The remaining failure was `tests/test_oauth.py::test_discovery_dcr_404_when_disabled_or_missing_client_id`, where Windows aborted a localhost HTTP connection with WinError 10053.
-- The entire OAuth test module passed separately (**34 tests**). An unchanged `main` archive also passed its full suite (**831 tests**, 85.41% coverage). These results do not establish a specific root cause for the full-run connection failure.
-- A subsequent complete run without coverage produced **867 passed, 2 failed, 1 skipped**: the same OAuth test and `test_discovery_server_idempotent_start_and_dcr_http` failed with the same connection-aborted error. The feature's acceptance tests continued to pass.
-- The full repository suite therefore is **not entirely green on this Windows host**. No production OAuth code or existing OAuth tests were changed to mask that result.
-- `git diff --check` passed. At the time of verification, the implementation was uncommitted and unpushed on `feature/issue-67-data-spillover`.
+Official MCP session proxies may be recreated for each request. Their Python
+object identity is therefore not a durable HTTP or stdio ownership key.
+Legacy HTTP instead uses the server-issued session ID, resolved only after the
+official manager routes and validates the request. Modern/auto HTTP has no
+anonymous durable session: a verified principal is required to spill.
 
-The local virtual environment needed the already-declared `pytest-timeout` development dependency. Its editable SDK installation was refreshed from stale version 0.3.2 to the pulled source version 0.4.2; this resolved an unrelated upgrade-test version mismatch without changing dependency declarations.
+Stdio allocates a random connection ID in `serve_stdio_streams()` and resets its
+context variable in `finally`. MCP 2.3 propagates the sender's per-message context,
+which can originate before the stream server starts. The stream adapter copies
+that context, preserves its other variables, and binds the server's connection
+ID before passing each message unchanged to the official MCP loop. It does not
+parse JSON-RPC, implement handlers or replace official transport ownership.
+The HTTP path is checked first, so a concurrent HTTP request cannot borrow a
+stdio identity. Only explicit in-process test/session contexts retain weak keys.
+
+## Verification
+
+Current collection, full-suite matrix results and baseline checks are recorded in
+[PR #92 verification](pr92-verification.md). Large-output cases now have committed
+HTTP tests in `tests/test_spillover_transport.py`; the JSON report beside this
+walkthrough names their command and expectations instead of historical timings.

@@ -457,6 +457,7 @@ async def test_add():
 if __name__ == "__main__":
     asyncio.run(test_add())
 ```
+
 ### Large tool results: data spillover
 
 Attach `DataSpilloverInterceptor` to a tool to store large results separately and
@@ -539,6 +540,12 @@ HTTP clients need a persistent MCP session; sessionless HTTP clients should
 authenticate. Expired results and results owned by another caller return
 resource-not-found. Stored results are not enumerated in `resources/list`.
 
+HTTP ownership uses the server-issued session ID after the official transport
+has validated it, rather than the identity of an SDK request/session proxy.
+Stdio assigns a random identity to each live stream connection. Requests on that
+connection can retrieve its anonymous results; a later connection cannot inherit
+them. Concurrent HTTP requests cannot borrow a stdio connection's identity.
+
 Successful explicit MCP tool results are stored as JSON; errors and input-required
 responses pass through. Decorated tools with output schemas advertise either the
 original output or the spillover envelope. Spilled widget results return the
@@ -546,3 +553,7 @@ resource reference without invoking the widget's data transformer.
 
 See [the line-by-line implementation walkthrough](docs/spillover-line-by-line.md)
 for the storage, interceptor, MCP integration, and tests.
+
+Independent HTTP/stdio tests and reproducible large-output checks live in
+`tests/test_spillover_transport.py`; see
+[PR #92 verification](docs/pr92-verification.md) for commands and platform results.
