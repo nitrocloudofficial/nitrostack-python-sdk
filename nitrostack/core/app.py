@@ -1359,7 +1359,7 @@ class McpApplication:
                     context.auth = auth_context_from_payload(payload)
             except Exception:
                 pass  # Invalid credentials remain denied by caller_owner.
-        bind_spillover_context(context, rc, self._spillover)
+        bind_spillover_context(context, rc, self._spillover, self.protocol_era)
 
     def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:
         return (
