@@ -313,6 +313,29 @@ Example:
 server = ServerConfig(name="my-server", transport_type="http", max_sessions=100, session_timeout_ms=1_800_000)
 ```
 
+### Health resources
+
+Decorated health checks are exposed at both `health://status` and `health://checks`.
+The status resource keeps its original `{check_name: status}` JSON map for existing
+clients. The checks resource returns an aggregate payload with `status`, `uptimeSeconds`,
+per-check `name`, `status`, `latencyMs`, and `message`, plus `count`, `transforms`,
+`timestamp`, and `sdkVersion`. Checks default to a five-second timeout and run independently;
+set a per-check timeout with `@health_check("database", timeout=2.0)`. A false check result
+marks the aggregate `degraded`; a timeout or exception marks it `unhealthy` (exceptions are
+reported with a generic message on `health://checks`; the legacy status resource retains its
+existing error string). A timed-out check has status `timeout`.
+
+Async checks are timed out on the event loop. Sync checks run in a dedicated four-worker pool,
+with at most four submitted sync checks at a time; a timed-out sync function keeps its worker
+slot until it returns, but does not hold up the resource response or `asyncio.run()` shutdown.
+Executor threads are non-daemon, so a sync check that never returns can still delay process exit.
+Sync checks therefore run off the main thread and should not depend on thread-bound resources
+such as a database connection created on the main thread. Transform entries currently report
+their name, type, and order; `details` is reserved for telemetry that is not yet collected.
+The SDK version is resolved once when the package loads.
+
+`ServerHealthPayload` and `TransformTelemetry` are exported from `nitrostack` for typing.
+
 `ServerConfig.protocol_era` is used only when `MCP_STATELESS` and `NITRO_MCP_PROTOCOL_VERSION` are both unset. Unknown tokens become `auto`, same as an unknown env value.
 
 ---
