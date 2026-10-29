@@ -7,6 +7,7 @@ import asyncio
 import inspect
 import datetime
 import logging
+from unittest.mock import NonCallableMock
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Pattern, Set, Tuple, Type
@@ -657,10 +658,16 @@ class McpApplication:
                         seen_instance_ids.add(id(instance))
                         module_instances.append(instance)
 
+        # Kept so the testing harness can run provider shutdown hooks.
+        self._module_instances = module_instances
+
         # 3. Discover decorated methods on resolved module providers and controllers
         for instance in module_instances:
             # Scan members of this instance
             for name, member in inspect.getmembers(instance):
+                # A test mock answers hasattr() for everything, so it would look like a tool.
+                if isinstance(member, NonCallableMock):
+                    continue
                 # Discover Tools
                 if hasattr(member, "_mcp_tool_config"):
                     tool_config: ToolConfig = getattr(member, "_mcp_tool_config")

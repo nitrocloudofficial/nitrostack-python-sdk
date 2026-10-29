@@ -425,3 +425,67 @@ async def test_add():
 if __name__ == "__main__":
     asyncio.run(test_add())
 ```
+
+#### Overrides, cleanup and mocks
+Replace a provider with a fake, and release resources when the test ends:
+<!-- readme-test -->
+```python
+import asyncio
+from pydantic import BaseModel
+from nitrostack import ExecutionContext, module, injectable, tool
+from nitrostack.testing import NitroTestingModule, MockLogger, create_mock_context
+
+
+class ItemInput(BaseModel):
+    key: str
+
+
+@injectable()
+class Database:
+    def __init__(self):
+        raise RuntimeError("the real database must not be built in tests")
+
+
+class FakeDatabase:
+    closed = 0
+
+    def get(self, key):
+        return f"fake-{key}"
+
+    def on_module_destroy(self):  # provider shutdown hook; runs once on close()
+        FakeDatabase.closed += 1
+
+
+@injectable(deps=[Database])
+class Items:
+    def __init__(self, db):
+        self.db = db
+
+    @tool(name="get_item", description="Look up an item", input_schema=ItemInput)
+    async def get_item(self, input: ItemInput, context: ExecutionContext) -> str:
+        return self.db.get(input.key)
+
+
+@module(name="items", providers=[Database, Items])
+class AppModule:
+    pass
+
+
+async def test_get_item():
+    async with await NitroTestingModule.create(AppModule, overrides={Database: FakeDatabase()}) as app:
+        assert await app.call_tool("get_item", {"input": {"key": "a"}}) == "fake-a"
+    assert FakeDatabase.closed == 1  # close() ran the hook; calling it again would not repeat it
+
+    logger = MockLogger()
+    context = create_mock_context(logger=logger)
+    context.logger.info("hello")
+    assert logger.has_log("info", "hello")
+
+
+if __name__ == "__main__":
+    asyncio.run(test_get_item())
+```
+`overrides` takes an instance, or a class/function that builds one (it may be `async`). Overrides
+are undone by `close()`. Shutdown hooks are methods named `on_module_destroy` (sync or async).
+`flush_tasks()` yields to the event loop so background tasks can finish. The optional pytest
+fixture `nitro_client` is enabled with `pytest_plugins = ["nitrostack.testing.pytest_plugin"]`.
