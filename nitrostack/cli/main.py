@@ -1666,8 +1666,7 @@ def register_server(name: str, file_path: str):
         print(f"Error: Script file '{file_path}' does not exist.")
         sys.exit(1)
         
-    abs_file_path = os.path.abspath(file_path)
-    python_exe = sys.executable
+    server_entry = _build_server_entry(file_path)
     
     config_paths = get_claude_config_paths()
     if not config_paths:
@@ -1691,10 +1690,7 @@ def register_server(name: str, file_path: str):
             if "mcpServers" not in config:
                 config["mcpServers"] = {}
                 
-            config["mcpServers"][name] = {
-                "command": python_exe,
-                "args": [abs_file_path]
-            }
+            config["mcpServers"][name] = server_entry
             
             # Create directory if needed
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1710,6 +1706,74 @@ def register_server(name: str, file_path: str):
         print("\nAll done! Please fully restart Claude Desktop to load your new server.")
     else:
         print("Error: Failed to register the server in any configuration files.")
+
+
+def _build_server_entry(file_path: str):
+    """Build the stdio server entry shared by register and Cursor configs."""
+    return {
+        "command": sys.executable,
+        "args": [os.path.abspath(file_path)],
+    }
+
+
+def _write_json_atomic(path: str, data):
+    """Replace a JSON config atomically so readers never see a partial write."""
+    import json
+    import tempfile
+
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".mcp-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def register_cursor_server(name: str, file_path: str = "main.py", *, global_config: bool = False, transport: str = "command"):
+    """Merge this project into Cursor's project or user MCP configuration."""
+    import json
+
+    if transport not in ("command", "streamable-http", "sse"):
+        raise ValueError("transport must be command, streamable-http, or sse")
+    if transport == "command" and not os.path.exists(file_path):
+        print(f"Error: Script file '{file_path}' does not exist.")
+        sys.exit(1)
+
+    if global_config:
+        config_path = os.path.join(os.path.expanduser("~"), ".cursor", "mcp.json")
+    else:
+        config_path = os.path.join(os.getcwd(), ".cursor", "mcp.json")
+
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+    if not isinstance(config, dict):
+        config = {}
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+        config["mcpServers"] = servers
+
+    if transport == "command":
+        entry = _build_server_entry(file_path)
+    else:
+        route = "mcp" if transport == "streamable-http" else "sse"
+        entry = {"url": f"http://localhost:3000/{route}"}
+    servers[name] = entry
+    _write_json_atomic(config_path, config)
+    print(f"Successfully registered server '{name}' in Cursor config: {config_path}")
 
 def main():
     if hasattr(sys.stdout, "reconfigure"):
@@ -1768,6 +1832,18 @@ def main():
     reg_parser = subparsers.add_parser("register", help="Register server script inside Claude Desktop configuration")
     reg_parser.add_argument("--name", default=os.path.basename(os.getcwd()), help="Name of the server (defaults to folder name)")
     reg_parser.add_argument("--file", default="main.py", help="Python script to register (defaults to main.py)")
+
+    # cursor command
+    cursor_parser = subparsers.add_parser("cursor", help="Register this server in Cursor MCP configuration")
+    cursor_parser.add_argument("--global", dest="global_config", action="store_true", help="Write to ~/.cursor/mcp.json")
+    cursor_parser.add_argument(
+        "--transport",
+        choices=("command", "streamable-http", "sse"),
+        default="command",
+        help="Connection type (default: command)",
+    )
+    cursor_parser.add_argument("--name", default=os.path.basename(os.getcwd()), help="Name of the server")
+    cursor_parser.add_argument("--file", default="main.py", help="Python script to register for command transport")
 
     # generate command
     gen_parser = subparsers.add_parser(
@@ -1870,6 +1946,8 @@ def main():
         run_start(port=args.port, widget=args.widget)
     elif args.command == "register":
         register_server(args.name, args.file)
+    elif args.command == "cursor":
+        register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
     elif args.command == "generate":
         if not args.generator:
             gen_parser.print_help()
