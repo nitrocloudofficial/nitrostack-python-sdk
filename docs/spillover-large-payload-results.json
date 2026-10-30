@@ -1,0 +1,72 @@
+{
+  "description": "Reproducible large outputs generated inside tools and checked through official HTTP transport",
+  "test_module": "tests/test_spillover_transport.py",
+  "test_name": "test_large_payloads_over_http",
+  "command": "python -m pytest tests/test_spillover_transport.py -q",
+  "backends": [
+    "memory",
+    "file"
+  ],
+  "threshold_bytes": 65536,
+  "max_payload_bytes": 10485760,
+  "checks_passed": 24,
+  "verified_on": "2026-10-29",
+  "mcp_version": "2.3.0",
+  "assertions": [
+    "UTF-8 original size",
+    "preview at most 2048 bytes",
+    "exact full resource content",
+    "another HTTP session denied"
+  ],
+  "cases": [
+    {
+      "case": "threshold",
+      "expectation": "64 KiB returned unchanged"
+    },
+    {
+      "case": "threshold-plus-one",
+      "expectation": "64 KiB plus one byte spills"
+    },
+    {
+      "case": "1MiB",
+      "expectation": "1 MiB spills and is retrieved byte-for-byte"
+    },
+    {
+      "case": "5MiB",
+      "expectation": "5 MiB spills and is retrieved byte-for-byte"
+    },
+    {
+      "case": "10MiB",
+      "expectation": "10 MiB spills and is retrieved byte-for-byte"
+    },
+    {
+      "case": "unicode",
+      "expectation": "Multibyte UTF-8 size and retrieval match"
+    },
+    {
+      "case": "escaped",
+      "expectation": "Escaped text has a bounded preview and exact retrieval"
+    },
+    {
+      "case": "rows",
+      "expectation": "100,000-row list spills and is retrieved exactly"
+    },
+    {
+      "case": "dictionary",
+      "expectation": "50,000-entry dictionary spills and is retrieved exactly"
+    },
+    {
+      "case": "nested",
+      "expectation": "Approximately 6 MiB nested data is retrieved exactly"
+    },
+    {
+      "case": "too-large",
+      "expectation": "10 MiB plus one byte is rejected without a large fallback"
+    },
+    {
+      "case": "20MiB",
+      "expectation": "20 MiB is rejected without a large fallback"
+    }
+  ],
+  "note": "Threshold and rejection cases assert unchanged output or a bounded error, respectively. Timing measurements from the previous in-process script have been replaced by committed transport tests."
+}

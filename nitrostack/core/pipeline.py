@@ -40,7 +40,7 @@ def use_middleware(*middleware: Type[Middleware]):
         return func
     return decorator
 
-def use_interceptors(*interceptors: Type[Interceptor]):
+def use_interceptors(*interceptors: Type[Interceptor] | Interceptor):
     def decorator(func: Callable):
         func._mcp_interceptors = getattr(func, "_mcp_interceptors", []) + list(interceptors)
         return func
@@ -204,7 +204,7 @@ async def run_pipeline(
     context: ExecutionContext,
     guards: List[Type[Guard]],
     middleware: List[Type[Middleware]],
-    interceptors: List[Type[Interceptor]],
+    interceptors: List[Type[Interceptor] | Interceptor],
     pipes: List[Type[Pipe]],
     filters: List[Type[ExceptionFilter]],
     param_name: str = "input",
@@ -248,7 +248,10 @@ async def run_pipeline(
         # Middleware -> Interceptors -> Handler
         current_next = call_target
         for interceptor_cls in reversed(interceptors):
-            interceptor = container.resolve(interceptor_cls)
+            interceptor = (
+                container.resolve(interceptor_cls)
+                if isinstance(interceptor_cls, type) else interceptor_cls
+            )
 
             def make_interceptor_next(nxt, icpt=interceptor):
                 return lambda: icpt.intercept(context, nxt)

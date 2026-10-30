@@ -48,6 +48,10 @@ from nitrostack.core.errors import (
 )
 from nitrostack.core.mcp_server import NitroStackMcpServer
 from nitrostack.core.pipeline import run_pipeline
+from nitrostack.core.interceptors.data_spillover import (
+    DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult,
+    bind_spillover_context, caller_owner,
+)
 from nitrostack.core.additional_decorators import HealthCheckRegistry
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
@@ -611,6 +615,7 @@ class McpApplication:
         self._initial_tools: List[Tuple[Any, Callable, ToolConfig]] = []
         self.task_manager = TaskManager()
         self._in_flight = InFlightRegistry()
+        self._spillover = SpilloverRegistry()
 
         # Pipeline first: handlers consult it lazily when requests arrive.
         self._transforms = TransformPipeline(
@@ -693,6 +698,11 @@ class McpApplication:
         # 5. Wire every protocol handler (tools/resources/prompts/tasks/notifications)
         #    onto the owned low-level server. This is factored out so additional server
         #    instances (e.g. one per HTTP session) can be configured identically.
+        for entry in self._tools.values():
+            for candidate in getattr(entry.method, "_mcp_interceptors", []):
+                interceptor = container.resolve(candidate) if isinstance(candidate, type) else candidate
+                if isinstance(interceptor, DataSpilloverInterceptor):
+                    self._spillover.register(interceptor)
         self._setup_handlers(self.mcp_server)
 
     def _assert_declared_dependencies(
@@ -1180,6 +1190,11 @@ class McpApplication:
 
         output_schema = tool_json_schema(cfg.output_schema)
         if output_schema is not None:
+            if self._has_spillover(entry.method):
+                output_schema = {
+                    "type": "object", "anyOf": [output_schema, SPILLOVER_SCHEMA],
+                    **({"$defs": output_schema["$defs"]} if "$defs" in output_schema else {}),
+                }
             tool_kwargs["outputSchema"] = output_schema
 
         return types.Tool(**tool_kwargs)
@@ -1224,7 +1239,33 @@ class McpApplication:
     # Request dispatch
     # ------------------------------------------------------------------
 
-    def _pipeline_stages(self, method: Callable) -> Tuple[List[Type], List[Type], List[Type], List[Type], List[Type]]:
+    def _has_spillover(self, method: Callable) -> bool:
+        container = DIContainer.get_instance()
+        return any(
+            isinstance(container.resolve(item) if isinstance(item, type) else item,
+                       DataSpilloverInterceptor)
+            for item in getattr(method, "_mcp_interceptors", [])
+        )
+
+    async def _bind_spillover(self, context: ExecutionContext, rc: Any) -> None:
+        if not self._spillover.routes:
+            return
+        # OAuth guards may verify opaque tokens as well as the shared JWT path.
+        from nitrostack.auth.request import authorization_token_from_request, auth_context_from_payload
+        from nitrostack.auth.oauth import OAuthService
+
+        token = authorization_token_from_request(rc)
+        container = DIContainer.get_instance()
+        if context.auth is None and token and container.has_value(OAuthService):
+            try:
+                payload = await container.resolve(OAuthService).introspect_token(token)
+                if payload.get("active"):
+                    context.auth = auth_context_from_payload(payload)
+            except Exception:
+                pass  # Invalid credentials remain denied by caller_owner.
+        bind_spillover_context(context, rc, self._spillover, self.protocol_era)
+
+    def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:
         return (
             getattr(method, "_mcp_guards", []),
             getattr(method, "_mcp_middleware", []),
@@ -1245,6 +1286,8 @@ class McpApplication:
         component: Optional[Component] = None,
         context: Optional[ExecutionContext] = None,
     ) -> types.CallToolResult:
+        if isinstance(result, SpilloverResult):
+            return result.to_mcp()
         if isinstance(result, InputRequiredResult):
             wire = result.to_wire_dict()
             return types.CallToolResult(
@@ -1491,6 +1534,7 @@ class McpApplication:
                     trace=trace,
                 )
                 _apply_request_envelope(task_ctx, rc)
+                await self._bind_spillover(task_ctx, rc)
                 task_ctx.task = TaskContext(
                     task_id,
                     self.task_manager,
@@ -1545,6 +1589,7 @@ class McpApplication:
             trace=trace,
         )
         _apply_request_envelope(ctx, rc)
+        await self._bind_spillover(ctx, rc)
         ticket = self._in_flight.register(correlation_id, jsonrpc_id=jsonrpc_id)
         try:
             result = await run_pipeline(
@@ -1577,6 +1622,21 @@ class McpApplication:
         return self._to_call_tool_result(result, entry.component, ctx)
 
     async def _read_resource(self, uri: str) -> List[ReadResourceContents]:
+        for prefix, store in self._spillover.routes.items():
+            if uri.startswith(prefix):
+                ctx = ExecutionContext(request_id=str(uuid.uuid4()))
+                rc = request_ctx.get(None)
+                _apply_request_envelope(ctx, rc)
+                await self._bind_spillover(ctx, rc)
+                try:
+                    entry = await store.get(uri[len(prefix):], owner=caller_owner(ctx))
+                except (PermissionError, ValueError):
+                    raise ResourceNotFoundError(uri) from None
+                if entry is None:
+                    raise ResourceNotFoundError(uri)
+                return [ReadResourceContents(
+                    content=entry.payload.decode("utf-8"), mime_type=entry.mime_type,
+                )]
         entry = self._resources.get(uri)
         path_kwargs: Dict[str, str] = {}
 

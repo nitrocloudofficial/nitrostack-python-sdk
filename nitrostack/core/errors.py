@@ -1,6 +1,10 @@
 from typing import Any
 
 
+class PayloadTooLargeError(ValueError):
+    """A serialized tool result exceeds the spillover store's per-result limit."""
+
+
 class ToolExecutionError(Exception):
     """Raised when tool execution fails."""
     pass

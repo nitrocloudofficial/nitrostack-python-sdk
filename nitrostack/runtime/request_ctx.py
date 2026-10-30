@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 request_ctx: ContextVar[Any] = ContextVar("nitrostack_request_ctx", default=None)
+# Set by the stdio adapter for one live stream pair, never by client metadata.
+stdio_connection_id: ContextVar[Optional[str]] = ContextVar(
+    "nitrostack_stdio_connection_id", default=None
+)
 
 
 @dataclass

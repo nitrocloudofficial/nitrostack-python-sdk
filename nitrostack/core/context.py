@@ -202,6 +202,8 @@ class ExecutionContext:
     rpc_meta: Optional["RequestMeta"] = None
     mcp_headers: Dict[str, str] = field(default_factory=dict)
     mcp_param_headers: Dict[str, str] = field(default_factory=dict)
+    spillover_session_key: Optional[str] = field(default=None, repr=False)
+    spillover_invalid_auth: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.correlation_id:
