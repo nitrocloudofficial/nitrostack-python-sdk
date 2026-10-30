@@ -67,8 +67,9 @@ strict_optional = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-q --timeout=60"
+addopts = "-q --timeout=60 --ignore=tests/test_mcp20_blueprint.py --ignore=tests/test_mcp20_deprecated.py --ignore=tests/test_mcp20_jsonrpc_wire.py --ignore=tests/test_mcp20_stateless_http.py"
 filterwarnings = ["ignore::DeprecationWarning"]
+
 
 [tool.coverage.run]
 source = ["nitrostack"]

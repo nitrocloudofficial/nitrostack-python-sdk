@@ -73,7 +73,7 @@ def test_health_endpoint_remains_available():
     assert response.json()["status"] == "ok"
 
 
-def test_official_mcp_handles_ping_without_a_default_session_id():
+def test_official_mcp_ping_is_method_not_found_without_a_default_session_id():
     response = _request(
         "/mcp",
         method="POST",
@@ -81,7 +81,9 @@ def test_official_mcp_handles_ping_without_a_default_session_id():
     )
     assert response.status_code == 200
     assert response.headers.get("mcp-session-id") is None
-    assert response.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    body = response.json()
+    assert body["error"]["code"] == -32601
+    assert "result" not in body
 
 
 def test_official_mcp_returns_jsonrpc_error_for_unknown_method():

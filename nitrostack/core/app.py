@@ -3,6 +3,7 @@ import sys
 import re
 import json
 import uuid
+from nitrostack.protocol.errors import JsonRpcErrorCode
 import asyncio
 import inspect
 import datetime
@@ -16,6 +17,7 @@ from nitrostack.transforms import (
 import mcp.types as types
 from mcp import MCPError
 from mcp.server.context import ServerRequestContext
+
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import (
     CallToolRequestParams,
@@ -869,14 +871,28 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
-        return build_discover_result(
-            server_name=self.server_config.name,
-            server_version=self.server_config.version,
-            protocol_version=version,
-            advertise_tasks=self._advertise_tasks_extension(),
-            advertise_app=has_widgets,
-            custom_extensions=self._custom_extensions(),
+        return self._stamp_discover_meta(
+            build_discover_result(
+                server_name=self.server_config.name,
+                server_version=self.server_config.version,
+                protocol_version=version,
+                advertise_tasks=self._advertise_tasks_extension(),
+                advertise_app=has_widgets,
+                custom_extensions=self._custom_extensions(),
+            )
         )
+
+    def _stamp_discover_meta(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """2026 puts serverInfo and resultType on the result, keeping any cache hint in _meta."""
+        out = dict(result)
+        meta = dict(out.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        out["_meta"] = meta
+        out.setdefault("resultType", "complete")
+        return out
 
     def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
         """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
@@ -932,6 +948,10 @@ class McpApplication:
                 tools=tools,
                 _meta=self._list_endpoint_cache_meta(),
             )
+        async def _ping(_ctx: ServerRequestContext, _params: Optional[RequestParams]):
+            if self.protocol_era == "legacy":
+                return types.EmptyResult()
+            raise MCPError(types.METHOD_NOT_FOUND, "ping was removed in MCP 2026-07-28")
 
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
             result = await self._call_tool(
@@ -997,6 +1017,7 @@ class McpApplication:
         server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
         server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)
         server.add_request_handler("resources/list", PaginatedRequestParams, _list_resources)
+        server.add_request_handler("ping", RequestParams, _ping)
         server.add_request_handler(
             "resources/templates/list", PaginatedRequestParams, _list_resource_templates
         )
@@ -1447,6 +1468,15 @@ class McpApplication:
                     meta, "progressToken", None
                 )
             session = getattr(rc, "session", None)
+
+
+        if task_metadata is not None and not getattr(self.mcp_server, "has_task_support", True):
+            raise MCPError(
+                JsonRpcErrorCode.MISSING_REQUIRED_CLIENT_CAPABILITY,
+                f"Tasks are not available on this protocol version; tool '{cfg.name}' "
+                "cannot be run as a task.",
+            )
+
         auth_meta = _auth_metadata_from_request_ctx(rc)
         trace = _trace_context_from_request_ctx(rc)
 
