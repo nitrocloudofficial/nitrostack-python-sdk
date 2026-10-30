@@ -330,6 +330,31 @@ This detects all standard and Windows Store installation directories, sets up vi
 
 ### Widgets (UI tools)
 
+Applications with registered widgets expose an `application/json` manifest at
+`widget://examples`. Discover it through MCP `resources/list` and read it with
+`resources/read`, using `{"uri": "widget://examples"}` as the request parameters.
+The manifest contains `widgets`, `count`, and `loaded`; each widget includes its
+route, URI, mode-specific MIME type, metadata, associated tool names, and any
+declared `ToolExamples` inputs and outputs. It is built at startup from registered
+decorators, including helper-generated options, without executing tools.
+
+For Python access:
+
+```python
+from nitrostack import get_widget_registry
+
+registry = get_widget_registry(app)  # also available as app.widget_registry
+widgets = registry.get_all_widgets()
+widget_info = registry.get_widget("ui://widget/card.html")  # None if absent
+manifest = registry.get_manifest().to_dict()
+```
+
+Each application owns its registry, and reads return detached copies. Shared
+routes appear once in sorted order, retaining examples from every associated
+tool. Applications without widgets expose no additional resource. In widget
+applications, `widget://examples` is reserved; a conflicting resource registration
+raises a startup error. Existing widget HTML resources and rendering are unchanged.
+
 Bind a static HTML template to a tool with `@widget` and return domain JSON from the handler:
 
 ```python

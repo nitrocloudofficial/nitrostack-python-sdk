@@ -103,6 +103,7 @@ from nitrostack.runtime.request_ctx import ServerResult, request_ctx
 from nitrostack.runtime.caller import caller_identity
 from nitrostack.tasks.authorization import extract_task_access_context
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
+from nitrostack.widgets.registry import WIDGET_EXAMPLES_URI, WidgetRegistry
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
 
@@ -686,6 +687,10 @@ class McpApplication:
                     event_name = getattr(member, "_mcp_event_name")
                     EventEmitter.get_instance().bind_instance(event_name, member, instance)
 
+        self.widget_registry: WidgetRegistry = WidgetRegistry._from_tools(self._tools.values())
+        if self.widget_registry.get_all_widgets():
+            self._register_widget_examples_resource()
+
         # 4. Register Built-in Health check Resource if any checks exist
         if HealthCheckRegistry.get_checks():
             self._register_health_resource()
@@ -803,6 +808,26 @@ class McpApplication:
             instance=None,
             method=widget_resource_handler,
             component=component,
+        )
+
+    def _register_widget_examples_resource(self) -> None:
+        if WIDGET_EXAMPLES_URI in self._resources:
+            raise ValueError(
+                f"Resource URI {WIDGET_EXAMPLES_URI!r} is reserved for the widget manifest"
+            )
+
+        async def widget_examples(context: ExecutionContext) -> dict:
+            return self.widget_registry.get_manifest().to_dict()
+
+        self._resources[WIDGET_EXAMPLES_URI] = _ResourceEntry(
+            config=ResourceConfig(
+                uri=WIDGET_EXAMPLES_URI,
+                name="Widget Examples",
+                description="Provides metadata and examples for all registered UI widgets",
+                mime_type="application/json",
+            ),
+            instance=None,
+            method=widget_examples,
         )
 
     def _register_resource(self, instance: Any, method: Callable, resource_config: ResourceConfig) -> None:

@@ -1,3 +1,10 @@
+from nitrostack.widgets.registry import (
+    WidgetExample,
+    WidgetManifest,
+    WidgetMetadata,
+    WidgetRegistry,
+    get_widget_registry,
+)
 from nitrostack.core.app_mode import (
     OPENAI_SKYBRIDGE_MIME_TYPE,
     RESOURCE_MIME_TYPE_MCP_APP,
@@ -28,6 +35,11 @@ from nitrostack.widgets.mcp_meta import (
 )
 
 __all__ = [
+    "WidgetExample",
+    "WidgetManifest",
+    "WidgetMetadata",
+    "WidgetRegistry",
+    "get_widget_registry",
     "Component",
     "WidgetCsp",
     "WidgetOptions",

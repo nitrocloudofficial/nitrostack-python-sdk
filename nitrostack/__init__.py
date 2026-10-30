@@ -1,5 +1,13 @@
 # NitroStack Python SDK Public API Exports
 
+from nitrostack.widgets.registry import (
+    WidgetExample,
+    WidgetManifest,
+    WidgetMetadata,
+    WidgetRegistry,
+    get_widget_registry,
+)
+
 from nitrostack.core.decorators import (
     tool,
     resource,
@@ -228,6 +236,11 @@ __all__ = [
     "TaskAlreadyTerminalError",
     "InvalidTaskTransitionError",
     "TaskExpiredError",
+    "WidgetExample",
+    "WidgetManifest",
+    "WidgetMetadata",
+    "WidgetRegistry",
+    "get_widget_registry",
     "widget_resource_uri",
     "Component",
     "WidgetCsp",
