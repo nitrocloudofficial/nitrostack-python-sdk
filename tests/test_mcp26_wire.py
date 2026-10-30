@@ -97,7 +97,6 @@ def test_ping_is_method_not_found(monkeypatch, era):
     with TestClient(app.get_combined_app()) as client:
         resp = rpc(client, "ping", headers=modern_headers("ping"))
     assert error_code(body_of(resp)) == -32601
-    
 def test_ping_handler_not_found_on_2026(monkeypatch):
     app = make_app(monkeypatch, "modern")
     handler = app.mcp_server._request_handlers["ping"]  # ADAPT: find where add_request_handler stores it
@@ -124,7 +123,7 @@ def test_discover_keeps_cache_hint_in_meta(monkeypatch):
 
 
 def test_initialize_is_not_served_on_modern(monkeypatch):
-    app = make_app(monkeypatch, "modern") 
+    app = make_app(monkeypatch, "modern")
     with TestClient(app.get_combined_app()) as client:
         resp = rpc(
             client,
@@ -170,4 +169,3 @@ def test_task_call_still_works_when_tasks_available(monkeypatch):
         return await app._call_tool("alpha", {}, task=types.TaskMetadata(ttl=1000))
 
     assert isinstance(asyncio.run(go()), types.CreateTaskResult)
-    
