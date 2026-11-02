@@ -551,9 +551,6 @@ responses pass through. Decorated tools with output schemas advertise either the
 original output or the spillover envelope. Spilled widget results return the
 resource reference without invoking the widget's data transformer.
 
-See [the line-by-line implementation walkthrough](docs/spillover-line-by-line.md)
-for the storage, interceptor, MCP integration, and tests.
-
 Independent HTTP/stdio tests and reproducible large-output checks live in
-`tests/test_spillover_transport.py`; see
-[PR #92 verification](docs/pr92-verification.md) for commands and platform results.
+`tests/test_spillover_transport.py`. Run the spillover tests with
+`python -m pytest tests/test_spillover.py tests/test_spillover_transport.py`.
