@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from unittest.mock import patch
 
 import mcp.types as types
 import pytest
-from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, request_ctx
 from mcp import MCPError as McpError
 from pydantic import BaseModel, Field
-from starlette.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -23,7 +21,7 @@ from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.core.di import DIContainer
 from nitrostack.core.errors import ResourceNotFoundError, TaskNotFoundError
 from nitrostack.core.task import TaskManager
-from nitrostack.protocol.constants import LEGACY_SESSION_HEADER, MAX_CIMD_BYTES
+from nitrostack.protocol.constants import MAX_CIMD_BYTES
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.discovery import build_discover_result
 from nitrostack.protocol.errors import JsonRpcErrorCode
@@ -40,11 +38,23 @@ from nitrostack.runtime.conformance import (
     protocol_version_matches_blueprint,
     verify_package_layout,
 )
-from nitrostack.runtime.stateless import assert_stateless_headers
 from nitrostack.tasks.eviction import should_evict_terminal_task
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData, datetime_to_ms, utc_now
 from nitrostack.tasks.authorization import check_task_access
 from nitrostack.transports.cors import cors_preflight_response_headers
+from tests.http_probe import decode, http_client, post
+
+
+def test_blueprint_discover_uses_official_http_without_session():
+    with http_client("auto") as (app, _, client):
+        response = post(client, "server/discover")
+        assert response.status_code == 200, response.text
+        result = decode(response)["result"]
+        assert MODERN_PROTOCOL_VERSION in result["supportedVersions"]
+        assert result["capabilities"]["resources"]["subscribe"] is False
+        assert result["capabilities"]["tools"]["listChanged"] is True
+        assert "mcp-session-id" not in response.headers
+        assert app.mcp_server.get_capabilities().resources.subscribe is False
 
 
 class EchoInput(BaseModel):
@@ -95,36 +105,11 @@ class TestStatelessHttpConformance:
 
 
     def test_post_mcp_stateless_no_session_header(self):
-        @injectable()
-        class PingController:
-            @tool(name="echo", description="echo", input_schema=EchoInput)
-            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
-                return input.value
-
-        @module(name="BlueprintHttp", controllers=[PingController])
-        class HttpModule:
-            pass
-
-        @mcp_app(module=HttpModule, server=ServerConfig(name="blueprint-http", stateless=True))
-        class HttpApp:
-            pass
-
-        app = asyncio.run(McpApplicationFactory.create(HttpApp))
-        http_app = app.get_combined_app(stateless=True, json_response=True)
-        with TestClient(http_app) as client:
-            resp = client.post(
-                "/mcp",
-                headers={**JSON_HEADERS, "Mcp-Method": "tools/call", "Mcp-Name": "echo"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {"name": "echo", "arguments": {"value": "ok"}},
-                },
-            )
-        assert resp.status_code == 200
-        assert LEGACY_SESSION_HEADER not in {k.title() for k in resp.headers.keys()}
-        assert resp.json()["result"]["content"][0]["text"] == "ok"
+        with http_client("auto") as (_, _, client):
+            response = post(client, "tools/call", {"name": "echo", "arguments": {"value": "ok"}})
+            assert response.status_code == 200, response.text
+            assert "mcp-session-id" not in response.headers
+            assert decode(response)["result"]["structuredContent"]["value"] == "ok"
 
     def test_cors_preflight_includes_mcp_headers(self):
         headers = cors_preflight_response_headers({"Origin": "https://app.example.com"})

@@ -177,8 +177,15 @@ def _tools_list_http(era: str) -> dict:
     """Run a real tools/list over the mounted /mcp app and return the tool named ``taskable``."""
     response = _http_request(
         _app(era),
-        {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
-        extra_headers={"Mcp-Method": "tools/list"} if era == "modern" else None,
+        {
+            "jsonrpc": "2.0", "id": 3, "method": "tools/list",
+            "params": {"_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name": "hide-tasks-test", "version": "1"},
+                "io.modelcontextprotocol/clientCapabilities": {},
+            }},
+        },
+        extra_headers={"Mcp-Method": "tools/list", "MCP-Protocol-Version": "2026-07-28"},
     )
     assert response.status_code == 200, response.text
     tools = response.json()["result"]["tools"]

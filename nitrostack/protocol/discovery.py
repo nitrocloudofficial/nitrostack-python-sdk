@@ -36,11 +36,17 @@ def build_discover_result(
     custom_extensions: Optional[dict[str, str]] = None,
     tools_list_changed: bool = True,
     resources_list_changed: bool = True,
+    resources_subscribe: bool = False,
     prompts_list_changed: bool = True,
     ttl_ms: int = DEFAULT_LIST_CACHE_TTL_MS,
     cache_scope: Literal["public", "private"] = "private",
 ) -> dict[str, Any]:
-    """Build the ``server/discover`` result for the mounted HTTP engine."""
+    """Build the ``server/discover`` result for the mounted HTTP engine.
+
+    ``resources_subscribe`` must match ``NitroStackMcpServer.get_capabilities``
+    for the same era, so ``server/discover`` and real capability negotiation
+    never disagree on ``resources.subscribe``.
+    """
     versions = list(supported_versions or SUPPORTED_PROTOCOL_VERSIONS)
     extensions: dict[str, dict[str, str]] = {}
     if advertise_app:
@@ -53,7 +59,7 @@ def build_discover_result(
 
     capabilities: dict[str, Any] = {
         "tools": {"listChanged": tools_list_changed},
-        "resources": {"subscribe": False, "listChanged": resources_list_changed},
+        "resources": {"subscribe": resources_subscribe, "listChanged": resources_list_changed},
         "prompts": {"listChanged": prompts_list_changed},
     }
     if extensions:
