@@ -120,10 +120,12 @@ class NitroTestingModule:
         """Overrides first, then every provider this harness built, dependencies before consumers."""
         if self._container is None or self._snapshot is None:
             return list(self._overrides)
-        before = self._snapshot[0]
+        # Compare by identity, not token: a consumer evicted by create() and rebuilt has the
+        # same token as the original, but it is a new object this harness must tear down.
+        original_ids = {id(value) for value in self._snapshot[0].values()}
         built = [
-            value for token, value in self._container._instances.items()
-            if token not in before
+            value for value in self._container._instances.values()
+            if id(value) not in original_ids
         ]
         ordered: List[Any] = []
         seen = set()

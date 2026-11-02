@@ -290,9 +290,17 @@ async def test_consumer_cached_before_create_is_rebuilt_with_the_override():
     original_service = container.resolve(Service)  # built earlier, holds the real Repo
     original_repo = container.resolve(Repo)
     assert original_service.repo is original_repo
-    async with await NitroTestingModule.create(AppModule, overrides={Repo: FakeRepo()}) as app:
+    fake = FakeRepo()
+    async with await NitroTestingModule.create(AppModule, overrides={Repo: fake}) as app:
+        # 1. The override is applied to the rebuilt consumer.
         assert await app.call_tool("lookup", {"input": {"key": "a"}}) == "fake-a"
-    # The originals are put back untouched on close.
+        rebuilt = container.resolve(Service)
+        assert rebuilt is not original_service
+        assert rebuilt.repo is fake
+    # 2. The rebuilt service and the override were shut down exactly once.
+    assert rebuilt.destroyed == 1
+    assert fake.destroyed == 1
+    # 3. The originals are back by identity and were never shut down.
     assert container.resolve(Service) is original_service
     assert container.resolve(Repo) is original_repo
     assert original_service.destroyed == 0
@@ -300,15 +308,49 @@ async def test_consumer_cached_before_create_is_rebuilt_with_the_override():
 
 @pytest.mark.asyncio
 async def test_indirect_consumer_cached_before_create_is_rebuilt():
+    order = []
+
     @injectable(deps=[Service])
     class Outer:
         def __init__(self, service):
             self.service = service
+            self.destroyed = 0
+
+        def on_module_destroy(self):
+            self.destroyed += 1
+            order.append("outer")
 
     container = DIContainer.get_instance()
-    before = container.resolve(Outer)
-    async with await NitroTestingModule.create(AppModule, overrides={Repo: FakeRepo()}):
-        rebuilt = container.resolve(Outer)
-        assert rebuilt is not before
-        assert rebuilt.service.repo.get("x") == "fake-x"
-    assert container.resolve(Outer) is before
+    original_outer = container.resolve(Outer)
+    original_service = original_outer.service
+    original_repo = container.resolve(Repo)
+
+    fake = FakeRepo()
+    fake_destroy = fake.on_module_destroy
+    fake.on_module_destroy = lambda: (order.append("fake"), fake_destroy())[1]
+    service_destroy = Service.on_module_destroy
+
+    async def tracked_destroy(self):
+        order.append("service")
+        await service_destroy(self)
+
+    Service.on_module_destroy = tracked_destroy
+    try:
+        async with await NitroTestingModule.create(AppModule, overrides={Repo: fake}):
+            # 1. The override reaches the indirect consumer.
+            rebuilt_outer = container.resolve(Outer)
+            rebuilt_service = rebuilt_outer.service
+            assert rebuilt_outer is not original_outer
+            assert rebuilt_service is not original_service
+            assert rebuilt_outer.service.repo.get("x") == "fake-x"
+    finally:
+        Service.on_module_destroy = service_destroy
+
+    # 2. Every rebuilt service was shut down once, consumers before dependencies.
+    assert order == ["outer", "service", "fake"]
+    assert (rebuilt_outer.destroyed, rebuilt_service.destroyed, fake.destroyed) == (1, 1, 1)
+    # 3. The originals are restored by identity and untouched.
+    assert container.resolve(Outer) is original_outer
+    assert container.resolve(Service) is original_service
+    assert container.resolve(Repo) is original_repo
+    assert (original_outer.destroyed, original_service.destroyed) == (0, 0)
