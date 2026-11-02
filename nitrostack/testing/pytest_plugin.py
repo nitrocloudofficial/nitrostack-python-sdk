@@ -19,11 +19,12 @@ async def nitro_client(request):
     marker = request.node.get_closest_marker("nitro_app")
     if marker and "module" in marker.kwargs:
         app_module = marker.kwargs["module"]
-    elif "nitro_app" in request.fixturenames:
-        app_module = request.getfixturevalue("nitro_app")
     else:
-        raise RuntimeError(
-            "nitro_client needs a 'nitro_app' fixture or @pytest.mark.nitro_app(module=RootModule)."
-        )
+        try:
+            app_module = request.getfixturevalue("nitro_app")
+        except pytest.FixtureLookupError:
+            raise RuntimeError(
+                "nitro_client needs a 'nitro_app' fixture or @pytest.mark.nitro_app(module=RootModule)."
+            ) from None
     async with await NitroTestingModule.create(app_module) as harness:
         yield harness

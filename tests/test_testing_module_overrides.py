@@ -212,3 +212,73 @@ async def test_no_resource_warning():
 @pytest.mark.asyncio
 async def test_nitro_client_fixture(nitro_client):
     assert await nitro_client.call_tool("lookup", {"input": {"key": "q"}}) == "real-q"
+
+
+@pytest.mark.asyncio
+async def test_second_harness_does_not_reuse_service_holding_old_fake():
+    first, second = FakeRepo(), FakeRepo()
+    second.get = lambda key: f"second-{key}"
+    async with await NitroTestingModule.create(AppModule, overrides={Repo: first}) as app:
+        assert await app.call_tool("lookup", {"input": {"key": "a"}}) == "fake-a"
+    async with await NitroTestingModule.create(AppModule, overrides={Repo: second}) as app:
+        assert await app.call_tool("lookup", {"input": {"key": "a"}}) == "second-a"
+    # And without overrides, nothing from the earlier harnesses is left behind.
+    async with await NitroTestingModule.create(AppModule) as app:
+        assert await app.call_tool("lookup", {"input": {"key": "a"}}) == "real-a"
+
+
+@pytest.mark.asyncio
+async def test_teardown_order_covers_indirect_dependencies_consumers_first():
+    order = []
+
+    @injectable()
+    class Leaf:
+        def on_module_destroy(self):
+            order.append("leaf")
+
+    @injectable(deps=[Leaf])
+    class Middle:
+        def __init__(self, leaf):
+            self.leaf = leaf
+
+        def on_module_destroy(self):
+            order.append("middle")
+
+    @injectable(deps=[Middle])
+    class Top:
+        def __init__(self, middle):
+            self.middle = middle
+
+        def on_module_destroy(self):
+            order.append("top")
+
+    # Only Top is declared on the module; Leaf and Middle are reached through DI.
+    @module(name="chain", providers=[Top])
+    class Chain:
+        pass
+
+    async with await NitroTestingModule.create(Chain):
+        pass
+    assert order == ["top", "middle", "leaf"]
+
+
+@pytest.mark.asyncio
+async def test_failing_override_factory_rolls_back_earlier_overrides():
+    def broken():
+        raise RuntimeError("factory failed")
+
+    before = dict(DIContainer.get_instance()._instances)
+    with pytest.raises(RuntimeError, match="factory failed"):
+        await NitroTestingModule.create(AppModule, overrides={Repo: FakeRepo(), "other": broken})
+    assert DIContainer.get_instance()._instances == before
+    assert not DIContainer.get_instance().has_value(Repo)
+
+
+@pytest.fixture
+def nitro_app():
+    return AppModule
+
+
+@pytest.mark.asyncio
+async def test_nitro_client_resolves_nitro_app_fixture_dynamically(nitro_client):
+    assert await nitro_client.call_tool("lookup", {"input": {"key": "f"}}) == "real-f"
