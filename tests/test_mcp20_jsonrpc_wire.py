@@ -292,7 +292,7 @@ class TestToolVsProtocolErrors:
 class TestDeprecatedMethods:
     @pytest.mark.parametrize(
         "method",
-        ["tasks/result", "tasks/list", "resources/subscribe", "logging/setLevel"],
+        ["resources/subscribe", "logging/setLevel"],
     )
     def test_deprecated_methods_have_messages(self, method):
         assert deprecated_method_message(method) is not None

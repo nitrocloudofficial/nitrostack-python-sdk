@@ -313,7 +313,39 @@ Example:
 server = ServerConfig(name="my-server", transport_type="http", max_sessions=100, session_timeout_ms=1_800_000)
 ```
 
+### Health resources
+
+Decorated health checks are exposed at both `health://status` and `health://checks`.
+The status resource keeps its original `{check_name: status}` JSON map for existing
+clients. The checks resource returns an aggregate payload with `status`, `uptimeSeconds`,
+per-check `name`, `status`, `latencyMs`, and `message`, plus `count`, `transforms`,
+`timestamp`, and `sdkVersion`. Checks default to a five-second timeout and run independently;
+set a per-check timeout with `@health_check("database", timeout=2.0)`. A false check result
+marks the aggregate `degraded`; a timeout or exception marks it `unhealthy` (exceptions are
+reported with a generic message on `health://checks`; the legacy status resource retains its
+existing error string). A timed-out check has status `timeout`.
+
+Async checks are timed out on the event loop. Sync checks run in a dedicated four-worker pool,
+with at most four submitted sync checks at a time; a timed-out sync function keeps its worker
+slot until it returns, but does not hold up the resource response or `asyncio.run()` shutdown.
+Executor threads are non-daemon, so a sync check that never returns can still delay process exit.
+Sync checks therefore run off the main thread and should not depend on thread-bound resources
+such as a database connection created on the main thread. Transform entries currently report
+their name, type, and order; `details` is reserved for telemetry that is not yet collected.
+The SDK version is resolved once when the package loads.
+
+`ServerHealthPayload` and `TransformTelemetry` are exported from `nitrostack` for typing.
+
 `ServerConfig.protocol_era` is used only when `MCP_STATELESS` and `NITRO_MCP_PROTOCOL_VERSION` are both unset. Unknown tokens become `auto`, same as an unknown env value.
+
+### Per-session tool visibility
+
+Tools can declare `visibility="hidden"` and `default_visible=False`, then handlers can
+call `context.enable_tools(["admin_tool"])` or `context.disable_tools([...])`. Overrides
+are scoped by transport session ID and verified token subject, with a bounded TTL/LRU
+store. Dynamic visibility requires a sessionful transport. The default `auto` era is
+sessionless, so changes warn and do nothing there; the SDK does not fall back to
+subject-only state because it would share overrides across that subject's sessions.
 
 ---
 
@@ -450,3 +482,100 @@ async def test_add():
 if __name__ == "__main__":
     asyncio.run(test_add())
 ```
+
+### Large tool results: data spillover
+
+Attach `DataSpilloverInterceptor` to a tool to store large results separately and
+return a preview, `resource_uri`, and `original_size_bytes`. Results at or below
+the threshold pass through unchanged. Sizes count serialized UTF-8 bytes, not
+characters; lists and dictionaries use compact JSON.
+
+```python
+from pydantic import BaseModel
+from nitrostack import DataSpilloverInterceptor, MemorySpilloverStore, tool, use_interceptors
+
+spillover = DataSpilloverInterceptor(
+    threshold_bytes=64 * 1024,
+    store=MemorySpilloverStore(
+        max_bytes=10 * 1024 * 1024,
+        max_total_bytes=100 * 1024 * 1024,
+        ttl_seconds=300,
+    ),
+    resource_uri_prefix="resource://data-spillover/",
+)
+
+class ReportInput(BaseModel):
+    count: int = 10000
+
+class ReportTools:
+    @tool(name="report", description="Generate a report", input_schema=ReportInput)
+    @use_interceptors(spillover)
+    async def report(self, input: ReportInput, context):
+        return [{"row": index} for index in range(input.count)]
+```
+
+Register `ReportTools` as a module provider or controller as usual. A configured
+interceptor instance works directly in the decorator. For default configuration,
+`@use_interceptors(DataSpilloverInterceptor)` also works through dependency injection.
+
+The MCP result includes a text preview, structured content, and a resource link.
+Clients retrieve the full result with `resources/read`, for example:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "resources/read",
+  "params": {"uri": "resource://data-spillover/<id-from-tool-result>"}
+}
+```
+
+Lists and dictionaries preview their first five items or entries and total counts.
+Strings preview up to 512 characters. The complete preview stays within 2 KiB;
+large nested values are represented as truncated text. Reading the full resource
+can consume context again, so clients should retrieve it only when needed.
+
+For disk storage, replace the store with:
+
+```python
+from nitrostack import FileSpilloverStore
+
+store = FileSpilloverStore(
+    ".nitrostack/spillover",
+    max_bytes=10 * 1024 * 1024,
+    max_total_bytes=100 * 1024 * 1024,
+    ttl_seconds=300,
+)
+```
+
+The memory store evicts least recently used results when its payload capacity is
+full. The file store rejects writes when its capacity is full; its capacity counts
+actual JSON file bytes, including base64 and metadata overhead. A single result
+larger than `max_bytes` raises `PayloadTooLargeError`. Both stores remove expired
+results during operations; file storage also cleans up on initialization. Expiry
+is absolute and reads do not extend it. Each file-store root must be owned by one
+store instance in one process; shared storage across processes is not supported.
+Keep the configured directory private to the server account.
+
+Resource access requires the same verified principal, issuer, client identity,
+and tenant. Anonymous access is limited to the same server-side MCP session.
+Requests without either a verified identity or trusted session cannot spill
+results; invalid credentials do not fall back to anonymous access. Anonymous
+HTTP clients need a persistent MCP session; sessionless HTTP clients should
+authenticate. Expired results and results owned by another caller return
+resource-not-found. Stored results are not enumerated in `resources/list`.
+
+HTTP ownership uses the server-issued session ID after the official transport
+has validated it, rather than the identity of an SDK request/session proxy.
+Stdio assigns a random identity to each live stream connection. Requests on that
+connection can retrieve its anonymous results; a later connection cannot inherit
+them. Concurrent HTTP requests cannot borrow a stdio connection's identity.
+
+Successful explicit MCP tool results are stored as JSON; errors and input-required
+responses pass through. Decorated tools with output schemas advertise either the
+original output or the spillover envelope. Spilled widget results return the
+resource reference without invoking the widget's data transformer.
+
+Independent HTTP/stdio tests and reproducible large-output checks live in
+`tests/test_spillover_transport.py`. Run the spillover tests with
+`python -m pytest tests/test_spillover.py tests/test_spillover_transport.py`.

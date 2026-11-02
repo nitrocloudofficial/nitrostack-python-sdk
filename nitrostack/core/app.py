@@ -6,6 +6,7 @@ import uuid
 import asyncio
 import inspect
 import datetime
+import time
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from mcp.types import (
     UnsubscribeRequestParams,
 )
 from pydantic import BaseModel, create_model
+from nitrostack import __version__ as _sdk_version
 from nitrostack.transforms import (
     TransformContext,
     TransformError,
@@ -35,6 +37,7 @@ from nitrostack.transforms import (
 )
 
 from nitrostack.core.context import ExecutionContext, TaskContext
+from nitrostack.core.visibility import VisibilityTransform
 from nitrostack.core.decorators import ToolConfig, ResourceConfig, PromptConfig, widget_resource_uri
 from nitrostack.core.app_mode import get_app_mode, get_widget_mime_type, is_mcp_app_mode, is_openai_mode
 from nitrostack.core.di import DIContainer
@@ -48,7 +51,11 @@ from nitrostack.core.errors import (
 )
 from nitrostack.core.mcp_server import NitroStackMcpServer
 from nitrostack.core.pipeline import run_pipeline
-from nitrostack.core.additional_decorators import HealthCheckRegistry
+from nitrostack.core.additional_decorators import HealthCheckRegistry, ServerHealthPayload
+from nitrostack.core.interceptors.data_spillover import (
+    DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult,
+    bind_spillover_context, caller_owner,
+)
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
 from nitrostack.protocol.schema import (
@@ -585,6 +592,8 @@ def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
 class McpApplication:
     def __init__(self, app_class: Type):
         self.app_class = app_class
+        self._started_at = time.monotonic()
+        self._sdk_version = _sdk_version
         if hasattr(app_class, "_mcp_app_module"):
             self.root_module = app_class._mcp_app_module
             self.server_config = app_class._mcp_app_server
@@ -612,6 +621,8 @@ class McpApplication:
         self._initial_tools: List[Tuple[Any, Callable, ToolConfig]] = []
         self.task_manager = TaskManager()
         self._in_flight = InFlightRegistry()
+        self.visibility_transform = VisibilityTransform()
+        self._spillover = SpilloverRegistry()
 
         # Pipeline first: handlers consult it lazily when requests arrive.
         self._transforms = TransformPipeline(
@@ -680,7 +691,10 @@ class McpApplication:
                 # Bind Health Checks
                 if hasattr(member, "_mcp_health_check_name"):
                     check_name = getattr(member, "_mcp_health_check_name")
-                    HealthCheckRegistry.bind_instance(check_name, member, instance)
+                    HealthCheckRegistry.bind_instance(
+                        check_name, member, instance,
+                        timeout=float(getattr(member, "_mcp_health_check_timeout", 5.0)),
+                    )
 
                 # Bind Event Listeners
                 if hasattr(member, "_mcp_event_name"):
@@ -698,6 +712,11 @@ class McpApplication:
         # 5. Wire every protocol handler (tools/resources/prompts/tasks/notifications)
         #    onto the owned low-level server. This is factored out so additional server
         #    instances (e.g. one per HTTP session) can be configured identically.
+        for entry in self._tools.values():
+            for candidate in getattr(entry.method, "_mcp_interceptors", []):
+                interceptor = container.resolve(candidate) if isinstance(candidate, type) else candidate
+                if isinstance(interceptor, DataSpilloverInterceptor):
+                    self._spillover.register(interceptor)
         self._setup_handlers(self.mcp_server)
 
     def _assert_declared_dependencies(
@@ -854,23 +873,85 @@ class McpApplication:
         self._prompts[prompt_config.name] = _PromptEntry(config=prompt_config, instance=instance, method=method)
 
     def _register_health_resource(self) -> None:
-        config = ResourceConfig(
+        status_config = ResourceConfig(
             uri="health://status",
             name="Health Status",
             description="System health status check",
+            mime_type="application/json",
+        )
+        checks_config = ResourceConfig(
+            uri="health://checks",
+            name="Health Checks & Pipeline Telemetry",
+            description="Current health status and transform pipeline telemetry",
+            mime_type="application/json",
         )
 
         async def health_status_resource(context: ExecutionContext) -> str:
+            # Keep the original string map at health://status for existing clients.
             results = await HealthCheckRegistry.run_all()
             return json.dumps(results)
 
-        self._resources[config.uri] = _ResourceEntry(config=config, instance=None, method=health_status_resource)
+        async def health_checks_resource(context: ExecutionContext) -> ServerHealthPayload:
+            checks = await HealthCheckRegistry.run_detailed()
+            has_failures = any(
+                check["status"] in {"error", "timeout"}
+                for check in checks
+            )
+            has_unhealthy = any(
+                check["status"] == "unhealthy"
+                for check in checks
+            )
+            transforms = []
+            configured_transforms = getattr(self.app_class, "_mcp_transforms", None) or []
+            for order, transform in enumerate(configured_transforms):
+                transforms.append({
+                    "name": getattr(transform, "name", transform.__class__.__name__),
+                    "type": transform.__class__.__name__,
+                    "order": order,
+                    "details": {},
+                })
+            public_checks = [
+                {
+                    **check,
+                    "message": "Check failed" if check["status"] == "error" else check["message"],
+                }
+                for check in checks
+            ]
+            payload: ServerHealthPayload = {
+                "status": (
+                    "unhealthy" if has_failures
+                    else "degraded" if has_unhealthy
+                    else "healthy"
+                ),
+                "uptimeSeconds": int(time.monotonic() - self._started_at),
+                "checks": public_checks,
+                "count": len(public_checks),
+                "transforms": transforms,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "sdkVersion": self._sdk_version,
+            }
+            return payload
+
+        self._resources[status_config.uri] = _ResourceEntry(
+            config=status_config, instance=None, method=health_status_resource
+        )
+        self._resources[checks_config.uri] = _ResourceEntry(
+            config=checks_config, instance=None, method=health_checks_resource
+        )
 
     # ------------------------------------------------------------------
     # Protocol handler wiring (owned low-level `mcp.server.lowlevel.Server`)
     # ------------------------------------------------------------------
 
+    def _tasks_visible_on_wire(self) -> bool:
+        # Tasks remain available to in-process callers and the legacy wire only.
+        # MCP 2026 has no complete tasks surface (notably tasks/update), so
+        # nothing on the 2026 wire may advertise this partial implementation.
+        return self.protocol_era not in ("auto", "modern")
+
     def _advertise_tasks_extension(self) -> bool:
+        if not self._tasks_visible_on_wire():
+            return False
         return any(
             entry.config.task_support in ("optional", "required")
             for entry in self._tools.values()
@@ -933,9 +1014,11 @@ class McpApplication:
             ctx: ServerRequestContext,
             _params: Optional[PaginatedRequestParams],
         ):
+            session_key = self._visibility_session_key(ctx)
             tools = [
                 self._build_tool_definition(entry)
                 for entry in self._tools.values()
+                if self.visibility_transform.is_visible(entry, session_key)
             ]
 
             if self._transforms.enabled:
@@ -959,20 +1042,26 @@ class McpApplication:
             )
 
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
-            result = await self._call_tool(
-                params.name, params.arguments or {}, task=params.task
-            )
-            if isinstance(result, types.CreateTaskResult):
-                task = result.task
-                return types.CallToolResult(
-                    content=[types.TextContent(type="text", text=task.task_id)],
-                    structuredContent={
-                        "resultType": "task",
-                        "task": task.model_dump(by_alias=True),
-                    },
-                    isError=False,
+            token = request_ctx.set(ctx)
+            try:
+                if not self._tool_visible(params.name, ctx):
+                    return self._unknown_tool_result(params.name)
+                result = await self._call_tool(
+                    params.name, params.arguments or {}, task=params.task
                 )
-            return result
+                if isinstance(result, types.CreateTaskResult):
+                    task = result.task
+                    return types.CallToolResult(
+                        content=[types.TextContent(type="text", text=task.task_id)],
+                        structuredContent={
+                            "resultType": "task",
+                            "task": task.model_dump(by_alias=True),
+                        },
+                        isError=False,
+                    )
+                return result
+            finally:
+                request_ctx.reset(token)
 
         async def _list_resources(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
             return types.ListResourcesResult(
@@ -1032,14 +1121,22 @@ class McpApplication:
         server.add_request_handler("prompts/get", GetPromptRequestParams, _get_prompt)
 
         async def handle_list_tools(req=None):
-            return ServerResult(await _list_tools(None, None))
+            ctx = req if req is not None and hasattr(req, "session") else request_ctx.get(None)
+            return ServerResult(await _list_tools(ctx, None))
 
         async def handle_call_tool(req=None):
             params = getattr(req, "params", None) if req is not None else None
             name = getattr(params, "name", "") if params is not None else ""
             arguments = (getattr(params, "arguments", None) or {}) if params is not None else {}
             task = getattr(params, "task", None) if params is not None else None
-            return ServerResult(await self._call_tool(name, arguments, task=task))
+            ctx = req if req is not None and hasattr(req, "session") else request_ctx.get(None)
+            if not self._tool_visible(name, ctx):
+                return ServerResult(self._unknown_tool_result(name))
+            token = request_ctx.set(ctx)
+            try:
+                return ServerResult(await self._call_tool(name, arguments, task=task))
+            finally:
+                request_ctx.reset(token)
 
         async def handle_list_resources(req=None):
             return ServerResult(await _list_resources(None, None))
@@ -1081,6 +1178,7 @@ class McpApplication:
     def _build_transform_context(self, rc: Any, *, invoker: Any) -> TransformContext:
         """TransformContext for the in-flight request, identity from ``caller_identity``."""
         session_id, subject = caller_identity(rc, self.protocol_era)
+        session_key = VisibilityTransform.session_key(session_id, subject)
         exec_ctx = None
         if rc is not None:
             correlation_id, jsonrpc_id = _bind_correlation(rc)
@@ -1092,10 +1190,17 @@ class McpApplication:
                 trace=_trace_context_from_request_ctx(rc),
             )
             _apply_request_envelope(exec_ctx, rc)
+            self._configure_visibility_context(exec_ctx, rc)
+        visible_tools = [
+            self._build_tool_definition(entry)
+            for entry in self._tools.values()
+            if self.visibility_transform.is_visible(entry, session_key)
+        ]
         return TransformContext(
             session_id=session_id,
             subject=subject,
             execution_context=exec_ctx,
+            visible_tools=visible_tools,
             _invoker=invoker,
         )
 
@@ -1143,10 +1248,11 @@ class McpApplication:
         cfg = entry.config
         input_schema = self._tool_input_schema(entry.input_model)
 
+        tasks_visible = self._tasks_visible_on_wire()
         meta: Dict[str, Any] = {
             "is_initial": cfg.is_initial,
             "visibility": cfg.visibility,
-            "task_support": cfg.task_support,
+            **({"task_support": cfg.task_support} if tasks_visible else {}),
             **(cfg.metadata or {}),
         }
 
@@ -1188,7 +1294,7 @@ class McpApplication:
         )
 
         execution = None
-        if cfg.task_support and cfg.task_support != "forbidden":
+        if tasks_visible and cfg.task_support and cfg.task_support != "forbidden":
             execution = types.ToolExecution(taskSupport=cfg.task_support)
 
         tool_kwargs: Dict[str, Any] = {
@@ -1205,6 +1311,11 @@ class McpApplication:
 
         output_schema = tool_json_schema(cfg.output_schema)
         if output_schema is not None:
+            if self._has_spillover(entry.method):
+                output_schema = {
+                    "type": "object", "anyOf": [output_schema, SPILLOVER_SCHEMA],
+                    **({"$defs": output_schema["$defs"]} if "$defs" in output_schema else {}),
+                }
             tool_kwargs["outputSchema"] = output_schema
 
         return types.Tool(**tool_kwargs)
@@ -1249,7 +1360,33 @@ class McpApplication:
     # Request dispatch
     # ------------------------------------------------------------------
 
-    def _pipeline_stages(self, method: Callable) -> Tuple[List[Type], List[Type], List[Type], List[Type], List[Type]]:
+    def _has_spillover(self, method: Callable) -> bool:
+        container = DIContainer.get_instance()
+        return any(
+            isinstance(container.resolve(item) if isinstance(item, type) else item,
+                       DataSpilloverInterceptor)
+            for item in getattr(method, "_mcp_interceptors", [])
+        )
+
+    async def _bind_spillover(self, context: ExecutionContext, rc: Any) -> None:
+        if not self._spillover.routes:
+            return
+        # OAuth guards may verify opaque tokens as well as the shared JWT path.
+        from nitrostack.auth.request import authorization_token_from_request, auth_context_from_payload
+        from nitrostack.auth.oauth import OAuthService
+
+        token = authorization_token_from_request(rc)
+        container = DIContainer.get_instance()
+        if context.auth is None and token and container.has_value(OAuthService):
+            try:
+                payload = await container.resolve(OAuthService).introspect_token(token)
+                if payload.get("active"):
+                    context.auth = auth_context_from_payload(payload)
+            except Exception:
+                pass  # Invalid credentials remain denied by caller_owner.
+        bind_spillover_context(context, rc, self._spillover, self.protocol_era)
+
+    def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:
         return (
             getattr(method, "_mcp_guards", []),
             getattr(method, "_mcp_middleware", []),
@@ -1264,12 +1401,63 @@ class McpApplication:
         # Re-enter the normal call path so guards and validation run for the real tool.
         return await self._call_tool(name, arguments, _tctx=tctx)
 
+    def _visibility_session_key(self, request_context: Any) -> tuple[str, str] | None:
+        session_id, subject = caller_identity(request_context, self.protocol_era)
+        return VisibilityTransform.session_key(session_id, subject)
+
+    def _tool_visible(self, name: str, request_context: Any) -> bool:
+        entry = self._tools.get(name)
+        if entry is None:
+            # Transform-defined synthetic tools are not in the app registry.
+            # Let the transform resolver decide whether such names exist.
+            return True
+        return self.visibility_transform.is_visible(
+            entry, self._visibility_session_key(request_context)
+        )
+
+    def _configure_visibility_context(
+        self, context: ExecutionContext, request_context: Any
+    ) -> None:
+        key = self._visibility_session_key(request_context)
+        context._tool_visibility_controller = self.visibility_transform
+        context._visibility_session_key = key
+        context._visibility_app = self
+        context._visibility_supported = key is not None
+        context._visibility_change_callback = self._publish_tools_changed
+
+    @staticmethod
+    def _unknown_tool_result(name: str) -> types.CallToolResult:
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=f"Tool '{name}' not found")],
+            isError=True,
+        )
+
+    def _publish_tools_changed(self, context: ExecutionContext) -> None:
+        session = getattr(request_ctx.get(None), "session", None)
+        sender = getattr(session, "send_notification", None) if session is not None else None
+        if sender is None:
+            logger.debug("Transport does not support tools/list_changed notification")
+            return
+
+        async def send_notification() -> None:
+            try:
+                await sender(types.ToolListChangedNotification())
+            except Exception:
+                logger.debug("Unable to send session tools/list_changed notification", exc_info=True)
+
+        try:
+            asyncio.create_task(send_notification())
+        except RuntimeError:
+            logger.debug("No running event loop for tools/list_changed notification")
+
     def _to_call_tool_result(
         self,
         result: Any,
         component: Optional[Component] = None,
         context: Optional[ExecutionContext] = None,
     ) -> types.CallToolResult:
+        if isinstance(result, SpilloverResult):
+            return result.to_mcp()
         if isinstance(result, InputRequiredResult):
             wire = result.to_wire_dict()
             return types.CallToolResult(
@@ -1429,10 +1617,9 @@ class McpApplication:
     async def _call_real_tool(self, name: str, arguments: Dict[str, Any], task: Any = None):
         entry = self._tools.get(name)
         if entry is None:
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text=f"Tool '{name}' not found")],
-                isError=True,
-            )
+            return self._unknown_tool_result(name)
+        if not self._tool_visible(name, request_ctx.get(None)):
+            return self._unknown_tool_result(name)
 
         cfg = entry.config
         tool_arguments, input_responses, request_state = split_mrtr_from_arguments(
@@ -1476,6 +1663,11 @@ class McpApplication:
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
         if cfg.task_support == "forbidden" and task_metadata is not None:
             raise MCPError(
                 types.METHOD_NOT_FOUND,
@@ -1516,6 +1708,8 @@ class McpApplication:
                     trace=trace,
                 )
                 _apply_request_envelope(task_ctx, rc)
+                self._configure_visibility_context(task_ctx, rc)
+                await self._bind_spillover(task_ctx, rc)
                 task_ctx.task = TaskContext(
                     task_id,
                     self.task_manager,
@@ -1570,6 +1764,8 @@ class McpApplication:
             trace=trace,
         )
         _apply_request_envelope(ctx, rc)
+        self._configure_visibility_context(ctx, rc)
+        await self._bind_spillover(ctx, rc)
         ticket = self._in_flight.register(correlation_id, jsonrpc_id=jsonrpc_id)
         try:
             result = await run_pipeline(
@@ -1602,6 +1798,21 @@ class McpApplication:
         return self._to_call_tool_result(result, entry.component, ctx)
 
     async def _read_resource(self, uri: str) -> List[ReadResourceContents]:
+        for prefix, store in self._spillover.routes.items():
+            if uri.startswith(prefix):
+                ctx = ExecutionContext(request_id=str(uuid.uuid4()))
+                rc = request_ctx.get(None)
+                _apply_request_envelope(ctx, rc)
+                await self._bind_spillover(ctx, rc)
+                try:
+                    entry = await store.get(uri[len(prefix):], owner=caller_owner(ctx))
+                except (PermissionError, ValueError):
+                    raise ResourceNotFoundError(uri) from None
+                if entry is None:
+                    raise ResourceNotFoundError(uri)
+                return [ReadResourceContents(
+                    content=entry.payload.decode("utf-8"), mime_type=entry.mime_type,
+                )]
         entry = self._resources.get(uri)
         path_kwargs: Dict[str, str] = {}
 
@@ -1747,6 +1958,10 @@ class McpApplication:
         return GetTaskResult(**payload)
 
     def _register_task_handlers(self, server: NitroStackMcpServer) -> None:
+        if self.protocol_era in ("auto", "modern"):
+            server.has_task_support = False
+            return
+
         async def handle_list_tasks(req):
             if rejects_deprecated_method("tasks/list", self.protocol_era):
                 message = deprecated_method_message("tasks/list")

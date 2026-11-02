@@ -1,11 +1,42 @@
 # NitroStack Python SDK Public API Exports
 
+try:
+    from importlib.metadata import PackageNotFoundError, version as _package_version
+
+    __version__ = _package_version("nitrostack")
+except PackageNotFoundError:
+    # Keep the SDK version available when running directly from a source checkout.
+    try:
+        from pathlib import Path
+
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10
+            import tomli as tomllib
+
+        _project_metadata = tomllib.loads(
+            (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        __version__ = str(_project_metadata["project"]["version"])
+    except (ImportError, KeyError, OSError, ValueError, TypeError):
+        __version__ = "unknown"
+
 from nitrostack.widgets.registry import (
     WidgetExample,
     WidgetManifest,
     WidgetMetadata,
     WidgetRegistry,
     get_widget_registry,
+)
+
+from nitrostack.core.interceptors import (
+    DataSpilloverInterceptor,
+    FileSpilloverStore,
+    MemorySpilloverStore,
+    PayloadTooLargeError,
+    SpilloverEntry,
+    SpilloverStore,
+    generate_preview,
 )
 
 from nitrostack.core.decorators import (
@@ -50,6 +81,7 @@ from nitrostack.core.app import (
 from nitrostack.core.errors import (
     ToolExecutionError,
     ValidationError,
+    RateLimitExceededError,
     ResourceNotFoundError,
     PromptNotFoundError,
     TaskCancelledError,
@@ -77,6 +109,8 @@ from nitrostack.core.additional_decorators import (
     cache,
     rate_limit,
     health_check,
+    TransformTelemetry,
+    ServerHealthPayload,
 )
 from nitrostack.events.event_emitter import (
     on_event,
@@ -152,6 +186,14 @@ from nitrostack.runtime import StatelessInvariants, assert_stateless_headers
 
 
 __all__ = [
+    "__version__",
+    "DataSpilloverInterceptor",
+    "FileSpilloverStore",
+    "MemorySpilloverStore",
+    "PayloadTooLargeError",
+    "SpilloverEntry",
+    "SpilloverStore",
+    "generate_preview",
     "tool",
     "resource",
     "prompt",
@@ -173,6 +215,7 @@ __all__ = [
     "ServerConfig",
     "ToolExecutionError",
     "ValidationError",
+    "RateLimitExceededError",
     "ResourceNotFoundError",
     "PromptNotFoundError",
     "use_guards",
@@ -186,6 +229,8 @@ __all__ = [
     "cache",
     "rate_limit",
     "health_check",
+    "TransformTelemetry",
+    "ServerHealthPayload",
     "on_event",
     "EventEmitter",
     "ApiKeyModule",

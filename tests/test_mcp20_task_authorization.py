@@ -167,7 +167,10 @@ class TestWireHandlersAntiEnumeration:
         class AuthModule:
             pass
 
-        @mcp_app(module=AuthModule, server=ServerConfig(name="task-auth"))
+        @mcp_app(
+            module=AuthModule,
+            server=ServerConfig(name="task-auth", protocol_era="legacy"),
+        )
         class AuthApp:
             pass
 

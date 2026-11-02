@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import warnings
 
 import pytest
@@ -70,3 +71,104 @@ def test_no_never_awaited_warning():
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         _read_status()
+
+
+def _read_checks(app_module):
+    async def run():
+        harness = await NitroTestingModule.create(app_module)
+        return await harness.read_resource("health://checks")
+
+    return asyncio.run(run())
+
+
+def test_health_payload_distinguishes_healthy_degraded_and_failing():
+    @injectable()
+    class Svc:
+        @health_check("healthy")
+        def healthy(self):
+            return True
+
+        @health_check("degraded")
+        def degraded(self):
+            return False
+
+        @health_check("failing")
+        def failing(self):
+            raise RuntimeError("dependency unavailable")
+
+    @module(name="health-statuses", providers=[Svc])
+    class M:
+        pass
+
+    payload = _read_checks(M)
+    statuses = {check["name"]: check["status"] for check in payload["checks"]}
+    assert statuses == {"healthy": "healthy", "degraded": "unhealthy", "failing": "error"}
+    failing_check = next(check for check in payload["checks"] if check["name"] == "failing")
+    assert failing_check["message"] == "Check failed"
+    assert payload["status"] == "unhealthy"
+
+
+def test_false_check_degrades_aggregate_without_failing_it():
+    @injectable()
+    class Svc:
+        @health_check("partial")
+        def partial(self):
+            return False
+
+    @module(name="health-degraded", providers=[Svc])
+    class M:
+        pass
+
+    payload = _read_checks(M)
+    assert payload["status"] == "degraded"
+
+
+def test_timed_out_sync_check_does_not_block_asyncio_run_or_other_checks():
+    release = threading.Event()
+
+    @injectable()
+    class Svc:
+        @health_check("slow_sync", timeout=0.05)
+        def slow_sync(self):
+            release.wait(timeout=5)
+            return True
+
+        @health_check("fast")
+        async def fast(self):
+            await asyncio.sleep(0.005)
+            return True
+
+    @module(name="health-timeouts", providers=[Svc])
+    class M:
+        pass
+
+    result = {}
+    read_complete = threading.Event()
+
+    def read_resource():
+        try:
+            result["payload"] = _read_checks(M)
+        finally:
+            read_complete.set()
+
+    reader = threading.Thread(target=read_resource)
+    reader.start()
+    completed_before_release = read_complete.wait(timeout=2)
+    release.set()
+    reader.join(timeout=2)
+
+    assert completed_before_release, "asyncio.run waited for the timed-out sync check"
+    assert not reader.is_alive()
+    payload = result["payload"]
+    statuses = {check["name"]: check for check in payload["checks"]}
+    assert statuses["slow_sync"]["status"] == "timeout"
+    assert statuses["slow_sync"]["message"] == "Timed out after 0.05s"
+    assert statuses["fast"]["status"] == "healthy"
+    assert payload["status"] == "unhealthy"
+
+
+def test_health_status_retains_legacy_string_map():
+    status = _read_status()
+    assert status["async_ok"] == "healthy"
+    assert status["sync_ok"] == "healthy"
+    assert status["async_boom"] == "error: db down"
