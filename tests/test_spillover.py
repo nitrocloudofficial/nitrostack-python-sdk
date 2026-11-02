@@ -334,7 +334,9 @@ def test_models_mcp_results_and_widget_bypass(store):
     asyncio.run(scenario())
 
 
-def test_background_task_spills_and_can_be_read():
+def test_background_task_spills_and_can_be_read(monkeypatch):
+    # Task augmentation is supported on the legacy wire, not MCP 2026.
+    monkeypatch.setenv("NITRO_MCP_PROTOCOL_VERSION", "legacy")
     app = make_app(DataSpilloverInterceptor(threshold_bytes=1), task_support="optional")
     rc = RequestContext(session=Session())
     async def scenario():
