@@ -322,14 +322,18 @@ def inspector_friendly_schema(node: Any) -> Any:
 
 
 def tool_json_schema(schema_spec: Any) -> Optional[Dict[str, Any]]:
-    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema."""
+    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema.
+
+    Output schemas describe real results, so ``null`` branches of Optional fields are kept.
+    ``inspector_friendly_schema`` is only for input forms.
+    """
     if schema_spec is None:
         return None
     if isinstance(schema_spec, dict):
-        return normalize_output_schema(inspector_friendly_schema(schema_spec))
+        return normalize_output_schema(schema_spec)
     model = get_pydantic_model(schema_spec)
     if model is not None:
-        return normalize_output_schema(inspector_friendly_schema(model.model_json_schema()))
+        return normalize_output_schema(model.model_json_schema())
     return None
 
 
