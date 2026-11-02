@@ -9,6 +9,13 @@ class ValidationError(Exception):
     """Raised when inputs or outputs fail schema validation."""
     pass
 
+class RateLimitExceededError(ValueError):
+    """Raised when a @rate_limit bucket is exhausted."""
+
+    def __init__(self, message: str, retry_after_seconds: float):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
 class ResourceNotFoundError(Exception):
     """Raised when a requested resource is not found."""
     pass

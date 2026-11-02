@@ -63,6 +63,7 @@ from nitrostack.core.app import (
 from nitrostack.core.errors import (
     ToolExecutionError,
     ValidationError,
+    RateLimitExceededError,
     ResourceNotFoundError,
     PromptNotFoundError,
     TaskCancelledError,
@@ -189,6 +190,7 @@ __all__ = [
     "ServerConfig",
     "ToolExecutionError",
     "ValidationError",
+    "RateLimitExceededError",
     "ResourceNotFoundError",
     "PromptNotFoundError",
     "use_guards",
