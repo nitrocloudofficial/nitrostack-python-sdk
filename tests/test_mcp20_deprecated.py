@@ -57,3 +57,12 @@ def test_sessionless_official_handler_hides_tasks_list(era):
         assert types.ListTasksRequest not in app.mcp_server.request_handlers
     finally:
         DIContainer.reset()
+
+
+@pytest.mark.parametrize("era", ["auto", "modern"])
+@pytest.mark.parametrize("method", ["tasks/list", "tasks/get", "tasks/result", "tasks/cancel", "tasks/update"])
+def test_sessionless_http_hides_task_methods(era, method):
+    with http_client(era) as (_, _, client):
+        response = post(client, method, {"taskId": "missing"} if method != "tasks/list" else {})
+        assert response.status_code == 404, response.text
+        assert decode(response)["error"]["code"] == types.METHOD_NOT_FOUND

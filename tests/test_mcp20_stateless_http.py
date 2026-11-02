@@ -139,7 +139,8 @@ def test_incoming_session_id_cannot_attach_sessionless_calls(era):
 def test_method_contract_table_still_covers_modern_surface():
     methods = {row.method for row in MODERN_METHOD_CONTRACTS}
     assert {"server/discover", "resources/read", "prompts/get", "completion/complete",
-            "tasks/get", "tools/call"} <= methods
+            "tools/call"} <= methods
+    assert not any(method.startswith("tasks/") for method in methods)
 
 
 def test_response_echo_uses_supported_request_version():
