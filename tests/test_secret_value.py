@@ -477,3 +477,39 @@ def test_oauth_still_falls_back_to_environment_when_not_given(monkeypatch):
     monkeypatch.setenv("INTROSPECTION_CLIENT_SECRET", "ENV-VALUE-0123456789")
     service = OAuthService("https://r", ["https://a"], ["x"])
     assert service.token_introspection_client_secret == "ENV-VALUE-0123456789"
+
+
+class _LeakySource(str):
+    """A ``str`` subclass that equals "env" but drags a secret into its pickle state."""
+
+    def __new__(cls, text, leaked):
+        obj = super().__new__(cls, text)
+        obj.leaked = leaked
+        return obj
+
+    def __reduce__(self):
+        return (str, (str(self),), {"leaked": self.leaked})
+
+    def __hash__(self):
+        return hash("env")
+
+    def __eq__(self, other):
+        return other == "env" or str.__eq__(self, other)
+
+
+def test_pickle_ignores_state_carried_by_a_str_subclass_source():
+    leaked = "sk-live-top-secret"
+    for label in ("env", "config", "explicit"):
+        secret = SecretValue("v-" + leaked, source=_LeakySource(label, leaked))
+        blob = pickle.dumps(secret)
+        assert leaked.encode() not in blob
+        assert pickle.loads(blob).source == label
+
+
+def test_subclass_with_a_fake_equality_cannot_pick_a_safe_label():
+    leaked = "sk-live-top-secret"
+    # Compares equal to "env" but its real text is the secret.
+    secret = SecretValue("v-" + leaked, source=_LeakySource(leaked, leaked))
+    blob = pickle.dumps(secret)
+    assert leaked.encode() not in blob
+    assert pickle.loads(blob).source == "custom"

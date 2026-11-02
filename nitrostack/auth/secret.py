@@ -174,7 +174,12 @@ class SecretValue:
         # The pickle holds only the source. Loading it gives a SecretValue with no
         # value, so a secret can neither leak through a pickle nor be silently
         # replaced by a placeholder string.
-        source = self.source if self.source in _PICKLE_SAFE_SOURCES else "custom"
+        # Emit a built-in label, never ``self.source`` itself: a ``str`` subclass can carry
+        # extra pickle state (or fake ``==``), and ``str.__eq__`` ignores both.
+        source = next(
+            (label for label in _PICKLE_SAFE_SOURCES if str.__eq__(self.source, label) is True),
+            "custom",
+        )
         return (_redacted_after_pickle, (source,))
 
     def __copy__(self) -> "SecretValue":
