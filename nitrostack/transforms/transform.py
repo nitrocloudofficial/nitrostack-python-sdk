@@ -49,6 +49,7 @@ class TransformContext:
     subject: Optional[str] = None  # verified bearer subject, never client-supplied
     execution_context: Any = None  # the ExecutionContext of the originating request
     metadata: Dict[str, Any] = field(default_factory=dict)
+    visible_tools: Optional[Sequence[Tool]] = None
     _invoker: Optional[ToolInvoker] = None
 
     async def call_tool(
