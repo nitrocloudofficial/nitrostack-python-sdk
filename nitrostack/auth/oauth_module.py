@@ -156,7 +156,7 @@ def build_registration_response(service: "OAuthService", body: Optional[Dict[str
     body = body or {}
     client_id = service.static_client_id
     # The registration response must hand the real secret to the client, so unwrap it here.
-    client_secret = unwrap_secret(service.static_client_secret) if service.static_client_secret else ""
+    client_secret = unwrap_secret(service.static_client_secret) if service.static_client_secret is not None else ""
     return {
         "client_id": client_id,
         "client_secret": client_secret,

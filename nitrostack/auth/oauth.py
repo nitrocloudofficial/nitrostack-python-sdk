@@ -65,6 +65,13 @@ def warn_if_oauth_fail_open() -> None:
     )
     sys.stderr.flush()
 
+def _has_secret(value: Any) -> bool:
+    """True when a secret was given. A SecretValue counts even if it holds no value (it is
+    falsy after pickling), so it is never silently replaced by an environment variable;
+    unwrapping it raises instead."""
+    return isinstance(value, SecretValue) or bool(value)
+
+
 class OAuthService:
     def __init__(
         self,
@@ -106,7 +113,9 @@ class OAuthService:
             token_introspection_client_id or os.environ.get("INTROSPECTION_CLIENT_ID")
         )
         self.token_introspection_client_secret = (
-            token_introspection_client_secret or os.environ.get("INTROSPECTION_CLIENT_SECRET")
+            token_introspection_client_secret
+            if _has_secret(token_introspection_client_secret)
+            else os.environ.get("INTROSPECTION_CLIENT_SECRET")
         )
 
         # Environmental fallbacks
@@ -127,7 +136,11 @@ class OAuthService:
             else os.environ.get("OAUTH_ENABLE_CLIENT_REGISTRATION", "").lower() == "true"
         )
         self.static_client_id = static_client_id or os.environ.get("OAUTH_CLIENT_ID")
-        self.static_client_secret = static_client_secret or os.environ.get("OAUTH_CLIENT_SECRET")
+        self.static_client_secret = (
+            static_client_secret
+            if _has_secret(static_client_secret)
+            else os.environ.get("OAUTH_CLIENT_SECRET")
+        )
 
         # Caches: JWKS client objects (keyed by jwks_uri — PyJWKClient already does its
         # own internal signing-key caching, this just avoids reconstructing the client
@@ -374,7 +387,7 @@ class OAuthService:
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
         # Add basic auth if client credentials provided
-        if self.token_introspection_client_id and self.token_introspection_client_secret:
+        if self.token_introspection_client_id and _has_secret(self.token_introspection_client_secret):
             import base64
             client_secret = unwrap_secret(self.token_introspection_client_secret)
             auth_str = f"{self.token_introspection_client_id}:{client_secret}"
