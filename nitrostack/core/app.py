@@ -6,6 +6,7 @@ import uuid
 import asyncio
 import inspect
 import datetime
+import time
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from mcp.types import (
     UnsubscribeRequestParams,
 )
 from pydantic import BaseModel, create_model
+from nitrostack import __version__ as _sdk_version
 from nitrostack.transforms import (
     TransformContext,
     TransformError,
@@ -48,7 +50,7 @@ from nitrostack.core.errors import (
 )
 from nitrostack.core.mcp_server import NitroStackMcpServer
 from nitrostack.core.pipeline import run_pipeline
-from nitrostack.core.additional_decorators import HealthCheckRegistry
+from nitrostack.core.additional_decorators import HealthCheckRegistry, ServerHealthPayload
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
 from nitrostack.protocol.schema import (
@@ -584,6 +586,8 @@ def _auth_metadata_from_request_ctx(rc: Any) -> Dict[str, Any]:
 class McpApplication:
     def __init__(self, app_class: Type):
         self.app_class = app_class
+        self._started_at = time.monotonic()
+        self._sdk_version = _sdk_version
         if hasattr(app_class, "_mcp_app_module"):
             self.root_module = app_class._mcp_app_module
             self.server_config = app_class._mcp_app_server
@@ -679,7 +683,10 @@ class McpApplication:
                 # Bind Health Checks
                 if hasattr(member, "_mcp_health_check_name"):
                     check_name = getattr(member, "_mcp_health_check_name")
-                    HealthCheckRegistry.bind_instance(check_name, member, instance)
+                    HealthCheckRegistry.bind_instance(
+                        check_name, member, instance,
+                        timeout=float(getattr(member, "_mcp_health_check_timeout", 5.0)),
+                    )
 
                 # Bind Event Listeners
                 if hasattr(member, "_mcp_event_name"):
@@ -829,17 +836,71 @@ class McpApplication:
         self._prompts[prompt_config.name] = _PromptEntry(config=prompt_config, instance=instance, method=method)
 
     def _register_health_resource(self) -> None:
-        config = ResourceConfig(
+        status_config = ResourceConfig(
             uri="health://status",
             name="Health Status",
             description="System health status check",
+            mime_type="application/json",
+        )
+        checks_config = ResourceConfig(
+            uri="health://checks",
+            name="Health Checks & Pipeline Telemetry",
+            description="Current health status and transform pipeline telemetry",
+            mime_type="application/json",
         )
 
         async def health_status_resource(context: ExecutionContext) -> str:
+            # Keep the original string map at health://status for existing clients.
             results = await HealthCheckRegistry.run_all()
             return json.dumps(results)
 
-        self._resources[config.uri] = _ResourceEntry(config=config, instance=None, method=health_status_resource)
+        async def health_checks_resource(context: ExecutionContext) -> ServerHealthPayload:
+            checks = await HealthCheckRegistry.run_detailed()
+            has_failures = any(
+                check["status"] in {"error", "timeout"}
+                for check in checks
+            )
+            has_unhealthy = any(
+                check["status"] == "unhealthy"
+                for check in checks
+            )
+            transforms = []
+            configured_transforms = getattr(self.app_class, "_mcp_transforms", None) or []
+            for order, transform in enumerate(configured_transforms):
+                transforms.append({
+                    "name": getattr(transform, "name", transform.__class__.__name__),
+                    "type": transform.__class__.__name__,
+                    "order": order,
+                    "details": {},
+                })
+            public_checks = [
+                {
+                    **check,
+                    "message": "Check failed" if check["status"] == "error" else check["message"],
+                }
+                for check in checks
+            ]
+            payload: ServerHealthPayload = {
+                "status": (
+                    "unhealthy" if has_failures
+                    else "degraded" if has_unhealthy
+                    else "healthy"
+                ),
+                "uptimeSeconds": int(time.monotonic() - self._started_at),
+                "checks": public_checks,
+                "count": len(public_checks),
+                "transforms": transforms,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "sdkVersion": self._sdk_version,
+            }
+            return payload
+
+        self._resources[status_config.uri] = _ResourceEntry(
+            config=status_config, instance=None, method=health_status_resource
+        )
+        self._resources[checks_config.uri] = _ResourceEntry(
+            config=checks_config, instance=None, method=health_checks_resource
+        )
 
     # ------------------------------------------------------------------
     # Protocol handler wiring (owned low-level `mcp.server.lowlevel.Server`)
