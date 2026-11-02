@@ -4,11 +4,12 @@ import time
 import json
 import urllib.request
 import urllib.parse
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
+from nitrostack.auth.secret import SecretValue, unwrap_secret
 from nitrostack.auth.oauth_module import (
     apply_cimd_to_registration_body,
     build_authorization_server_metadata,
@@ -72,7 +73,7 @@ class OAuthService:
         scopes_supported: List[str],
         token_introspection_endpoint: Optional[str] = None,
         token_introspection_client_id: Optional[str] = None,
-        token_introspection_client_secret: Optional[str] = None,
+        token_introspection_client_secret: Union[SecretValue, str, None] = None,
         discovery_port: int = 3005,
         jwks_uri: Optional[str] = None,
         audience: Optional[str] = None,
@@ -80,7 +81,7 @@ class OAuthService:
         token_cache_seconds: Optional[int] = None,
         enable_client_registration: Optional[bool] = None,
         static_client_id: Optional[str] = None,
-        static_client_secret: Optional[str] = None,
+        static_client_secret: Union[SecretValue, str, None] = None,
     ):
         self.resource_uri = resource_uri
         self.authorization_servers = authorization_servers
@@ -375,7 +376,8 @@ class OAuthService:
         # Add basic auth if client credentials provided
         if self.token_introspection_client_id and self.token_introspection_client_secret:
             import base64
-            auth_str = f"{self.token_introspection_client_id}:{self.token_introspection_client_secret}"
+            client_secret = unwrap_secret(self.token_introspection_client_secret)
+            auth_str = f"{self.token_introspection_client_id}:{client_secret}"
             encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
             req.add_header("Authorization", f"Basic {encoded_auth}")
 
@@ -460,7 +462,7 @@ class OAuthModule:
         scopes_supported: List[str],
         token_introspection_endpoint: Optional[str] = None,
         token_introspection_client_id: Optional[str] = None,
-        token_introspection_client_secret: Optional[str] = None,
+        token_introspection_client_secret: Union[SecretValue, str, None] = None,
         discovery_port: int = 3005,
         jwks_uri: Optional[str] = None,
         audience: Optional[str] = None,
@@ -468,7 +470,7 @@ class OAuthModule:
         token_cache_seconds: Optional[int] = None,
         enable_client_registration: Optional[bool] = None,
         static_client_id: Optional[str] = None,
-        static_client_secret: Optional[str] = None,
+        static_client_secret: Union[SecretValue, str, None] = None,
     ):
         if not resource_uri or not str(resource_uri).strip():
             raise ConfigurationError("OAuthModule.for_root requires resource_uri")

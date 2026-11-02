@@ -1,9 +1,10 @@
 import secrets
 import hashlib
 import os
-from typing import List, Optional
+from typing import List, Optional, Sequence, Union
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
+from nitrostack.auth.secret import SecretValue, unwrap_secret
 
 class ApiKeyService:
     def __init__(
@@ -11,10 +12,13 @@ class ApiKeyService:
         keys_env_prefix: str = "API_KEY",
         header_name: str = "x-api-key",
         hashed: bool = False,
+        keys: Optional[Sequence[Union[SecretValue, str]]] = None,
     ):
         self.keys_env_prefix = keys_env_prefix
         self.header_name = header_name
         self.hashed = hashed
+        # Keys passed in code are used in addition to the ones found in the environment.
+        self._explicit_keys: List[Union[SecretValue, str]] = list(keys or [])
         self._keys: List[str] = []
         self._load_keys()
 
@@ -29,7 +33,8 @@ class ApiKeyService:
         for k, v in os.environ.items():
             if k.startswith(f"{self.keys_env_prefix}_"):
                 keys.append(v)
-                
+
+        keys.extend(unwrap_secret(k) for k in self._explicit_keys)
         self._keys = keys
 
     def get_keys(self) -> List[str]:
@@ -65,11 +70,13 @@ class ApiKeyModule:
         keys_env_prefix: str = "API_KEY",
         header_name: str = "x-api-key",
         hashed: bool = False,
+        keys: Optional[Sequence[Union[SecretValue, str]]] = None,
     ):
         service = ApiKeyService(
             keys_env_prefix=keys_env_prefix,
             header_name=header_name,
-            hashed=hashed
+            hashed=hashed,
+            keys=keys,
         )
         DIContainer.get_instance().register_value(ApiKeyService, service)
         return cls

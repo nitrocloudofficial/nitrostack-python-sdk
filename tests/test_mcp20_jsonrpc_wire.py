@@ -31,7 +31,6 @@ from nitrostack.protocol.meta import (
     split_params_and_meta,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.transports.dispatch import IngressContext, StatelessIngressPipeline
 
 
 class TestErrorCodes:
@@ -255,62 +254,6 @@ class TestHeaderBodyMismatch:
         validate_protocol_version_header_meta(None, "2025-06-18")
         validate_protocol_version_header_meta("2026-07-28", "2026-07-28")
 
-    def test_pipeline_rejects_header_and_meta_mismatch(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "ping",
-                    "params": {"_meta": {"mcp": {"protocolVersion": "2025-06-18"}}},
-                }
-            ).encode()
-            status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2026-07-28"}
-            )
-            assert status == 400
-            assert resp["error"]["code"] == HEADER_BODY_MISMATCH
-
-        asyncio.run(_run())
-
-    def test_pipeline_header_only_proceeds(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
-            status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2026-07-28"}
-            )
-            assert status == 200
-            assert resp["result"] == {}
-
-        asyncio.run(_run())
-
-    def test_pipeline_ignores_unrelated_meta_keys(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "ping",
-                    "params": {"_meta": {"trace": {"id": "span"}, "userId": "eve"}},
-                }
-            ).encode()
-            status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2026-07-28"}
-            )
-            assert status == 200
-            assert resp["result"] == {}
-
-        asyncio.run(_run())
-
 
 class TestUnsupportedProtocolVersion:
     def test_unknown_header_is_rejected(self):
@@ -324,76 +267,6 @@ class TestUnsupportedProtocolVersion:
             validate_supported_protocol_version("1999-01-01", {"2026-07-28"})
         assert int(exc.value.code) == UNSUPPORTED_PROTOCOL_VERSION
         assert str(exc.value) == "Unsupported protocol version"
-
-    def test_pipeline_rejects_unknown_header(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
-            status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "1999-01-01"}
-            )
-            assert status == 400
-            assert resp["error"]["code"] == -32022
-            assert resp["error"]["message"] == "Unsupported protocol version"
-
-        asyncio.run(_run())
-
-    def test_pipeline_accepts_supported_header(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
-            modern, modern_resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2026-07-28"}
-            )
-            legacy, legacy_resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2025-06-18"}
-            )
-            absent, absent_resp = await pipeline.handle_post(body, {})
-            assert modern == 200
-            assert modern_resp["result"] == {}
-            assert legacy == 200
-            assert legacy_resp["result"] == {}
-            assert absent == 200
-            assert absent_resp["result"] == {}
-
-        asyncio.run(_run())
-
-    def test_pipeline_rejects_envelope_only_unknown_version(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="stateless")
-            )
-            body = json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "ping",
-                    "params": {"_meta": {"mcp": {"protocolVersion": "1999-01-01"}}},
-                }
-            ).encode()
-            status, resp = await pipeline.handle_post(body, {})
-            assert status == 400
-            assert resp["error"]["code"] == -32022
-
-        asyncio.run(_run())
-
-    def test_modern_rejects_legacy_dated_header(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION, wire_mode="reject")
-            )
-            body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
-            status, resp = await pipeline.handle_post(
-                body, {"MCP-Protocol-Version": "2025-06-18", "Mcp-Method": "ping"}
-            )
-            assert status == 400
-            assert resp["error"]["code"] == -32022
-
-        asyncio.run(_run())
 
 
 class TestToolVsProtocolErrors:
@@ -419,48 +292,10 @@ class TestToolVsProtocolErrors:
 class TestDeprecatedMethods:
     @pytest.mark.parametrize(
         "method",
-        ["tasks/result", "tasks/list", "resources/subscribe", "logging/setLevel"],
+        ["resources/subscribe", "logging/setLevel"],
     )
     def test_deprecated_methods_have_messages(self, method):
         assert deprecated_method_message(method) is not None
-
-    def test_pipeline_rejects_tasks_list(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext(
-                    "srv",
-                    "1.0.0",
-                    MODERN_PROTOCOL_VERSION,
-                    wire_mode="reject",
-                    protocol_era="modern",
-                )
-            )
-            body = json.dumps(
-                {"jsonrpc": "2.0", "id": 1, "method": "tasks/list", "params": {}}
-            ).encode()
-            status, resp = await pipeline.handle_post(body, {"Mcp-Method": "tasks/list"})
-            assert status == 200
-            assert resp["error"]["code"] == int(JsonRpcErrorCode.METHOD_NOT_FOUND)
-
-        asyncio.run(_run())
-
-    def test_pipeline_auto_forwards_tasks_list(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext(
-                    "srv",
-                    "1.0.0",
-                    MODERN_PROTOCOL_VERSION,
-                    wire_mode="stateless",
-                    protocol_era="auto",
-                )
-            )
-            body = json.dumps(
-                {"jsonrpc": "2.0", "id": 1, "method": "tasks/list", "params": {}}
-            ).encode()
-            assert await pipeline.handle_post(body, {"Mcp-Method": "tasks/list"}) is None
-
-        asyncio.run(_run())
 
 
 class TestJsonRpcParseErrors:

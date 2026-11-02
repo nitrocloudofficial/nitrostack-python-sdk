@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -57,12 +56,13 @@ from nitrostack.protocol.version import (
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.transports.headers import (
     CORS_ALLOW_HEADER_NAMES,
-    CORS_EXPOSE_HEADER_NAMES,
     SSE_SUBSCRIPTIONS_PATH,
     strip_legacy_session_headers_asgi,
 )
+from nitrostack.transports.cors import McpCorsMiddleware
 from nitrostack.transports.subscriptions import subscriptions_listen_endpoint
 from nitrostack.transports.proxy import public_url_for_request
+from nitrostack.core.log_emitter import install_log_handler
 
 if TYPE_CHECKING:
     from nitrostack.core.app import McpApplication
@@ -130,6 +130,7 @@ def _enable_trace_logging() -> None:
     traces are not emitted twice once `FileLogger` does attach its handler.
     stderr keeps them off stdout, which dual mode uses for JSON-RPC.
     """
+    install_log_handler("nitrostack.transports.http")
     if any(getattr(handler, "_nitrostack_trace", False) for handler in logger.handlers):
         return
     handler = logging.StreamHandler(sys.stderr)
@@ -277,7 +278,8 @@ class HeaderCompatMiddleware:
     version checks see what the client sent.
 
     Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
-    Sidecar version checks run on the combined app outside this mount.
+    This middleware only normalizes transport headers; JSON-RPC dispatch remains
+    owned by the official MCP Streamable HTTP manager.
     """
 
     def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
@@ -739,17 +741,14 @@ def build_http_app(
         Middleware(ExactEndpointSlashMiddleware, endpoint=endpoint),
     ]
     if enable_cors:
-        expose_headers = list(CORS_EXPOSE_HEADER_NAMES)
-        if http_engine == "sessionful":
-            expose_headers.append(LEGACY_SESSION_HEADER)
+        # CORS policy lives in transports/cors.py (MCP_CORS_ALLOWED_ORIGINS, Mcp-* headers).
+        # Mcp-Session-Id is exposed only on the sessionful (legacy) engine.
         middleware.insert(
             0,
             Middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-                allow_headers=CORS_ALLOW_HEADERS,
-                expose_headers=expose_headers,
+                McpCorsMiddleware,
+                expose_session_id=http_engine == "sessionful",
+                fallback_allow_headers=CORS_ALLOW_HEADERS,
             ),
         )
 

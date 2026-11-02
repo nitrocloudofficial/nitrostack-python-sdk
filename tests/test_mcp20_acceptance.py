@@ -108,7 +108,7 @@ class TestAcceptanceTaskConformance:
         class TasksModule:
             pass
 
-        @mcp_app(module=TasksModule, server=ServerConfig(name="acceptance-tasks"))
+        @mcp_app(module=TasksModule, server=ServerConfig(name="acceptance-tasks", protocol_era="legacy"))
         class TasksApp:
             pass
 
@@ -151,7 +151,7 @@ class TestAcceptanceTaskConformance:
             class CancelModule:
                 pass
 
-            @mcp_app(module=CancelModule, server=ServerConfig(name="acceptance-cancel"))
+            @mcp_app(module=CancelModule, server=ServerConfig(name="acceptance-cancel", protocol_era="legacy"))
             class CancelApp:
                 pass
 

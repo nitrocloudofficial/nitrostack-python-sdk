@@ -45,7 +45,6 @@ from nitrostack.tasks.eviction import should_evict_terminal_task
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData, datetime_to_ms, utc_now
 from nitrostack.tasks.authorization import check_task_access
 from nitrostack.transports.cors import cors_preflight_response_headers
-from nitrostack.transports.dispatch import IngressContext, StatelessIngressPipeline
 
 
 class EchoInput(BaseModel):
@@ -94,25 +93,6 @@ class TestStatelessHttpConformance:
         assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
         assert result["cacheScope"] in ("public", "private")
 
-    def test_stateless_pipeline_handles_discover_without_session(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION),
-                discover_handler=lambda _req: build_discover_result(
-                    server_name="srv",
-                    server_version="1.0.0",
-                    protocol_version=MODERN_PROTOCOL_VERSION,
-                ),
-            )
-            body = json.dumps(
-                {"jsonrpc": "2.0", "id": "d1", "method": "server/discover", "params": {}}
-            ).encode()
-            status, resp = await pipeline.handle_post(body, {})
-            assert status == 200
-            assert resp["result"]["protocolVersion"] == MODERN_PROTOCOL_VERSION
-            assert_stateless_headers({"Content-Type": "application/json"})
-
-        asyncio.run(_run())
 
     def test_post_mcp_stateless_no_session_header(self):
         @injectable()
@@ -192,15 +172,10 @@ class TestJsonRpcConformance:
 
         async def _run():
             app = await McpApplicationFactory.create(JsonRpcApp)
-            handler = app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-            with pytest.raises(McpError) as exc:
-                await handler(
-                    types.GetTaskPayloadRequest(
-                        method="tasks/result",
-                        params=types.GetTaskPayloadRequestParams(taskId="missing"),
-                    )
-                )
-            assert exc.value.error.code == types.METHOD_NOT_FOUND
+            # The 2026 wire has no Tasks surface, so tasks/result has no handler at all
+            # and the official server answers it as method-not-found.
+            assert types.GetTaskPayloadRequest not in app.mcp_server.request_handlers
+            assert app.mcp_server.has_task_support is False
 
         asyncio.run(_run())
 
@@ -217,7 +192,7 @@ class TestTaskSubsystemConformance:
         class TasksModule:
             pass
 
-        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks"))
+        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks", protocol_era="legacy"))
         class TasksApp:
             pass
 
@@ -266,7 +241,7 @@ class TestTaskSubsystemConformance:
             class GetModule:
                 pass
 
-            @mcp_app(module=GetModule, server=ServerConfig(name="get"))
+            @mcp_app(module=GetModule, server=ServerConfig(name="get", protocol_era="legacy"))
             class GetApp:
                 pass
 
@@ -344,7 +319,7 @@ class TestMultiTenantIsolationConformance:
             class IsoModule:
                 pass
 
-            @mcp_app(module=IsoModule, server=ServerConfig(name="iso"))
+            @mcp_app(module=IsoModule, server=ServerConfig(name="iso", protocol_era="legacy"))
             class IsoApp:
                 pass
 

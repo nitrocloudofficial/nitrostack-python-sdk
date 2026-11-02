@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any, Callable, Optional
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer, injectable
+from nitrostack.auth.secret import SecretValue
 
 @injectable()
 class ConfigService:
@@ -12,6 +13,8 @@ class ConfigService:
         defaults: Optional[Dict[str, Any]] = None,
         validate_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
     ):
+        # ``defaults`` values may be SecretValue instances. They are kept as they are, so
+        # printing the config or calling ``get()`` never shows the raw secret.
         self._config: Dict[str, Any] = {}
         if defaults:
             self._config.update(defaults)
@@ -51,6 +54,25 @@ class ConfigService:
         if key not in self._config:
             raise KeyError(f"Configuration key '{key}' is required but not found.")
         return self._config[key]
+
+    def get_secret(self, key: str, default: Optional[SecretValue] = None) -> Optional[SecretValue]:
+        """Return a configuration value as a ``SecretValue`` (or ``default`` when missing).
+
+        A value that is already a ``SecretValue`` is returned as it is. A plain string is
+        wrapped, so callers can pass it on without it being printed by accident.
+        """
+        value = self._config.get(key)
+        if value is None or value == "":
+            return default
+        if isinstance(value, SecretValue):
+            return value
+        return SecretValue(str(value), source="config")
+
+    def get_secret_or_throw(self, key: str) -> SecretValue:
+        secret = self.get_secret(key)
+        if secret is None:
+            raise KeyError(f"Configuration key '{key}' is required but not found.")
+        return secret
 
 @module(name="ConfigModule")
 class ConfigModule:

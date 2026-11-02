@@ -239,11 +239,6 @@ def jsonrpc_error(request_id: Any, code: int, message: str, data: Any = None) ->
     return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "error": error}
 
 
-def build_ping_response(request_id: Any) -> dict[str, Any]:
-    """Ping fast path."""
-    return jsonrpc_success(request_id, {})
-
-
 def build_tool_error_result(message: str, *, text_type: str = "text") -> dict[str, Any]:
     """
     Tool business failure — JSON-RPC success with isError: true.

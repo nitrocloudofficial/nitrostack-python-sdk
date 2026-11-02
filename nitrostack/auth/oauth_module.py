@@ -20,6 +20,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from nitrostack.auth.secret import unwrap_secret
+
 from nitrostack.auth.cimd import (
     looks_like_cimd_url,
     resolve_cimd_sync,
@@ -153,7 +155,8 @@ def build_registration_response(service: "OAuthService", body: Optional[Dict[str
     """
     body = body or {}
     client_id = service.static_client_id
-    client_secret = service.static_client_secret or ""
+    # The registration response must hand the real secret to the client, so unwrap it here.
+    client_secret = unwrap_secret(service.static_client_secret) if service.static_client_secret else ""
     return {
         "client_id": client_id,
         "client_secret": client_secret,

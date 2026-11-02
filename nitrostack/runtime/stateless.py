@@ -47,7 +47,8 @@ def request_protocol_version(
 
     The header wins when present. Otherwise ``_meta.mcp.protocolVersion`` is
     used. When neither is present the request proceeds (legacy default). The
-    header is not required on ``modern`` in this sidecar.
+    header is not required on ``modern`` because the official SDK owns the
+    HTTP request lifecycle.
     """
     for raw in (header_version, envelope_version):
         if isinstance(raw, str) and raw.strip():
