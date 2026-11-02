@@ -172,15 +172,10 @@ class TestJsonRpcConformance:
 
         async def _run():
             app = await McpApplicationFactory.create(JsonRpcApp)
-            handler = app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-            with pytest.raises(McpError) as exc:
-                await handler(
-                    types.GetTaskPayloadRequest(
-                        method="tasks/result",
-                        params=types.GetTaskPayloadRequestParams(taskId="missing"),
-                    )
-                )
-            assert exc.value.error.code == types.METHOD_NOT_FOUND
+            # The 2026 wire has no Tasks surface, so tasks/result has no handler at all
+            # and the official server answers it as method-not-found.
+            assert types.GetTaskPayloadRequest not in app.mcp_server.request_handlers
+            assert app.mcp_server.has_task_support is False
 
         asyncio.run(_run())
 
@@ -197,7 +192,7 @@ class TestTaskSubsystemConformance:
         class TasksModule:
             pass
 
-        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks"))
+        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks", protocol_era="legacy"))
         class TasksApp:
             pass
 
@@ -246,7 +241,7 @@ class TestTaskSubsystemConformance:
             class GetModule:
                 pass
 
-            @mcp_app(module=GetModule, server=ServerConfig(name="get"))
+            @mcp_app(module=GetModule, server=ServerConfig(name="get", protocol_era="legacy"))
             class GetApp:
                 pass
 
@@ -324,7 +319,7 @@ class TestMultiTenantIsolationConformance:
             class IsoModule:
                 pass
 
-            @mcp_app(module=IsoModule, server=ServerConfig(name="iso"))
+            @mcp_app(module=IsoModule, server=ServerConfig(name="iso", protocol_era="legacy"))
             class IsoApp:
                 pass
 

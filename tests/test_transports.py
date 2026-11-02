@@ -89,7 +89,7 @@ def _free_port() -> int:
 
 
 async def _build_app() -> McpApplication:
-    @mcp_app(module=TransportsTestModule, server=ServerConfig(name="transports-test-server"))
+    @mcp_app(module=TransportsTestModule, server=ServerConfig(name="transports-test-server", protocol_era="legacy"))
     class _TestApp:
         pass
 

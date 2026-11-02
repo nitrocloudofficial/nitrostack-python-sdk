@@ -130,13 +130,13 @@ def _make_widget_module(
     return WidgetTestModule, html_path if with_html_file else None
 
 
-async def _harness(module_cls, *, chdir_to_fixtures: bool = False):
+async def _harness(module_cls, *, chdir_to_fixtures: bool = False, protocol_era: str = "auto"):
     if chdir_to_fixtures:
         os.chdir(FIXTURES.parent.parent.parent)  # tests/fixtures
     @mcp_app(module=module_cls, server=ServerConfig(name="widget-test"))
     class _App:
         pass
-    return await NitroTestingModule.create(module_cls)
+    return await NitroTestingModule.create(module_cls, protocol_era=protocol_era)
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ def test_widget_task_result_matches_direct_call():
         prev = os.getcwd()
         try:
             os.chdir(FIXTURES.parent.parent)
-            harness = await _harness(mod)
+            harness = await _harness(mod, protocol_era="legacy")
         finally:
             os.chdir(prev)
 

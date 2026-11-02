@@ -53,6 +53,7 @@ class ToolConfig:
     invocation: Optional[ToolInvocation] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     is_initial: bool = False
+    default_visible: Optional[bool] = None
 
 @dataclass
 class ResourceConfig:
@@ -101,6 +102,7 @@ def tool(
     examples: Optional[ToolExamples] = None,
     invocation: Optional[ToolInvocation] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    default_visible: Optional[bool] = None,
 ):
     """
     Decorator to register a method as an MCP Tool.
@@ -121,6 +123,7 @@ def tool(
             annotations=annotations,
             task_support=task_support,
             visibility=visibility,
+            default_visible=(visibility == "visible") if default_visible is None else default_visible,
             examples=examples,
             invocation=invocation,
             metadata=metadata,
