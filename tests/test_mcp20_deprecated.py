@@ -152,27 +152,22 @@ async def _asgi_json_get(app, headers: dict[str, str]) -> tuple[int, dict]:
         await asyncio.wait_for(task, timeout=2)
 
 
-def test_auto_official_handler_still_lists_tasks(monkeypatch):
+def test_auto_official_handler_hides_tasks_list(monkeypatch):
+    # Tasks are hidden on the 2026 wire (auto included), so there is no handler.
     monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
     monkeypatch.delenv("MCP_STATELESS", raising=False)
     app, _ = _echo_http_app("auto")
     try:
-        handler = app.mcp_server.request_handlers[types.ListTasksRequest]
-        result = asyncio.run(handler(types.ListTasksRequest(method="tasks/list", params={})))
-        assert result.tasks == []
+        assert types.ListTasksRequest not in app.mcp_server.request_handlers
     finally:
         DIContainer.reset()
 
 
-def test_modern_official_handler_rejects_tasks_list(monkeypatch):
+def test_modern_official_handler_hides_tasks_list(monkeypatch):
     monkeypatch.delenv("NITRO_MCP_PROTOCOL_VERSION", raising=False)
     monkeypatch.delenv("MCP_STATELESS", raising=False)
     app, _ = _echo_http_app("modern")
     try:
-        handler = app.mcp_server.request_handlers[types.ListTasksRequest]
-        with pytest.raises(McpError) as exc:
-            asyncio.run(handler(types.ListTasksRequest(method="tasks/list", params={})))
-        assert exc.value.error.code == types.METHOD_NOT_FOUND
-        assert exc.value.error.message == deprecated_method_message("tasks/list")
+        assert types.ListTasksRequest not in app.mcp_server.request_handlers
     finally:
         DIContainer.reset()
