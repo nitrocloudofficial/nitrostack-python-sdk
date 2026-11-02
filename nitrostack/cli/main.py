@@ -850,6 +850,8 @@ OFFICIAL_TEMPLATES = {
     "python-starter": "starter",
     "python-pizzaz": "pizzaz",
     "python-oauth": "flight-booking",
+    "python-enterprise-search": "enterprise-search",
+    "python-code-mode": "code-mode",
 }
 
 REQUIREMENTS_TEMPLATE = """nitrostack
@@ -1107,18 +1109,22 @@ def _prompt_template() -> str:
     print("  \033[34m1. python-starter\033[0m     Starter — simple calculator for learning basics")
     print("  \033[34m2. python-pizzaz\033[0m      Advanced — pizza shop finder with maps & widgets")
     print("  \033[34m3. python-oauth\033[0m       Flight booking with OAuth 2.1 auth")
+    print("  \033[34m4. python-enterprise-search\033[0m  BM25 progressive tool discovery")
+    print("  \033[34m5. python-code-mode\033[0m         QuickJS multi-tool workflows")
     by_choice = {
         "1": "python-starter",
         "2": "python-pizzaz",
         "3": "python-oauth",
+        "4": "python-enterprise-search",
+        "5": "python-code-mode",
     }
     while True:
-        choice = _prompt("Enter choice (1-3) or template name", "1")
+        choice = _prompt("Enter choice (1-5) or template name", "1")
         if choice in by_choice:
             return by_choice[choice]
         if choice.lower() in OFFICIAL_TEMPLATES:
             return choice.lower()
-        print("Please enter 1, 2, 3, or an explicit template name (python-starter, python-pizzaz, python-oauth).")
+        print("Please enter 1-5, or an explicit template name (" + ", ".join(OFFICIAL_TEMPLATES) + ").")
 
 
 def _normalize_port(value, label):
@@ -1310,6 +1316,9 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
 
     # 7. Update .env file
     env_path = os.path.join(name, ".env")
+    env_example_path = os.path.join(name, ".env.example")
+    if not os.path.exists(env_path) and os.path.isfile(env_example_path):
+        shutil.copyfile(env_example_path, env_path)
     if os.path.exists(env_path):
         with open(env_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -1398,6 +1407,18 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     # Next Steps
     print("\n\033[1;37mNext steps:\033[0m")
     print(f" 1. \033[34mcd {name}\033[0m")
+    if template in ("python-enterprise-search", "python-code-mode"):
+        print(" 2. Read README.md for sample tool calls and local demonstration data")
+        print(" 3. Validate the project: nitrostack-py validate")
+        print(" 4. Install dependencies if skipped: nitrostack-py install")
+        print(" 5. Start an MCP stdio server: python main.py")
+        print("    For HTTP set MCP_TRANSPORT_TYPE=http, then connect to http://localhost:3000/mcp")
+        if template == "python-code-mode":
+            print("    Try scripts/sample-batch.js through execute; QuickJS must be installed")
+        else:
+            print("    Try search_tools with 'overdue invoices', then invoke it through call_tool")
+        print("\nHappy coding! 🚀\n")
+        return
     if template == "python-oauth":
         print(" 2. Configure OAuth credentials in your \033[34m.env\033[0m file")
         print("    See \033[34mOAUTH_SETUP.md\033[0m for provider guides")
@@ -1746,7 +1767,7 @@ def main():
         "--template",
         choices=list(OFFICIAL_TEMPLATES.keys()),
         default=None,
-        help="Template to use: python-starter, python-pizzaz, python-oauth (default: interactive prompt)",
+        help="Template to use: " + ", ".join(OFFICIAL_TEMPLATES) + " (default: interactive prompt)",
     )
     init_parser.add_argument("--skip-install", action="store_true", help="Skip installing Python (and widget npm) dependencies")
     init_parser.add_argument(
