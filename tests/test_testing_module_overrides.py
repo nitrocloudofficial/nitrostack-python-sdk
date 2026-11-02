@@ -282,3 +282,33 @@ def nitro_app():
 @pytest.mark.asyncio
 async def test_nitro_client_resolves_nitro_app_fixture_dynamically(nitro_client):
     assert await nitro_client.call_tool("lookup", {"input": {"key": "f"}}) == "real-f"
+
+
+@pytest.mark.asyncio
+async def test_consumer_cached_before_create_is_rebuilt_with_the_override():
+    container = DIContainer.get_instance()
+    original_service = container.resolve(Service)  # built earlier, holds the real Repo
+    original_repo = container.resolve(Repo)
+    assert original_service.repo is original_repo
+    async with await NitroTestingModule.create(AppModule, overrides={Repo: FakeRepo()}) as app:
+        assert await app.call_tool("lookup", {"input": {"key": "a"}}) == "fake-a"
+    # The originals are put back untouched on close.
+    assert container.resolve(Service) is original_service
+    assert container.resolve(Repo) is original_repo
+    assert original_service.destroyed == 0
+
+
+@pytest.mark.asyncio
+async def test_indirect_consumer_cached_before_create_is_rebuilt():
+    @injectable(deps=[Service])
+    class Outer:
+        def __init__(self, service):
+            self.service = service
+
+    container = DIContainer.get_instance()
+    before = container.resolve(Outer)
+    async with await NitroTestingModule.create(AppModule, overrides={Repo: FakeRepo()}):
+        rebuilt = container.resolve(Outer)
+        assert rebuilt is not before
+        assert rebuilt.service.repo.get("x") == "fake-x"
+    assert container.resolve(Outer) is before

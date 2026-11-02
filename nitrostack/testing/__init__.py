@@ -64,6 +64,7 @@ class NitroTestingModule:
                     value = await value
                 container.register_value(token, value)
                 override_values.append(value)
+            cls._evict_dependents(container, list((overrides or {})))
 
             server_config = ServerConfig(
                 name="test-server",
@@ -83,6 +84,27 @@ class NitroTestingModule:
             cls._restore_container(container, snapshot)
             raise
         return cls(app, container, snapshot, override_values)
+
+    @staticmethod
+    def _evict_dependents(container: DIContainer, overridden: List[Any]) -> None:
+        """Drop cached consumers of an overridden token so they are rebuilt with the override.
+
+        A service built before ``create()`` still holds the real dependency. Evicting it (and
+        anything that depends on it) makes the container construct it again inside the
+        harness. The snapshot taken first puts the original instances back on ``close()``.
+        """
+        stale = set(overridden)
+        changed = True
+        while changed:
+            changed = False
+            for token, instance in list(container._instances.items()):
+                if token in stale:
+                    continue
+                deps = getattr(type(instance), "_mcp_deps", None) or []
+                if any(dep in stale for dep in deps):
+                    stale.add(token)
+                    del container._instances[token]
+                    changed = True
 
     @staticmethod
     def _restore_container(
