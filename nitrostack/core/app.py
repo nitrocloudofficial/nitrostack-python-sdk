@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Patter
 from nitrostack.transforms import (
     SyntheticTool, ToolArgumentError, TransformContext, validate_tool_arguments,
 )
+from nitrostack.protocol.errors import JsonRpcErrorCode
 import mcp.types as types
 from mcp import MCPError
 from mcp.server.context import ServerRequestContext
@@ -987,7 +988,7 @@ class McpApplication:
         # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
         # `server/discover` and real capability negotiation never disagree.
         resources_subscribe = supports_resource_subscriptions(self.protocol_era)
-        return build_discover_result(
+        result = build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
@@ -996,6 +997,26 @@ class McpApplication:
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
         )
+        meta = dict(result.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        result["_meta"] = meta
+        result.setdefault("resultType", "complete")
+        return result
+
+    def _stamp_discover_meta(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """2026 puts serverInfo and resultType on the result, keeping any cache hint in _meta."""
+        out = dict(result)
+        meta = dict(out.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        out["_meta"] = meta
+        out.setdefault("resultType", "complete")
+        return out
 
     def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
         """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
@@ -1055,6 +1076,11 @@ class McpApplication:
                 _meta=self._list_endpoint_cache_meta(),
             )
 
+        async def _ping(_ctx: ServerRequestContext, _params: Optional[RequestParams]):
+            if self.protocol_era == "legacy":
+                return types.EmptyResult()
+            raise MCPError(types.METHOD_NOT_FOUND, "ping was removed in MCP 2026-07-28")
+        
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
             token = request_ctx.set(ctx)
             try:
@@ -1119,7 +1145,7 @@ class McpApplication:
                 params.name,
                 {str(key): str(value) for key, value in arguments.items()},
             )
-
+        server.add_request_handler("ping", RequestParams, _ping)
         async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
             return self.handle_server_discover(getattr(ctx, "protocol_version", None))
 
@@ -1679,6 +1705,17 @@ class McpApplication:
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
+        if is_task and not getattr(self.mcp_server, "has_task_support", True):
+            raise MCPError(
+                JsonRpcErrorCode.MISSING_REQUIRED_CLIENT_CAPABILITY,
+                f"Tasks are not available on this protocol version; tool '{cfg.name}' "
+                "cannot be run as a task.",
+            )
         if self.protocol_era in ("auto", "modern") and is_task:
             raise MCPError(
                 types.INVALID_PARAMS,
