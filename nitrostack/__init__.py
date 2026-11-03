@@ -21,6 +21,14 @@ except PackageNotFoundError:
     except (ImportError, KeyError, OSError, ValueError, TypeError):
         __version__ = "unknown"
 
+from nitrostack.widgets.registry import (
+    WidgetExample,
+    WidgetManifest,
+    WidgetMetadata,
+    WidgetRegistry,
+    get_widget_registry,
+)
+
 from nitrostack.core.interceptors import (
     DataSpilloverInterceptor,
     FileSpilloverStore,
@@ -287,6 +295,11 @@ __all__ = [
     "TaskAlreadyTerminalError",
     "InvalidTaskTransitionError",
     "TaskExpiredError",
+    "WidgetExample",
+    "WidgetManifest",
+    "WidgetMetadata",
+    "WidgetRegistry",
+    "get_widget_registry",
     "widget_resource_uri",
     "Component",
     "WidgetCsp",
