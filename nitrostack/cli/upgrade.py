@@ -75,20 +75,36 @@ def verify_nitrostack_version(version: str, timeout: float = 15.0) -> None:
         raise UpgradeError(f"Could not reach PyPI to verify nitrostack=={version}: {exc}") from exc
 
 
+def _is_source_reference(text: str, match: re.Match) -> bool:
+    """Keep uv source-table keys and local source paths out of version upgrades."""
+    tables = re.findall(r"(?m)^\s*\[([^\]\n]+)\]", text[:match.start()])
+    if tables and (tables[-1] == "tool.uv.sources" or tables[-1].startswith("tool.uv.sources.")):
+        return True
+    return bool(re.match(r"\s*=(?!=)", text[match.end():])) or (
+        match.start() > 0 and text[match.start() - 1] in "/\\"
+    )
+
+
 def find_current_spec(text: str) -> Optional[str]:
-    match = _DEP_RE.search(text)
-    if not match:
-        return None
-    spec = (match.group(2) + (match.group(3) or "")).strip()
-    return spec
+    for match in _DEP_RE.finditer(text):
+        # A [tool.uv.sources] key is not a dependency requirement.
+        if not _is_source_reference(text, match):
+            return (match.group(2) + (match.group(3) or "")).strip()
+    return None
 
 
 def replace_nitrostack_spec(text: str, spec: str) -> Tuple[str, int]:
+    count = 0
     def _sub(match: re.Match) -> str:
+        nonlocal count
+        if _is_source_reference(text, match):
+            return match.group(0)
+        count += 1
         quote = match.group(1) or ""
         return f"{quote}{spec}{quote}"
 
-    return _DEP_RE.subn(_sub, text)
+    updated = _DEP_RE.sub(_sub, text)
+    return updated, count
 
 
 def _add_to_pyproject_dependencies(text: str, spec: str) -> str:

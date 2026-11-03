@@ -667,3 +667,21 @@ resource reference without invoking the widget's data transformer.
 Independent HTTP/stdio tests and reproducible large-output checks live in
 `tests/test_spillover_transport.py`. Run the spillover tests with
 `python -m pytest tests/test_spillover.py tests/test_spillover_transport.py`.
+
+### Progressive discovery and code-mode templates
+
+| Template | Example |
+| --- | --- |
+| `python-enterprise-search` | BM25 discovery over local finance, inventory and support tools |
+| `python-code-mode` | Bounded JavaScript workflows calling Python tools through native QuickJS |
+
+```sh
+nitrostack-py init search-demo --template python-enterprise-search --skip-install
+nitrostack-py init code-demo --template python-code-mode --skip-install
+```
+
+Each generated README explains installation, tool calls, validation, upgrade and
+packaging. Both use deterministic sample data without credentials or external
+services. Code-mode execution additionally requires `quickjs>=1.19.4`; its workers
+start lazily and are disposed on graceful shutdown. Existing starter, pizzaz and
+OAuth templates remain available.
