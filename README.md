@@ -294,6 +294,30 @@ ApiKeyModule.for_root(keys=[SecretValue.from_env("SERVICE_API_KEY")])
 
 ---
 
+### Quick auth setup
+
+One call per auth type returns the keyword arguments for the matching module, and
+`validate_auth_env` lists every missing environment variable at once:
+
+```python
+from nitrostack import (
+    JWTModule, ApiKeyModule, OAuthModule,
+    setup_jwt_auth, setup_api_key_auth, setup_oauth_auth,
+    validate_auth_env, print_auth_setup_instructions,
+)
+
+ok, missing = validate_auth_env("oauth")      # (False, ["RESOURCE_URI", "AUTH_SERVER_URL", ...])
+if not ok:
+    print_auth_setup_instructions("oauth")
+
+JWTModule.for_root(**setup_jwt_auth())         # reads JWT_SECRET
+ApiKeyModule.for_root(**setup_api_key_auth())  # reads API_KEY / API_KEY_<n>
+OAuthModule.for_root(**setup_oauth_auth())     # reads RESOURCE_URI, AUTH_SERVER_URL, JWKS_URI
+```
+
+`generate_test_credentials()` returns random `SecretValue` credentials for tests and local
+demos only. They are never printed; call `.unwrap()` to read one.
+
 ## Transport Options
 
 NitroStack apps can run over three transports, selected via `MCP_TRANSPORT_TYPE` (or `ServerConfig(transport_type=...)`):
