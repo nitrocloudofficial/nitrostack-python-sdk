@@ -21,6 +21,14 @@ except PackageNotFoundError:
     except (ImportError, KeyError, OSError, ValueError, TypeError):
         __version__ = "unknown"
 
+from nitrostack.widgets.registry import (
+    WidgetExample,
+    WidgetManifest,
+    WidgetMetadata,
+    WidgetRegistry,
+    get_widget_registry,
+)
+
 from nitrostack.core.interceptors import (
     DataSpilloverInterceptor,
     FileSpilloverStore,
@@ -174,6 +182,14 @@ from nitrostack.auth.secret import (
     is_secret_value,
     unwrap_secret,
 )
+from nitrostack.auth.setup import (
+    generate_test_credentials,
+    print_auth_setup_instructions,
+    setup_api_key_auth,
+    setup_jwt_auth,
+    setup_oauth_auth,
+    validate_auth_env,
+)
 from nitrostack.widgets import (
     Component,
     WidgetCsp,
@@ -295,6 +311,12 @@ __all__ = [
     "SecretValue",
     "is_secret_value",
     "unwrap_secret",
+    "setup_jwt_auth",
+    "setup_api_key_auth",
+    "setup_oauth_auth",
+    "generate_test_credentials",
+    "validate_auth_env",
+    "print_auth_setup_instructions",
     "NitroTestingModule",
     "TaskContext",
     "LogRecord",
@@ -311,6 +333,11 @@ __all__ = [
     "TaskAlreadyTerminalError",
     "InvalidTaskTransitionError",
     "TaskExpiredError",
+    "WidgetExample",
+    "WidgetManifest",
+    "WidgetMetadata",
+    "WidgetRegistry",
+    "get_widget_registry",
     "widget_resource_uri",
     "Component",
     "WidgetCsp",

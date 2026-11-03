@@ -8,12 +8,14 @@ import inspect
 import datetime
 import time
 import logging
+from unittest.mock import NonCallableMock
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Pattern, Set, Tuple, Type
 from nitrostack.transforms import (
     SyntheticTool, ToolArgumentError, TransformContext, validate_tool_arguments,
 )
+from nitrostack.protocol.errors import JsonRpcErrorCode
 import mcp.types as types
 from mcp import MCPError
 from mcp.server.context import ServerRequestContext
@@ -73,6 +75,7 @@ from nitrostack.protocol.version import (
     resolve_http_engine,
     resolve_protocol_era_resolution,
     wire_mode_for_era,
+    supports_resource_subscriptions,
 )
 from nitrostack.protocol.mrtr import InputRequiredResult, split_mrtr_from_arguments
 from nitrostack.protocol.cache_hints import (
@@ -110,6 +113,7 @@ from nitrostack.runtime.request_ctx import ServerResult, request_ctx
 from nitrostack.runtime.caller import caller_identity
 from nitrostack.tasks.authorization import extract_task_access_context
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
+from nitrostack.widgets.registry import WIDGET_EXAMPLES_URI, WidgetRegistry
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
 
@@ -322,14 +326,18 @@ def inspector_friendly_schema(node: Any) -> Any:
 
 
 def tool_json_schema(schema_spec: Any) -> Optional[Dict[str, Any]]:
-    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema."""
+    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema.
+
+    Output schemas describe real results, so ``null`` branches of Optional fields are kept.
+    ``inspector_friendly_schema`` is only for input forms.
+    """
     if schema_spec is None:
         return None
     if isinstance(schema_spec, dict):
-        return normalize_output_schema(inspector_friendly_schema(schema_spec))
+        return normalize_output_schema(schema_spec)
     model = get_pydantic_model(schema_spec)
     if model is not None:
-        return normalize_output_schema(inspector_friendly_schema(model.model_json_schema()))
+        return normalize_output_schema(model.model_json_schema())
     return None
 
 
@@ -672,6 +680,9 @@ class McpApplication:
         for instance in module_instances:
             # Scan members of this instance
             for name, member in inspect.getmembers(instance):
+                # A test mock answers hasattr() for everything, so it would look like a tool.
+                if isinstance(member, NonCallableMock):
+                    continue
                 # Discover Tools
                 if hasattr(member, "_mcp_tool_config"):
                     tool_config: ToolConfig = getattr(member, "_mcp_tool_config")
@@ -699,6 +710,10 @@ class McpApplication:
                 if hasattr(member, "_mcp_event_name"):
                     event_name = getattr(member, "_mcp_event_name")
                     EventEmitter.get_instance().bind_instance(event_name, member, instance)
+
+        self.widget_registry: WidgetRegistry = WidgetRegistry._from_tools(self._tools.values())
+        if self.widget_registry.get_all_widgets():
+            self._register_widget_examples_resource()
 
         # 4. Register Built-in Health check Resource if any checks exist
         if HealthCheckRegistry.get_checks():
@@ -822,6 +837,26 @@ class McpApplication:
             instance=None,
             method=widget_resource_handler,
             component=component,
+        )
+
+    def _register_widget_examples_resource(self) -> None:
+        if WIDGET_EXAMPLES_URI in self._resources:
+            raise ValueError(
+                f"Resource URI {WIDGET_EXAMPLES_URI!r} is reserved for the widget manifest"
+            )
+
+        async def widget_examples(context: ExecutionContext) -> dict:
+            return self.widget_registry.get_manifest().to_dict()
+
+        self._resources[WIDGET_EXAMPLES_URI] = _ResourceEntry(
+            config=ResourceConfig(
+                uri=WIDGET_EXAMPLES_URI,
+                name="Widget Examples",
+                description="Provides metadata and examples for all registered UI widgets",
+                mime_type="application/json",
+            ),
+            instance=None,
+            method=widget_examples,
         )
 
     def _register_resource(self, instance: Any, method: Callable, resource_config: ResourceConfig) -> None:
@@ -950,14 +985,38 @@ class McpApplication:
             getattr(self, "protocol_era", None),
             self.server_config.protocol_version,
         )
-        return build_discover_result(
+        # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
+        # `server/discover` and real capability negotiation never disagree.
+        resources_subscribe = supports_resource_subscriptions(self.protocol_era)
+        result = build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
+            resources_subscribe=resources_subscribe,
             advertise_tasks=self._advertise_tasks_extension(),
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
         )
+        meta = dict(result.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        result["_meta"] = meta
+        result.setdefault("resultType", "complete")
+        return result
+
+    def _stamp_discover_meta(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """2026 puts serverInfo and resultType on the result, keeping any cache hint in _meta."""
+        out = dict(result)
+        meta = dict(out.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        out["_meta"] = meta
+        out.setdefault("resultType", "complete")
+        return out
 
     def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> Dict[str, Any]:
         """Answer 2025 ``initialize`` on the sessionless ``auto`` path. No session."""
@@ -985,6 +1044,7 @@ class McpApplication:
         return build_list_endpoint_cache_hint_meta()
 
     def _setup_handlers(self, server: NitroStackMcpServer) -> None:
+        server.protocol_era = self.protocol_era
         async def _list_tools(
             ctx: ServerRequestContext,
             _params: Optional[PaginatedRequestParams],
@@ -1016,6 +1076,11 @@ class McpApplication:
                 _meta=self._list_endpoint_cache_meta(),
             )
 
+        async def _ping(_ctx: ServerRequestContext, _params: Optional[RequestParams]):
+            if self.protocol_era == "legacy":
+                return types.EmptyResult()
+            raise MCPError(types.METHOD_NOT_FOUND, "ping was removed in MCP 2026-07-28")
+        
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
             token = request_ctx.set(ctx)
             try:
@@ -1056,7 +1121,7 @@ class McpApplication:
             return _read_contents_to_result(uri, await self._read_resource(uri))
 
         async def _subscribe_resource(_ctx: ServerRequestContext, params: SubscribeRequestParams):
-            if rejects_deprecated_method("resources/subscribe", self.protocol_era):
+            if not supports_resource_subscriptions(self.protocol_era):
                 message = deprecated_method_message("resources/subscribe")
                 raise MCPError(types.METHOD_NOT_FOUND, message or "Not supported")
             if str(params.uri) not in self._resources:
@@ -1064,6 +1129,8 @@ class McpApplication:
             return types.EmptyResult()
 
         async def _unsubscribe_resource(_ctx: ServerRequestContext, _params: UnsubscribeRequestParams):
+            if not supports_resource_subscriptions(self.protocol_era):
+                raise MCPError(types.METHOD_NOT_FOUND, "Resource subscriptions are not supported in this era")
             return types.EmptyResult()
 
         async def _list_prompts(_ctx: ServerRequestContext, _params: Optional[PaginatedRequestParams]):
@@ -1078,7 +1145,7 @@ class McpApplication:
                 params.name,
                 {str(key): str(value) for key, value in arguments.items()},
             )
-
+        server.add_request_handler("ping", RequestParams, _ping)
         async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
             return self.handle_server_discover(getattr(ctx, "protocol_version", None))
 
@@ -1638,6 +1705,17 @@ class McpApplication:
         trace = _trace_context_from_request_ctx(rc)
 
         is_task = task_metadata is not None
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
+        if is_task and not getattr(self.mcp_server, "has_task_support", True):
+            raise MCPError(
+                JsonRpcErrorCode.MISSING_REQUIRED_CLIENT_CAPABILITY,
+                f"Tasks are not available on this protocol version; tool '{cfg.name}' "
+                "cannot be run as a task.",
+            )
         if self.protocol_era in ("auto", "modern") and is_task:
             raise MCPError(
                 types.INVALID_PARAMS,

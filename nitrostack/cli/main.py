@@ -850,6 +850,8 @@ OFFICIAL_TEMPLATES = {
     "python-starter": "starter",
     "python-pizzaz": "pizzaz",
     "python-oauth": "flight-booking",
+    "python-enterprise-search": "enterprise-search",
+    "python-code-mode": "code-mode",
 }
 
 REQUIREMENTS_TEMPLATE = """nitrostack
@@ -1107,18 +1109,22 @@ def _prompt_template() -> str:
     print("  \033[34m1. python-starter\033[0m     Starter — simple calculator for learning basics")
     print("  \033[34m2. python-pizzaz\033[0m      Advanced — pizza shop finder with maps & widgets")
     print("  \033[34m3. python-oauth\033[0m       Flight booking with OAuth 2.1 auth")
+    print("  \033[34m4. python-enterprise-search\033[0m  BM25 progressive tool discovery")
+    print("  \033[34m5. python-code-mode\033[0m         QuickJS multi-tool workflows")
     by_choice = {
         "1": "python-starter",
         "2": "python-pizzaz",
         "3": "python-oauth",
+        "4": "python-enterprise-search",
+        "5": "python-code-mode",
     }
     while True:
-        choice = _prompt("Enter choice (1-3) or template name", "1")
+        choice = _prompt("Enter choice (1-5) or template name", "1")
         if choice in by_choice:
             return by_choice[choice]
         if choice.lower() in OFFICIAL_TEMPLATES:
             return choice.lower()
-        print("Please enter 1, 2, 3, or an explicit template name (python-starter, python-pizzaz, python-oauth).")
+        print("Please enter 1-5, or an explicit template name (" + ", ".join(OFFICIAL_TEMPLATES) + ").")
 
 
 def _normalize_port(value, label):
@@ -1310,6 +1316,9 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
 
     # 7. Update .env file
     env_path = os.path.join(name, ".env")
+    env_example_path = os.path.join(name, ".env.example")
+    if not os.path.exists(env_path) and os.path.isfile(env_example_path):
+        shutil.copyfile(env_example_path, env_path)
     if os.path.exists(env_path):
         with open(env_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -1398,6 +1407,18 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     # Next Steps
     print("\n\033[1;37mNext steps:\033[0m")
     print(f" 1. \033[34mcd {name}\033[0m")
+    if template in ("python-enterprise-search", "python-code-mode"):
+        print(" 2. Read README.md for sample tool calls and local demonstration data")
+        print(" 3. Validate the project: nitrostack-py validate")
+        print(" 4. Install dependencies if skipped: nitrostack-py install")
+        print(" 5. Start an MCP stdio server: python main.py")
+        print("    For HTTP set MCP_TRANSPORT_TYPE=http, then connect to http://localhost:3000/mcp")
+        if template == "python-code-mode":
+            print("    Try scripts/sample-batch.js through execute; QuickJS must be installed")
+        else:
+            print("    Try search_tools with 'overdue invoices', then invoke it through call_tool")
+        print("\nHappy coding! 🚀\n")
+        return
     if template == "python-oauth":
         print(" 2. Configure OAuth credentials in your \033[34m.env\033[0m file")
         print("    See \033[34mOAUTH_SETUP.md\033[0m for provider guides")
@@ -1666,8 +1687,7 @@ def register_server(name: str, file_path: str):
         print(f"Error: Script file '{file_path}' does not exist.")
         sys.exit(1)
         
-    abs_file_path = os.path.abspath(file_path)
-    python_exe = sys.executable
+    server_entry = _build_server_entry(file_path)
     
     config_paths = get_claude_config_paths()
     if not config_paths:
@@ -1691,10 +1711,7 @@ def register_server(name: str, file_path: str):
             if "mcpServers" not in config:
                 config["mcpServers"] = {}
                 
-            config["mcpServers"][name] = {
-                "command": python_exe,
-                "args": [abs_file_path]
-            }
+            config["mcpServers"][name] = server_entry
             
             # Create directory if needed
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1710,6 +1727,74 @@ def register_server(name: str, file_path: str):
         print("\nAll done! Please fully restart Claude Desktop to load your new server.")
     else:
         print("Error: Failed to register the server in any configuration files.")
+
+
+def _build_server_entry(file_path: str):
+    """Build the stdio server entry shared by register and Cursor configs."""
+    return {
+        "command": sys.executable,
+        "args": [os.path.abspath(file_path)],
+    }
+
+
+def _write_json_atomic(path: str, data):
+    """Replace a JSON config atomically so readers never see a partial write."""
+    import json
+    import tempfile
+
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".mcp-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def register_cursor_server(name: str, file_path: str = "main.py", *, global_config: bool = False, transport: str = "command"):
+    """Merge this project into Cursor's project or user MCP configuration."""
+    import json
+
+    if transport not in ("command", "streamable-http", "sse"):
+        raise ValueError("transport must be command, streamable-http, or sse")
+    if transport == "command" and not os.path.exists(file_path):
+        print(f"Error: Script file '{file_path}' does not exist.")
+        sys.exit(1)
+
+    if global_config:
+        config_path = os.path.join(os.path.expanduser("~"), ".cursor", "mcp.json")
+    else:
+        config_path = os.path.join(os.getcwd(), ".cursor", "mcp.json")
+
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+    if not isinstance(config, dict):
+        config = {}
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+        config["mcpServers"] = servers
+
+    if transport == "command":
+        entry = _build_server_entry(file_path)
+    else:
+        route = "mcp" if transport == "streamable-http" else "sse"
+        entry = {"url": f"http://localhost:3000/{route}"}
+    servers[name] = entry
+    _write_json_atomic(config_path, config)
+    print(f"Successfully registered server '{name}' in Cursor config: {config_path}")
 
 def main():
     if hasattr(sys.stdout, "reconfigure"):
@@ -1746,7 +1831,7 @@ def main():
         "--template",
         choices=list(OFFICIAL_TEMPLATES.keys()),
         default=None,
-        help="Template to use: python-starter, python-pizzaz, python-oauth (default: interactive prompt)",
+        help="Template to use: " + ", ".join(OFFICIAL_TEMPLATES) + " (default: interactive prompt)",
     )
     init_parser.add_argument("--skip-install", action="store_true", help="Skip installing Python (and widget npm) dependencies")
     init_parser.add_argument(
@@ -1768,6 +1853,18 @@ def main():
     reg_parser = subparsers.add_parser("register", help="Register server script inside Claude Desktop configuration")
     reg_parser.add_argument("--name", default=os.path.basename(os.getcwd()), help="Name of the server (defaults to folder name)")
     reg_parser.add_argument("--file", default="main.py", help="Python script to register (defaults to main.py)")
+
+    # cursor command
+    cursor_parser = subparsers.add_parser("cursor", help="Register this server in Cursor MCP configuration")
+    cursor_parser.add_argument("--global", dest="global_config", action="store_true", help="Write to ~/.cursor/mcp.json")
+    cursor_parser.add_argument(
+        "--transport",
+        choices=("command", "streamable-http", "sse"),
+        default="command",
+        help="Connection type (default: command)",
+    )
+    cursor_parser.add_argument("--name", default=os.path.basename(os.getcwd()), help="Name of the server")
+    cursor_parser.add_argument("--file", default="main.py", help="Python script to register for command transport")
 
     # generate command
     gen_parser = subparsers.add_parser(
@@ -1870,6 +1967,8 @@ def main():
         run_start(port=args.port, widget=args.widget)
     elif args.command == "register":
         register_server(args.name, args.file)
+    elif args.command == "cursor":
+        register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
     elif args.command == "generate":
         if not args.generator:
             gen_parser.print_help()
