@@ -25,6 +25,7 @@ code-mode = [
     "quickjs>=1.19.4",
 ]
 dev = [
+    "setuptools>=70.1",
     "quickjs>=1.19.4",
     "pytest-cov>=4.1.0",
     "pytest>=8",

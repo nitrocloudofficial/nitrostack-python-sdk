@@ -10,11 +10,13 @@ import ast
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anyio
 import httpx
 import pytest
+import nitrostack
 from mcp.shared.memory import create_client_server_memory_streams
 from mcp.shared.message import SessionMessage
 from mcp_types import PROTOCOL_VERSION_META_KEY, jsonrpc_message_adapter
@@ -26,12 +28,14 @@ from nitrostack import DIContainer, ExecutionContext, injectable, module, tool
 from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.protocol.version import LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION
 from nitrostack.transports.stdio import serve_stdio_streams
+from nitrostack.runtime.request_ctx import stdio_connection_id
 from tests.http_probe import decode, http_client, make_app, post
 
 CLIENT_META = {
     "io.modelcontextprotocol/clientInfo": {"name": "issue23-test", "version": "1.0"},
     "io.modelcontextprotocol/clientCapabilities": {},
 }
+SDK_ROOT = Path(nitrostack.__file__).resolve().parent
 
 
 def setup_function() -> None:
@@ -116,14 +120,23 @@ def test_discover_and_capabilities_agree_on_resources_subscribe(era):
             assert decode(response)["result"]["capabilities"]["resources"]["subscribe"] is False
 
 
-# 3. No private `mcp.server.runner` symbol left in stdio.py.
+# 3. No runner implementation imports or private MCP modules in stdio.py.
 def test_stdio_module_has_no_private_mcp_runner_import():
-    source = Path("nitrostack/transports/stdio.py").read_text(encoding="utf-8")
+    source = (SDK_ROOT / "transports" / "stdio.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
-    imports = [node for node in ast.walk(tree)
-               if isinstance(node, ast.ImportFrom) and node.module == "mcp.server.runner"]
-    assert imports
-    assert not [alias.name for node in imports for alias in node.names if alias.name.startswith("_")]
+    modules = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            modules.append(node.module)
+            if node.module == "mcp.server":
+                modules.extend(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.Import):
+            modules.extend(alias.name for alias in node.names)
+    mcp_modules = [name for name in modules if name.split(".")[0] == "mcp"]
+    assert mcp_modules
+    assert not [name for name in mcp_modules if name == "mcp.server.runner" or
+                name.startswith("mcp.server.runner.") or
+                any(part.startswith("_") for part in name.split("."))]
 
 
 # 4. /json/version tracks era instead of a hardcoded 2025 date.
@@ -143,8 +156,7 @@ def test_json_version_matches_era(era, expected_version):
     assert response.json()["Protocol-Version"] == expected_version
 
 
-# 5. Modern-era stdio boots and serves real requests without the removed
-# private import, via the public JSONRPCDispatcher/modern_on_request path.
+# 5. Modern-era stdio boots through the public Server.run entry point.
 def test_modern_stdio_serves_tool_call():
     app = _era_app("modern", "issue23-modern-stdio")
 
@@ -183,8 +195,8 @@ def test_modern_stdio_serves_tool_call():
     assert payload["result"]["content"][0]["text"] == "hi"
 
 
-# 5b. The hand-built on_notify path (no public one-liner exists for it) must
-# not crash or hang the dispatcher — proven by a normal request still working
+# 5b. Official notification handling must keep the connection usable,
+# proven by a normal request still working
 # on the same stream right after a notification.
 def test_modern_stdio_notification_does_not_break_the_stream():
     app = _era_app("modern", "issue23-modern-notify")
@@ -294,6 +306,81 @@ def test_modern_stdio_rejects_initialize_and_then_serves_a_request():
     responses = asyncio.run(_stdio_exchange(app.mcp_server, "modern", messages, 2))
     assert responses[0]["error"]["code"] == -32601
     assert responses[1]["result"]["tools"][0]["name"] == "echo"
+
+
+def test_legacy_stdio_rejects_modern_request_without_poisoning_initialization():
+    app = make_app("legacy")
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {
+            "_meta": {PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL_VERSION, **CLIENT_META},
+        }},
+        {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {
+            "protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {},
+            "clientInfo": {"name": "probe", "version": "1"},
+        }},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+            "name": "echo", "arguments": {"value": "legacy-after-rejection"},
+        }},
+    ]
+    responses = asyncio.run(_stdio_exchange(app.mcp_server, "legacy", messages, 3))
+    assert responses[0]["error"]["code"] == -32600
+    assert responses[1]["result"]["protocolVersion"] == LEGACY_PROTOCOL_VERSION
+    assert responses[2]["result"]["structuredContent"]["value"] == "legacy-after-rejection"
+
+
+@pytest.mark.parametrize("meta", [None, [], {PROTOCOL_VERSION_META_KEY: "1900-01-01"}])
+def test_modern_stdio_invalid_version_does_not_select_legacy_connection(meta):
+    app = make_app("modern")
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": meta}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {
+            "_meta": {PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL_VERSION, **CLIENT_META},
+        }},
+    ]
+    responses = asyncio.run(_stdio_exchange(app.mcp_server, "modern", messages, 2))
+    assert "error" in responses[0]
+    assert responses[0]["error"]["data"]["supportedVersions"] == [MODERN_PROTOCOL_VERSION]
+    assert responses[1]["result"]["tools"][0]["name"] == "echo"
+
+
+@pytest.mark.parametrize("era", ["legacy", "auto", "modern"])
+def test_stdio_public_runner_closes_lifespan_and_stream_on_eof(era):
+    app = make_app(era)
+    events = []
+
+    @asynccontextmanager
+    async def lifespan(server):
+        events.append("start")
+        try:
+            yield {}
+        finally:
+            events.append("stop")
+
+    app.mcp_server.lifespan = lifespan
+
+    async def scenario():
+        async with create_client_server_memory_streams() as (client, streams):
+            client_read, client_write = client
+
+            async def serve():
+                await serve_stdio_streams(app.mcp_server, *streams, era)
+                assert stdio_connection_id.get() is None
+
+            task = asyncio.create_task(serve())
+            try:
+                await client_write.aclose()
+                await asyncio.wait_for(task, timeout=3)
+                with pytest.raises(anyio.EndOfStream):
+                    await asyncio.wait_for(client_read.receive(), timeout=3)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        assert stdio_connection_id.get() is None
+
+    asyncio.run(scenario())
+    assert events == ["start", "stop"]
 
 
 @pytest.mark.parametrize("era", ["auto", "modern"])

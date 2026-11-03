@@ -39,10 +39,12 @@ class ValidationIssue:
 
 
 def _iter_python_files(root: str) -> Iterable[str]:
+    vendored_sdk = os.path.join(os.path.abspath(root), "vendor", "nitrostack")
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
             if d not in EXCLUDE_DIR_NAMES and not d.endswith(".egg-info")
+            and os.path.join(os.path.abspath(dirpath), d) != vendored_sdk
         ]
         for filename in filenames:
             if filename.endswith(".py"):

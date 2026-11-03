@@ -294,6 +294,30 @@ ApiKeyModule.for_root(keys=[SecretValue.from_env("SERVICE_API_KEY")])
 
 ---
 
+### Quick auth setup
+
+One call per auth type returns the keyword arguments for the matching module, and
+`validate_auth_env` lists every missing environment variable at once:
+
+```python
+from nitrostack import (
+    JWTModule, ApiKeyModule, OAuthModule,
+    setup_jwt_auth, setup_api_key_auth, setup_oauth_auth,
+    validate_auth_env, print_auth_setup_instructions,
+)
+
+ok, missing = validate_auth_env("oauth")      # (False, ["RESOURCE_URI", "AUTH_SERVER_URL", ...])
+if not ok:
+    print_auth_setup_instructions("oauth")
+
+JWTModule.for_root(**setup_jwt_auth())         # reads JWT_SECRET
+ApiKeyModule.for_root(**setup_api_key_auth())  # reads API_KEY / API_KEY_<n>
+OAuthModule.for_root(**setup_oauth_auth())     # reads RESOURCE_URI, AUTH_SERVER_URL, JWKS_URI
+```
+
+`generate_test_credentials()` returns random `SecretValue` credentials for tests and local
+demos only. They are never printed; call `.unwrap()` to read one.
+
 ## Transport Options
 
 NitroStack apps can run over three transports, selected via `MCP_TRANSPORT_TYPE` (or `ServerConfig(transport_type=...)`):
@@ -361,6 +385,31 @@ nitrostack-py register --name my-mcp-server --file app.py
 This detects all standard and Windows Store installation directories, sets up virtualenv executables, and writes the JSON configuration. Once registered, simply restart Claude Desktop.
 
 ### Widgets (UI tools)
+
+Applications with registered widgets expose an `application/json` manifest at
+`widget://examples`. Discover it through MCP `resources/list` and read it with
+`resources/read`, using `{"uri": "widget://examples"}` as the request parameters.
+The manifest contains `widgets`, `count`, and `loaded`; each widget includes its
+route, URI, mode-specific MIME type, metadata, associated tool names, and any
+declared `ToolExamples` inputs and outputs. It is built at startup from registered
+decorators, including helper-generated options, without executing tools.
+
+For Python access:
+
+```python
+from nitrostack import get_widget_registry
+
+registry = get_widget_registry(app)  # also available as app.widget_registry
+widgets = registry.get_all_widgets()
+widget_info = registry.get_widget("ui://widget/card.html")  # None if absent
+manifest = registry.get_manifest().to_dict()
+```
+
+Each application owns its registry, and reads return detached copies. Shared
+routes appear once in sorted order, retaining examples from every associated
+tool. Applications without widgets expose no additional resource. In widget
+applications, `widget://examples` is reserved; a conflicting resource registration
+raises a startup error. Existing widget HTML resources and rendering are unchanged.
 
 Bind a static HTML template to a tool with `@widget` and return domain JSON from the handler:
 
@@ -457,3 +506,182 @@ async def test_add():
 if __name__ == "__main__":
     asyncio.run(test_add())
 ```
+
+#### Overrides, cleanup and mocks
+Replace a provider with a fake, and release resources when the test ends:
+<!-- readme-test -->
+```python
+import asyncio
+from pydantic import BaseModel
+from nitrostack import ExecutionContext, module, injectable, tool
+from nitrostack.testing import NitroTestingModule, MockLogger, create_mock_context
+
+
+class ItemInput(BaseModel):
+    key: str
+
+
+@injectable()
+class Database:
+    def __init__(self):
+        raise RuntimeError("the real database must not be built in tests")
+
+
+class FakeDatabase:
+    closed = 0
+
+    def get(self, key):
+        return f"fake-{key}"
+
+    def on_module_destroy(self):  # provider shutdown hook; runs once on close()
+        FakeDatabase.closed += 1
+
+
+@injectable(deps=[Database])
+class Items:
+    def __init__(self, db):
+        self.db = db
+
+    @tool(name="get_item", description="Look up an item", input_schema=ItemInput)
+    async def get_item(self, input: ItemInput, context: ExecutionContext) -> str:
+        return self.db.get(input.key)
+
+
+@module(name="items", providers=[Database, Items])
+class AppModule:
+    pass
+
+
+async def test_get_item():
+    async with await NitroTestingModule.create(AppModule, overrides={Database: FakeDatabase()}) as app:
+        assert await app.call_tool("get_item", {"input": {"key": "a"}}) == "fake-a"
+    assert FakeDatabase.closed == 1  # close() ran the hook; calling it again would not repeat it
+
+    logger = MockLogger()
+    context = create_mock_context(logger=logger)
+    context.logger.info("hello")
+    assert logger.has_log("info", "hello")
+
+
+if __name__ == "__main__":
+    asyncio.run(test_get_item())
+```
+`overrides` takes an instance, or a class/function that builds one (it may be `async`). Overrides
+are undone by `close()`. Shutdown hooks are methods named `on_module_destroy` (sync or async).
+`flush_tasks()` yields to the event loop so background tasks can finish. The optional pytest
+fixture `nitro_client` is enabled with `pytest_plugins = ["nitrostack.testing.pytest_plugin"]`.
+
+### Large tool results: data spillover
+
+Attach `DataSpilloverInterceptor` to a tool to store large results separately and
+return a preview, `resource_uri`, and `original_size_bytes`. Results at or below
+the threshold pass through unchanged. Sizes count serialized UTF-8 bytes, not
+characters; lists and dictionaries use compact JSON.
+
+```python
+from pydantic import BaseModel
+from nitrostack import DataSpilloverInterceptor, MemorySpilloverStore, tool, use_interceptors
+
+spillover = DataSpilloverInterceptor(
+    threshold_bytes=64 * 1024,
+    store=MemorySpilloverStore(
+        max_bytes=10 * 1024 * 1024,
+        max_total_bytes=100 * 1024 * 1024,
+        ttl_seconds=300,
+    ),
+    resource_uri_prefix="resource://data-spillover/",
+)
+
+class ReportInput(BaseModel):
+    count: int = 10000
+
+class ReportTools:
+    @tool(name="report", description="Generate a report", input_schema=ReportInput)
+    @use_interceptors(spillover)
+    async def report(self, input: ReportInput, context):
+        return [{"row": index} for index in range(input.count)]
+```
+
+Register `ReportTools` as a module provider or controller as usual. A configured
+interceptor instance works directly in the decorator. For default configuration,
+`@use_interceptors(DataSpilloverInterceptor)` also works through dependency injection.
+
+The MCP result includes a text preview, structured content, and a resource link.
+Clients retrieve the full result with `resources/read`, for example:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "resources/read",
+  "params": {"uri": "resource://data-spillover/<id-from-tool-result>"}
+}
+```
+
+Lists and dictionaries preview their first five items or entries and total counts.
+Strings preview up to 512 characters. The complete preview stays within 2 KiB;
+large nested values are represented as truncated text. Reading the full resource
+can consume context again, so clients should retrieve it only when needed.
+
+For disk storage, replace the store with:
+
+```python
+from nitrostack import FileSpilloverStore
+
+store = FileSpilloverStore(
+    ".nitrostack/spillover",
+    max_bytes=10 * 1024 * 1024,
+    max_total_bytes=100 * 1024 * 1024,
+    ttl_seconds=300,
+)
+```
+
+The memory store evicts least recently used results when its payload capacity is
+full. The file store rejects writes when its capacity is full; its capacity counts
+actual JSON file bytes, including base64 and metadata overhead. A single result
+larger than `max_bytes` raises `PayloadTooLargeError`. Both stores remove expired
+results during operations; file storage also cleans up on initialization. Expiry
+is absolute and reads do not extend it. Each file-store root must be owned by one
+store instance in one process; shared storage across processes is not supported.
+Keep the configured directory private to the server account.
+
+Resource access requires the same verified principal, issuer, client identity,
+and tenant. Anonymous access is limited to the same server-side MCP session.
+Requests without either a verified identity or trusted session cannot spill
+results; invalid credentials do not fall back to anonymous access. Anonymous
+HTTP clients need a persistent MCP session; sessionless HTTP clients should
+authenticate. Expired results and results owned by another caller return
+resource-not-found. Stored results are not enumerated in `resources/list`.
+
+HTTP ownership uses the server-issued session ID after the official transport
+has validated it, rather than the identity of an SDK request/session proxy.
+Stdio assigns a random identity to each live stream connection. Requests on that
+connection can retrieve its anonymous results; a later connection cannot inherit
+them. Concurrent HTTP requests cannot borrow a stdio connection's identity.
+
+Successful explicit MCP tool results are stored as JSON; errors and input-required
+responses pass through. Decorated tools with output schemas advertise either the
+original output or the spillover envelope. Spilled widget results return the
+resource reference without invoking the widget's data transformer.
+
+Independent HTTP/stdio tests and reproducible large-output checks live in
+`tests/test_spillover_transport.py`. Run the spillover tests with
+`python -m pytest tests/test_spillover.py tests/test_spillover_transport.py`.
+
+### Progressive discovery and code-mode templates
+
+| Template | Example |
+| --- | --- |
+| `python-enterprise-search` | BM25 discovery over local finance, inventory and support tools |
+| `python-code-mode` | Bounded JavaScript workflows calling Python tools through native QuickJS |
+
+```sh
+nitrostack-py init search-demo --template python-enterprise-search --skip-install
+nitrostack-py init code-demo --template python-code-mode --skip-install
+```
+
+Each generated README explains installation, tool calls, validation, upgrade and
+packaging. Both use deterministic sample data without credentials or external
+services. Code-mode execution additionally requires `quickjs>=1.19.4`; its workers
+start lazily and are disposed on graceful shutdown. Existing starter, pizzaz and
+OAuth templates remain available.

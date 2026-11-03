@@ -26,6 +26,11 @@ MIN_RECOMMENDED_LENGTH = 16
 _HASH_KEY = _secrets.token_bytes(32)
 
 
+# Only these labels are ever written into a pickle. Anything else becomes "custom", so a
+# caller who passes a secret (or part of one) as ``source`` cannot leak it that way.
+_PICKLE_SAFE_SOURCES = frozenset({"env", "config", "explicit"})
+
+
 def _redacted_after_pickle(source: str) -> "SecretValue":
     """Rebuild a ``SecretValue`` that carries no value (used when unpickling)."""
     return SecretValue._empty(source)
@@ -48,6 +53,8 @@ class SecretValue:
                 UserWarning,
                 stacklevel=2,
             )
+        if not isinstance(source, str) or value in source:
+            raise ValueError("source must be a short label such as 'env', never the secret itself")
         self._value: Optional[str] = value
         self.source = source
 
@@ -167,7 +174,13 @@ class SecretValue:
         # The pickle holds only the source. Loading it gives a SecretValue with no
         # value, so a secret can neither leak through a pickle nor be silently
         # replaced by a placeholder string.
-        return (_redacted_after_pickle, (self.source,))
+        # Emit a built-in label, never ``self.source`` itself: a ``str`` subclass can carry
+        # extra pickle state (or fake ``==``), and ``str.__eq__`` ignores both.
+        source = next(
+            (label for label in _PICKLE_SAFE_SOURCES if str.__eq__(self.source, label) is True),
+            "custom",
+        )
+        return (_redacted_after_pickle, (source,))
 
     def __copy__(self) -> "SecretValue":
         return self  # immutable, so sharing is safe

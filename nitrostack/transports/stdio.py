@@ -1,16 +1,21 @@
 import sys
 import contextlib
-from typing import TYPE_CHECKING, Any, Generator
+import uuid
+import contextvars
+from typing import TYPE_CHECKING, Any, Generator, Mapping
 
-from mcp.server.runner import serve_loop
+import anyio
+from anyio.abc import ObjectReceiveStream, ObjectSendStream
+import mcp.types as types
 from mcp.server.stdio import stdio_server
+from mcp.shared.message import SessionMessage
+from mcp_types import PROTOCOL_VERSION_META_KEY, UNSUPPORTED_PROTOCOL_VERSION
 
-from nitrostack.protocol.version import ProtocolEra
+from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION, ProtocolEra
+from nitrostack.runtime.request_ctx import stdio_connection_id
 
 if TYPE_CHECKING:
     from mcp.server.lowlevel import Server
-    from mcp.shared._stream_protocols import ReadStream, WriteStream
-    from mcp.shared.message import SessionMessage
 
 
 class SafeStdoutWrapper:
@@ -45,66 +50,93 @@ def safe_stdio_transport() -> Generator[None, None, None]:
         sys.stdout = original_stdout
 
 
+class _StdioConnectionStream:
+    """Apply era policy and preserve the trusted connection identity and sender context."""
+
+    def __init__(self, stream: Any, connection_id: str, write_stream: Any, era: ProtocolEra) -> None:
+        self._stream = stream
+        self._connection_id = connection_id
+        self._write_stream = write_stream
+        self._era = era
+        self.last_context = None
+
+    async def receive(self):
+        while True:
+            message = await self._stream.receive()
+            error = self._era_error(message)
+            if error is None:
+                break
+            await self._write_stream.send(SessionMessage(types.JSONRPCError(
+                jsonrpc="2.0", id=message.message.id, error=error,
+            )))
+        sender_context = getattr(self._stream, "last_context", None)
+        self.last_context = sender_context.copy() if sender_context is not None else contextvars.copy_context()
+        self.last_context.run(stdio_connection_id.set, self._connection_id)
+        return message
+
+    def _era_error(self, message: SessionMessage | Exception) -> types.ErrorData | None:
+        # Server.run negotiates from the first request. Refuse incompatible requests
+        # before negotiation so a rejected handshake cannot select the wrong era.
+        # Accepted requests, notifications, responses and parse errors are passed
+        # unchanged to the official server; this adapter never dispatches handlers.
+        if not isinstance(message, SessionMessage) or not isinstance(message.message, types.JSONRPCRequest):
+            return None
+        request = message.message
+        if self._era == "modern" and request.method == "initialize":
+            return types.ErrorData(code=types.METHOD_NOT_FOUND, message="Method not found: initialize")
+        params = request.params or {}
+        meta = params.get("_meta")
+        version = meta.get(PROTOCOL_VERSION_META_KEY) if isinstance(meta, Mapping) else None
+        if self._era == "modern" and version != MODERN_PROTOCOL_VERSION:
+            return types.ErrorData(
+                code=UNSUPPORTED_PROTOCOL_VERSION,
+                message="Modern stdio requests require a supported protocol version in params._meta",
+                data={"supportedVersions": [MODERN_PROTOCOL_VERSION]},
+            )
+        if self._era == "legacy" and version == MODERN_PROTOCOL_VERSION:
+            return types.ErrorData(
+                code=types.INVALID_REQUEST,
+                message="Legacy stdio does not accept modern protocol envelopes",
+            )
+        return None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return await self.receive()
+        except anyio.EndOfStream:
+            raise StopAsyncIteration from None
+
+    async def __aenter__(self):
+        await self._stream.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        return await self._stream.__aexit__(*args)
+
+    async def aclose(self):
+        await self._stream.aclose()
+
+
 async def serve_stdio_streams(
     server: "Server[Any]",
-    read_stream: "ReadStream[SessionMessage | Exception]",
-    write_stream: "WriteStream[SessionMessage]",
+    read_stream: "ObjectReceiveStream[SessionMessage | Exception]",
+    write_stream: "ObjectSendStream[SessionMessage]",
     era: ProtocolEra,
 ) -> None:
-    """Drive official mcp 2.x over an already-open stdio stream pair.
-
-    ``auto`` uses the official dual-era loop (2026 envelope or 2025 handshake).
-    ``modern`` rejects ``initialize``. ``legacy`` keeps the handshake loop.
-    """
-    init_options = server.create_initialization_options()
-    if era == "auto":
-        await server.run(read_stream, write_stream, init_options)
-        return
-
-    async with server.lifespan(server) as lifespan_state:
-        try:
-            if era == "modern":
-                # A per-request envelope loop (no `initialize` handshake) built from
-                # documented, public `mcp.server.runner` building blocks, so this does
-                # not depend on a leading-underscore internal that mcp is free to
-                # remove without notice.
-                from mcp.server.runner import (
-                    Connection,
-                    JSONRPCDispatcher,
-                    LATEST_MODERN_VERSION,
-                    NotifyOnlyOutbound,
-                    ServerRunner,
-                    aclose_shielded,
-                    modern_on_request,
-                )
-
-                dispatcher: JSONRPCDispatcher = JSONRPCDispatcher(read_stream, write_stream)
-                outbound = NotifyOnlyOutbound(dispatcher)
-
-                async def _on_notify(dctx, method, params):
-                    # Fresh per-notification `Connection`, mirroring the request path:
-                    # notifications carry no envelope of their own at this era.
-                    connection = Connection.from_envelope(
-                        LATEST_MODERN_VERSION, None, None, outbound=outbound
-                    )
-                    try:
-                        await ServerRunner(server, connection, lifespan_state).on_notify(
-                            dctx, method, params
-                        )
-                    finally:
-                        await aclose_shielded(connection)
-
-                await dispatcher.run(modern_on_request(server, lifespan_state), _on_notify)
-            else:
-                await serve_loop(
-                    server,
-                    read_stream,
-                    write_stream,
-                    lifespan_state=lifespan_state,
-                    init_options=init_options,
-                )
-        finally:
-            await write_stream.aclose()
+    """Serve one connection with a trusted identity shared by its requests."""
+    connection_id = uuid.uuid4().hex
+    token = stdio_connection_id.set(connection_id)
+    try:
+        await server.run(
+            _StdioConnectionStream(read_stream, connection_id, write_stream, era),
+            write_stream,
+            server.create_initialization_options(),
+        )
+    finally:
+        stdio_connection_id.reset(token)
 
 
 async def run_stdio(server: "Server[Any]", era: ProtocolEra) -> None:

@@ -41,6 +41,7 @@ from nitrostack.cli.main import (
     init_project,
     main,
     print_banner,
+    register_cursor_server,
     register_server,
     run_dev,
     run_start,
@@ -802,6 +803,50 @@ def test_register_server_writes_config_and_handles_errors():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_cursor_registration_merges_project_config_and_is_idempotent(tmp_path, monkeypatch):
+    import json
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    (project / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    config_path = project / ".cursor" / "mcp.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps({"mcpServers": {"other": {"url": "http://example.test/mcp"}}}),
+        encoding="utf-8",
+    )
+
+    register_cursor_server("demo", "main.py")
+    register_cursor_server("demo", "main.py")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["other"] == {"url": "http://example.test/mcp"}
+    assert config["mcpServers"]["demo"]["command"] == sys.executable
+    assert config["mcpServers"]["demo"]["args"] == [str((project / "main.py").resolve())]
+    assert len(config["mcpServers"]) == 2
+
+
+def test_cursor_registration_global_target_and_http_transports(tmp_path, monkeypatch):
+    import json
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("nitrostack.cli.main.os.path.expanduser", lambda value: str(home) if value == "~" else value)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    register_cursor_server("web", global_config=True, transport="streamable-http")
+    register_cursor_server("events", global_config=True, transport="sse")
+
+    config_path = home / ".cursor" / "mcp.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["web"] == {"url": "http://localhost:3000/mcp"}
+    assert config["mcpServers"]["events"] == {"url": "http://localhost:3000/sse"}
+    assert not (project / ".cursor" / "mcp.json").exists()
+
+
 def test_main_dispatches_commands():
     from unittest.mock import patch
 
@@ -851,6 +896,13 @@ def test_main_dispatches_commands():
     ) as reg:
         main()
         reg.assert_called_once_with("x", "main.py")
+
+    with patch(
+        "sys.argv",
+        ["nitrostack-py", "cursor", "--global", "--transport", "sse", "--name", "x"],
+    ), patch("nitrostack.cli.main.register_cursor_server") as cursor:
+        main()
+        cursor.assert_called_once_with("x", "main.py", global_config=True, transport="sse")
     print("Success! main() dispatches init/dev/start/generate/register.")
 
 

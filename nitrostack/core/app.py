@@ -8,12 +8,14 @@ import inspect
 import datetime
 import time
 import logging
+from unittest.mock import NonCallableMock
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Pattern, Set, Tuple, Type
 from nitrostack.transforms import (
     SyntheticTool, ToolArgumentError, TransformContext, validate_tool_arguments,
 )
+from nitrostack.protocol.errors import JsonRpcErrorCode
 import mcp.types as types
 from mcp import MCPError
 from mcp.server.context import ServerRequestContext
@@ -52,6 +54,10 @@ from nitrostack.core.errors import (
 from nitrostack.core.mcp_server import NitroStackMcpServer
 from nitrostack.core.pipeline import run_pipeline
 from nitrostack.core.additional_decorators import HealthCheckRegistry, ServerHealthPayload
+from nitrostack.core.interceptors.data_spillover import (
+    DataSpilloverInterceptor, SPILLOVER_SCHEMA, SpilloverRegistry, SpilloverResult,
+    bind_spillover_context, caller_owner,
+)
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.events.event_emitter import EventEmitter
 from nitrostack.protocol.schema import (
@@ -107,6 +113,7 @@ from nitrostack.runtime.request_ctx import ServerResult, request_ctx
 from nitrostack.runtime.caller import caller_identity
 from nitrostack.tasks.authorization import extract_task_access_context
 from nitrostack.widgets.component import Component, find_project_root, load_widget_html, parse_widget_options
+from nitrostack.widgets.registry import WIDGET_EXAMPLES_URI, WidgetRegistry
 from nitrostack.widgets.mcp_meta import build_call_tool_result_meta, build_tool_list_meta, resource_read_contents_meta
 from nitrostack.widgets.route_templates import build_missing_widget
 
@@ -319,14 +326,18 @@ def inspector_friendly_schema(node: Any) -> Any:
 
 
 def tool_json_schema(schema_spec: Any) -> Optional[Dict[str, Any]]:
-    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema."""
+    """Convert a Pydantic model class or JSON-schema dict to MCP 2026-07-28 outputSchema.
+
+    Output schemas describe real results, so ``null`` branches of Optional fields are kept.
+    ``inspector_friendly_schema`` is only for input forms.
+    """
     if schema_spec is None:
         return None
     if isinstance(schema_spec, dict):
-        return normalize_output_schema(inspector_friendly_schema(schema_spec))
+        return normalize_output_schema(schema_spec)
     model = get_pydantic_model(schema_spec)
     if model is not None:
-        return normalize_output_schema(inspector_friendly_schema(model.model_json_schema()))
+        return normalize_output_schema(model.model_json_schema())
     return None
 
 
@@ -618,6 +629,7 @@ class McpApplication:
         self.task_manager = TaskManager()
         self._in_flight = InFlightRegistry()
         self.visibility_transform = VisibilityTransform()
+        self._spillover = SpilloverRegistry()
 
         # Pipeline first: handlers consult it lazily when requests arrive.
         self._transforms = TransformPipeline(
@@ -668,6 +680,9 @@ class McpApplication:
         for instance in module_instances:
             # Scan members of this instance
             for name, member in inspect.getmembers(instance):
+                # A test mock answers hasattr() for everything, so it would look like a tool.
+                if isinstance(member, NonCallableMock):
+                    continue
                 # Discover Tools
                 if hasattr(member, "_mcp_tool_config"):
                     tool_config: ToolConfig = getattr(member, "_mcp_tool_config")
@@ -696,6 +711,10 @@ class McpApplication:
                     event_name = getattr(member, "_mcp_event_name")
                     EventEmitter.get_instance().bind_instance(event_name, member, instance)
 
+        self.widget_registry: WidgetRegistry = WidgetRegistry._from_tools(self._tools.values())
+        if self.widget_registry.get_all_widgets():
+            self._register_widget_examples_resource()
+
         # 4. Register Built-in Health check Resource if any checks exist
         if HealthCheckRegistry.get_checks():
             self._register_health_resource()
@@ -703,6 +722,11 @@ class McpApplication:
         # 5. Wire every protocol handler (tools/resources/prompts/tasks/notifications)
         #    onto the owned low-level server. This is factored out so additional server
         #    instances (e.g. one per HTTP session) can be configured identically.
+        for entry in self._tools.values():
+            for candidate in getattr(entry.method, "_mcp_interceptors", []):
+                interceptor = container.resolve(candidate) if isinstance(candidate, type) else candidate
+                if isinstance(interceptor, DataSpilloverInterceptor):
+                    self._spillover.register(interceptor)
         self._setup_handlers(self.mcp_server)
 
     def _assert_declared_dependencies(
@@ -813,6 +837,26 @@ class McpApplication:
             instance=None,
             method=widget_resource_handler,
             component=component,
+        )
+
+    def _register_widget_examples_resource(self) -> None:
+        if WIDGET_EXAMPLES_URI in self._resources:
+            raise ValueError(
+                f"Resource URI {WIDGET_EXAMPLES_URI!r} is reserved for the widget manifest"
+            )
+
+        async def widget_examples(context: ExecutionContext) -> dict:
+            return self.widget_registry.get_manifest().to_dict()
+
+        self._resources[WIDGET_EXAMPLES_URI] = _ResourceEntry(
+            config=ResourceConfig(
+                uri=WIDGET_EXAMPLES_URI,
+                name="Widget Examples",
+                description="Provides metadata and examples for all registered UI widgets",
+                mime_type="application/json",
+            ),
+            instance=None,
+            method=widget_examples,
         )
 
     def _register_resource(self, instance: Any, method: Callable, resource_config: ResourceConfig) -> None:
@@ -941,7 +985,7 @@ class McpApplication:
         # Same source of truth as `NitroStackMcpServer.get_capabilities`, so
         # `server/discover` and real capability negotiation never disagree.
         resources_subscribe = supports_resource_subscriptions(self.protocol_era)
-        return build_discover_result(
+        result = build_discover_result(
             server_name=self.server_config.name,
             server_version=self.server_config.version,
             protocol_version=version,
@@ -950,6 +994,26 @@ class McpApplication:
             advertise_app=has_widgets,
             custom_extensions=self._custom_extensions(),
         )
+        meta = dict(result.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        result["_meta"] = meta
+        result.setdefault("resultType", "complete")
+        return result
+
+    def _stamp_discover_meta(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """2026 puts serverInfo and resultType on the result, keeping any cache hint in _meta."""
+        out = dict(result)
+        meta = dict(out.get("_meta") or {})
+        meta["io.modelcontextprotocol/serverInfo"] = {
+            "name": self.server_config.name,
+            "version": self.server_config.version,
+        }
+        out["_meta"] = meta
+        out.setdefault("resultType", "complete")
+        return out
 
     def _list_endpoint_cache_meta(self) -> Dict[str, Any]:
         return build_list_endpoint_cache_hint_meta()
@@ -988,6 +1052,11 @@ class McpApplication:
                 resultType="complete",
             )
 
+        async def _ping(_ctx: ServerRequestContext, _params: Optional[RequestParams]):
+            if self.protocol_era == "legacy":
+                return types.EmptyResult()
+            raise MCPError(types.METHOD_NOT_FOUND, "ping was removed in MCP 2026-07-28")
+        
         async def _call_tool(ctx: ServerRequestContext, params: CallToolRequestParams):
             token = request_ctx.set(ctx)
             try:
@@ -1057,6 +1126,7 @@ class McpApplication:
             )
             return result.model_copy(update={"result_type": result.result_type or "complete"})
 
+        server.add_request_handler("ping", RequestParams, _ping)
         async def _discover(ctx: ServerRequestContext, _params: Optional[RequestParams]):
             return self.handle_server_discover(getattr(ctx, "protocol_version", None))
 
@@ -1263,6 +1333,11 @@ class McpApplication:
 
         output_schema = tool_json_schema(cfg.output_schema)
         if output_schema is not None:
+            if self._has_spillover(entry.method):
+                output_schema = {
+                    "type": "object", "anyOf": [output_schema, SPILLOVER_SCHEMA],
+                    **({"$defs": output_schema["$defs"]} if "$defs" in output_schema else {}),
+                }
             tool_kwargs["outputSchema"] = output_schema
 
         return types.Tool(**tool_kwargs)
@@ -1307,7 +1382,33 @@ class McpApplication:
     # Request dispatch
     # ------------------------------------------------------------------
 
-    def _pipeline_stages(self, method: Callable) -> Tuple[List[Type], List[Type], List[Type], List[Type], List[Type]]:
+    def _has_spillover(self, method: Callable) -> bool:
+        container = DIContainer.get_instance()
+        return any(
+            isinstance(container.resolve(item) if isinstance(item, type) else item,
+                       DataSpilloverInterceptor)
+            for item in getattr(method, "_mcp_interceptors", [])
+        )
+
+    async def _bind_spillover(self, context: ExecutionContext, rc: Any) -> None:
+        if not self._spillover.routes:
+            return
+        # OAuth guards may verify opaque tokens as well as the shared JWT path.
+        from nitrostack.auth.request import authorization_token_from_request, auth_context_from_payload
+        from nitrostack.auth.oauth import OAuthService
+
+        token = authorization_token_from_request(rc)
+        container = DIContainer.get_instance()
+        if context.auth is None and token and container.has_value(OAuthService):
+            try:
+                payload = await container.resolve(OAuthService).introspect_token(token)
+                if payload.get("active"):
+                    context.auth = auth_context_from_payload(payload)
+            except Exception:
+                pass  # Invalid credentials remain denied by caller_owner.
+        bind_spillover_context(context, rc, self._spillover, self.protocol_era)
+
+    def _pipeline_stages(self, method: Callable) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:
         return (
             getattr(method, "_mcp_guards", []),
             getattr(method, "_mcp_middleware", []),
@@ -1377,6 +1478,8 @@ class McpApplication:
         component: Optional[Component] = None,
         context: Optional[ExecutionContext] = None,
     ) -> types.CallToolResult:
+        if isinstance(result, SpilloverResult):
+            return result.to_mcp()
         if isinstance(result, InputRequiredResult):
             wire = result.to_wire_dict()
             return types.CallToolResult(
@@ -1587,6 +1690,17 @@ class McpApplication:
                 types.INVALID_PARAMS,
                 "Server does not support task augmentation on the MCP 2026 wire",
             )
+        if is_task and not getattr(self.mcp_server, "has_task_support", True):
+            raise MCPError(
+                JsonRpcErrorCode.MISSING_REQUIRED_CLIENT_CAPABILITY,
+                f"Tasks are not available on this protocol version; tool '{cfg.name}' "
+                "cannot be run as a task.",
+            )
+        if self.protocol_era in ("auto", "modern") and is_task:
+            raise MCPError(
+                types.INVALID_PARAMS,
+                "Server does not support task augmentation on the MCP 2026 wire",
+            )
         if cfg.task_support == "forbidden" and task_metadata is not None:
             raise MCPError(
                 types.METHOD_NOT_FOUND,
@@ -1628,6 +1742,7 @@ class McpApplication:
                 )
                 _apply_request_envelope(task_ctx, rc)
                 self._configure_visibility_context(task_ctx, rc)
+                await self._bind_spillover(task_ctx, rc)
                 task_ctx.task = TaskContext(
                     task_id,
                     self.task_manager,
@@ -1683,6 +1798,7 @@ class McpApplication:
         )
         _apply_request_envelope(ctx, rc)
         self._configure_visibility_context(ctx, rc)
+        await self._bind_spillover(ctx, rc)
         ticket = self._in_flight.register(correlation_id, jsonrpc_id=jsonrpc_id)
         try:
             result = await run_pipeline(
@@ -1715,6 +1831,21 @@ class McpApplication:
         return self._to_call_tool_result(result, entry.component, ctx)
 
     async def _read_resource(self, uri: str) -> List[ReadResourceContents]:
+        for prefix, store in self._spillover.routes.items():
+            if uri.startswith(prefix):
+                ctx = ExecutionContext(request_id=str(uuid.uuid4()))
+                rc = request_ctx.get(None)
+                _apply_request_envelope(ctx, rc)
+                await self._bind_spillover(ctx, rc)
+                try:
+                    entry = await store.get(uri[len(prefix):], owner=caller_owner(ctx))
+                except (PermissionError, ValueError):
+                    raise ResourceNotFoundError(uri) from None
+                if entry is None:
+                    raise ResourceNotFoundError(uri)
+                return [ReadResourceContents(
+                    content=entry.payload.decode("utf-8"), mime_type=entry.mime_type,
+                )]
         entry = self._resources.get(uri)
         path_kwargs: Dict[str, str] = {}
 

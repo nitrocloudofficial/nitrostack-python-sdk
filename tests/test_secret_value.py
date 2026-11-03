@@ -432,3 +432,84 @@ def test_config_service_get_secret_missing_empty_and_required(tmp_path):
     assert config.get_secret("NOPE_NOT_SET_ANYWHERE", fallback) is fallback
     with pytest.raises(KeyError):
         config.get_secret_or_throw("NOPE_NOT_SET_ANYWHERE")
+
+
+# --- Review follow-ups (PR #93) ---------------------------------------------------------
+
+def test_secret_passed_as_source_is_rejected():
+    with pytest.raises(ValueError):
+        SecretValue(RAW, source=RAW)
+    with pytest.raises(ValueError):
+        SecretValue(RAW, source=f"prefix-{RAW}")
+
+
+def test_pickle_never_carries_a_custom_source():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        secret = SecretValue(RAW, source="part-of-s3cr3t-value")
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        data = pickle.dumps(secret, protocol=protocol)
+        assert b"s3cr3t" not in data
+        assert pickle.loads(data).source == "custom"
+
+
+def test_pickle_keeps_known_source_labels():
+    assert pickle.loads(pickle.dumps(_secret())).source == "explicit"
+    assert pickle.loads(pickle.dumps(SecretValue(RAW))).source == "env"
+
+
+def test_redacted_secret_is_not_replaced_by_environment_variable(monkeypatch):
+    monkeypatch.setenv("INTROSPECTION_CLIENT_SECRET", "ENV-VALUE-0123456789")
+    monkeypatch.setenv("OAUTH_CLIENT_SECRET", "ENV-VALUE-0123456789")
+    gone = pickle.loads(pickle.dumps(_secret()))
+    assert not gone
+    service = OAuthService(
+        "https://r", ["https://a"], ["x"],
+        token_introspection_client_secret=gone, static_client_secret=gone,
+    )
+    assert service.token_introspection_client_secret is gone
+    assert service.static_client_secret is gone
+    with pytest.raises(ValueError):
+        build_registration_response(service, {})
+
+
+def test_oauth_still_falls_back_to_environment_when_not_given(monkeypatch):
+    monkeypatch.setenv("INTROSPECTION_CLIENT_SECRET", "ENV-VALUE-0123456789")
+    service = OAuthService("https://r", ["https://a"], ["x"])
+    assert service.token_introspection_client_secret == "ENV-VALUE-0123456789"
+
+
+class _LeakySource(str):
+    """A ``str`` subclass that equals "env" but drags a secret into its pickle state."""
+
+    def __new__(cls, text, leaked):
+        obj = super().__new__(cls, text)
+        obj.leaked = leaked
+        return obj
+
+    def __reduce__(self):
+        return (str, (str(self),), {"leaked": self.leaked})
+
+    def __hash__(self):
+        return hash("env")
+
+    def __eq__(self, other):
+        return other == "env" or str.__eq__(self, other)
+
+
+def test_pickle_ignores_state_carried_by_a_str_subclass_source():
+    leaked = "sk-live-top-secret"
+    for label in ("env", "config", "explicit"):
+        secret = SecretValue("v-" + leaked, source=_LeakySource(label, leaked))
+        blob = pickle.dumps(secret)
+        assert leaked.encode() not in blob
+        assert pickle.loads(blob).source == label
+
+
+def test_subclass_with_a_fake_equality_cannot_pick_a_safe_label():
+    leaked = "sk-live-top-secret"
+    # Compares equal to "env" but its real text is the secret.
+    secret = SecretValue("v-" + leaked, source=_LeakySource(leaked, leaked))
+    blob = pickle.dumps(secret)
+    assert leaked.encode() not in blob
+    assert pickle.loads(blob).source == "custom"

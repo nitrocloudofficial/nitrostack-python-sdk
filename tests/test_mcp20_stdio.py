@@ -135,9 +135,7 @@ def test_modern_stdio_rejects_initialize(monkeypatch):
             },
         )
     )
-    # Modern has no `initialize` handshake handler at all (rejected via the
-    # public `modern_on_request` dispatch path, not a bespoke error message),
-    # so this surfaces as a standard JSON-RPC method-not-found.
+    # Reject the handshake before it can select the legacy connection style.
     assert "error" in payload
     assert payload["error"]["code"] == -32601
 

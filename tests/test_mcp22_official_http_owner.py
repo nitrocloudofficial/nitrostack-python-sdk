@@ -5,9 +5,12 @@ import json
 from pathlib import Path
 
 import httpx
+import nitrostack
 
 from nitrostack import module
 from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
+
+SDK_ROOT = Path(nitrostack.__file__).resolve().parent
 
 
 @module(name="issue22_probe", controllers=[])
@@ -44,17 +47,19 @@ def _request(path: str, *, method: str = "GET", payload: dict | None = None):
 
 
 def test_combined_app_has_no_jsonrpc_sidecar_call():
-    source = Path("nitrostack/core/app.py").read_text(encoding="utf-8")
+    source = (SDK_ROOT / "core" / "app.py").read_text(encoding="utf-8")
     assert "wrap_stateless_transport" not in source
     assert "return http_app" in source
 
 
 def test_sidecar_modules_and_ping_helpers_are_not_production_code():
-    assert not Path("nitrostack/transports/middleware.py").exists()
-    assert not Path("nitrostack/transports/dispatch.py").exists()
+    assert not (SDK_ROOT / "transports" / "middleware.py").exists()
+    assert not (SDK_ROOT / "transports" / "dispatch.py").exists()
+    sources = list(SDK_ROOT.rglob("*.py"))
+    assert sources, f"No production Python sources found in {SDK_ROOT}"
     production = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in Path("nitrostack").rglob("*.py")
+        for path in sources
     )
     for symbol in (
         "wrap_stateless_transport",
@@ -83,6 +88,19 @@ def test_official_mcp_lists_tools_without_a_default_session_id():
     assert response.headers.get("mcp-session-id") is None
     assert response.json()["id"] == 1
     assert response.json()["result"]["tools"] == []
+
+
+def test_official_mcp_ping_is_method_not_found_without_a_default_session_id():
+    response = _request(
+        "/mcp",
+        method="POST",
+        payload={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("mcp-session-id") is None
+    body = response.json()
+    assert body["error"]["code"] == -32601
+    assert "result" not in body
 
 
 def test_official_mcp_returns_jsonrpc_error_for_unknown_method():
