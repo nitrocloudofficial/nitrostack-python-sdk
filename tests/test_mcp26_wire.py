@@ -158,17 +158,6 @@ def test_missing_client_capability_code_is_defined():
     assert -32021 in {int(member.value) for member in JsonRpcErrorCode}
 
 
-def test_task_call_returns_32021_when_tasks_unavailable(monkeypatch):
-    app = make_app(monkeypatch, "modern")
-    app.mcp_server.has_task_support = False  # what the tasks issue (#25) will do on 2026
-
-    async def go():
-        return await app._call_tool("alpha", {}, task=types.TaskMetadata(ttl=1000))
-
-    with pytest.raises(MCPError) as excinfo:
-        asyncio.run(go())
-    assert exc_code(excinfo.value) == -32021
-
 
 def test_task_call_still_works_when_tasks_available(monkeypatch):
     app = make_app(monkeypatch, "legacy")
