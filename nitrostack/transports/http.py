@@ -276,17 +276,19 @@ class HeaderCompatMiddleware:
     ``drop_session_headers`` is set.
 
     ``MCP-Protocol-Version`` is never deleted. Duplicate casings are collapsed
-    to one ``mcp-protocol-version`` entry and the client value is kept so later
-    version checks see what the client sent.
+    to lowercase names and client values are preserved so the official
+    transport can reject duplicate or inconsistent version claims.
 
     Stack order on the HTTP app: CORS → this middleware (preserve) → handler.
     This middleware only normalizes transport headers; JSON-RPC dispatch remains
     owned by the official MCP Streamable HTTP manager.
     """
 
-    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False) -> None:
+    def __init__(self, app: ASGIApp, *, drop_session_headers: bool = False,
+                 require_protocol_version: bool = False) -> None:
         self.app = app
         self.drop_session_headers = drop_session_headers
+        self.require_protocol_version = require_protocol_version
 
     @staticmethod
     def _normalize_accept(value: Optional[str]) -> Optional[str]:
@@ -306,7 +308,7 @@ class HeaderCompatMiddleware:
 
     @staticmethod
     def _canonicalize_protocol_version(headers: List[Any]) -> List[Any]:
-        """Keep the protocol version value; emit one lowercase header name."""
+        """Normalize casing without hiding duplicates from MCP's validator."""
         version_values: List[bytes] = []
         kept: List[Any] = []
         for key, value in headers:
@@ -316,7 +318,7 @@ class HeaderCompatMiddleware:
                 kept.append((key, value))
         if not version_values:
             return headers
-        kept.append((b"mcp-protocol-version", version_values[0]))
+        kept.extend((b"mcp-protocol-version", value) for value in version_values)
         return kept
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -325,6 +327,19 @@ class HeaderCompatMiddleware:
             return
 
         headers: List[Any] = list(scope.get("headers") or [])
+        if self.require_protocol_version and scope.get("method") == "POST" and not any(
+            key.lower() == b"mcp-protocol-version" and value.strip() for key, value in headers
+        ):
+            # The official manager selects its strict path using this header.
+            # Reject before that selection without reading/replaying the body
+            # or interpreting a method. All JSON-RPC dispatch stays in MCP.
+            response = JSONResponse(
+                {"jsonrpc": "2.0", "id": None, "error": {
+                    "code": -32020, "message": "MCP-Protocol-Version header is required",
+                }}, status_code=400,
+            )
+            await response(scope, receive, send)
+            return
         if self.drop_session_headers:
             headers = strip_legacy_session_headers_asgi(headers)
         headers = self._canonicalize_protocol_version(headers)
@@ -529,7 +544,8 @@ def build_http_app(
     # Wraps only the Streamable HTTP mount, so `/mcp/health` and the legacy SSE
     # routes keep their own (correct) content negotiation.
     mcp_asgi_app: ASGIApp = HeaderCompatMiddleware(
-        handle_streamable_http, drop_session_headers=stateless
+        handle_streamable_http, drop_session_headers=stateless,
+        require_protocol_version=protocol_era == "modern",
     )
     session_cap: Optional[SessionCapMiddleware] = None
     if max_sessions and not stateless:

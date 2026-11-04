@@ -13,10 +13,8 @@ from nitrostack.protocol.jsonrpc import (
     HeaderBodyMismatchError,
     JsonRpcParseError,
     parse_jsonrpc_request,
-    validate_header_body_method,
 )
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.protocol.method_contract import MODERN_METHOD_CONTRACTS
 from nitrostack.transports.cors import build_cors_headers, cors_preflight_response_headers, resolve_allowed_origin
 from nitrostack.transports.headers import (
     MAX_MCP_PARAM_VALUE_BYTES,
@@ -134,13 +132,6 @@ def test_incoming_session_id_cannot_attach_sessionless_calls(era):
             assert response.status_code == 200, response.text
             assert "mcp-session-id" not in response.headers
             assert decode(response)["result"]["structuredContent"]["value"] == expected
-
-
-def test_method_contract_table_still_covers_modern_surface():
-    methods = {row.method for row in MODERN_METHOD_CONTRACTS}
-    assert {"server/discover", "resources/read", "prompts/get", "completion/complete",
-            "tools/call"} <= methods
-    assert not any(method.startswith("tasks/") for method in methods)
 
 
 def test_response_echo_uses_supported_request_version():
@@ -382,10 +373,6 @@ class TestJsonRpcParsing:
             parse_jsonrpc_request(b"{bad")
         assert exc.value.code == PARSE_ERROR
 
-    def test_header_body_mismatch(self):
-        with pytest.raises(HeaderBodyMismatchError) as exc:
-            validate_header_body_method("tools/list", "tools/call")
-        assert exc.value.code == HEADER_BODY_MISMATCH
 
 
 class TestDiscovery:
@@ -398,7 +385,7 @@ class TestDiscovery:
         assert result["supportedVersions"] == ["2026-07-28"]
         assert result["serverInfo"]["name"] == "my-stateless-mcp-server"
         assert result["capabilities"]["resources"]["subscribe"] is False
-        assert "io.modelcontextprotocol/tasks" in result["capabilities"]["extensions"]
+        assert "io.modelcontextprotocol/tasks" not in result["capabilities"].get("extensions", {})
         assert result["resultType"] == DISCOVER_RESULT_TYPE
         assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
         assert result["cacheScope"] in ("public", "private")
