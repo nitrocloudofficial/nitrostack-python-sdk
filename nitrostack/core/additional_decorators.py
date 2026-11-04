@@ -20,15 +20,27 @@ def copy_mcp_attributes(src: Any, dst: Any) -> None:
 def _make_cache_key_part(value: Any, label: str) -> Any:
     """Convert *value* into a hashable cache-key component.
 
-    Pydantic BaseModel instances are serialized via model_dump(mode="json").
+    Pydantic BaseModel instances are keyed from all declared fields (including
+    those marked exclude=True) via pydantic_core.to_jsonable_python, identified
+    by their fully-qualified class name (module + qualname) to prevent collisions
+    between identically-named models from different modules.
     Natively hashable values are used as-is.
     Anything else raises a descriptive TypeError.
     """
     try:
+        import pydantic_core
         from pydantic import BaseModel as PydanticBaseModel  # type: ignore
         if isinstance(value, PydanticBaseModel):
-            dumped = value.model_dump(mode="json")
-            return ("__pydantic__", type(value).__name__, json.dumps(dumped, sort_keys=True))
+            cls = type(value)
+            # Use all declared fields (bypasses exclude=True) so that excluded
+            all_fields = {name: getattr(value, name) for name in cls.model_fields}
+            serialized = json.dumps(
+                pydantic_core.to_jsonable_python(all_fields), sort_keys=True
+            )
+            # Use module + qualname so two classes named "Query" in different
+            # modules never share a cache entry.
+            type_id = f"{cls.__module__}.{cls.__qualname__}"
+            return ("__pydantic__", type_id, serialized)
     except ImportError:
         pass
 
@@ -87,7 +99,16 @@ def cache(ttl: int = 60, max_size: Optional[int] = 1024, key: Optional[Callable[
                 filtered_kwargs[k] = v
 
             if key is not None:
-                cache_key = key(*filtered_args, **filtered_kwargs)
+                raw_key = key(*filtered_args, **filtered_kwargs)
+                try:
+                    hash(raw_key)
+                except TypeError:
+                    raise TypeError(
+                        f"cache: the key= callable returned a value of type "
+                        f"{type(raw_key).__name__!r} which is not hashable. "
+                        f"Ensure key= returns a hashable object (e.g. a string, int, or tuple)."
+                    )
+                cache_key = raw_key
             else:
                 key_args = tuple(
                     _make_cache_key_part(v, f"args[{i}]") for i, v in enumerate(filtered_args)
@@ -97,19 +118,18 @@ def cache(ttl: int = 60, max_size: Optional[int] = 1024, key: Optional[Callable[
                 )
                 cache_key = (key_args, key_kwargs)
 
-            cache_lookup_key = cache_key
             now = time.time()
-            entry = cache_store.get(cache_lookup_key)
+            entry = cache_store.get(cache_key)
             if entry is not None:
                 val, expiry = entry
                 if now < expiry:
-                    cache_store.move_to_end(cache_lookup_key)
+                    cache_store.move_to_end(cache_key)
                     return val
-                del cache_store[cache_lookup_key]
+                del cache_store[cache_key]
 
             result = await func(*args, **kwargs)
-            cache_store[cache_lookup_key] = (result, now + ttl)
-            cache_store.move_to_end(cache_lookup_key)
+            cache_store[cache_key] = (result, now + ttl)
+            cache_store.move_to_end(cache_key)
 
             if max_size is not None and len(cache_store) > max_size:
                 for stale in [k for k, (_, exp) in cache_store.items() if exp <= now]:

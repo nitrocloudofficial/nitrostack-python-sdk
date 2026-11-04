@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from nitrostack.core.additional_decorators import cache, _make_cache_key_part
 from nitrostack.core.context import ExecutionContext
@@ -29,7 +29,7 @@ class TestMakeCacheKeyPart:
         part = _make_cache_key_part(m, "arg")
         assert isinstance(part, tuple)
         assert part[0] == "__pydantic__"
-        assert part[1] == "SearchQuery"
+        assert "SearchQuery" in part[1]
         assert isinstance(part[2], str)
 
     def test_same_model_state_produces_same_key(self):
@@ -142,6 +142,40 @@ class TestCacheWithPydanticModels:
         run(op(q, limit=10))
         assert len(calls) == 2
 
+    def test_excluded_field_produces_separate_cache_entries(self):
+        class UserQuery(BaseModel):
+            q: str
+            user_id: str = Field(default="", exclude=True)
+
+        calls = []
+
+        @cache(ttl=60)
+        async def fetch(uq: UserQuery) -> str:
+            calls.append(uq.user_id)
+            return uq.user_id
+
+        assert run(fetch(UserQuery(q="hello", user_id="alice"))) == "alice"
+        assert run(fetch(UserQuery(q="hello", user_id="bob"))) == "bob"
+        assert calls == ["alice", "bob"]
+
+    def test_same_class_name_different_module_no_cache_collision(self):
+        class Q(BaseModel):
+            q: str
+
+        OtherQ = type("Q", (BaseModel,), {"__annotations__": {"q": str}, "__module__": "other_module"})
+
+        calls = []
+
+        @cache(ttl=60)
+        async def fetch(v) -> str:
+            result = type(v).__module__
+            calls.append(result)
+            return result
+
+        r1, r2 = run(fetch(Q(q="x"))), run(fetch(OtherQ(q="x")))
+        assert r1 != r2
+        assert len(calls) == 2
+
 
 class TestCacheWithUnhashableArguments:
     def test_unhashable_positional_arg_raises_type_error(self):
@@ -240,3 +274,11 @@ class TestCacheCustomKeyCallable:
             not any(isinstance(v, ExecutionContext) for v in call_kwargs.values())
             for _, call_kwargs in seen
         )
+
+    def test_custom_key_returning_unhashable_raises_descriptive_error(self):
+        @cache(ttl=60, key=lambda x: [x])
+        async def fn(x: int) -> int:
+            return x
+
+        with pytest.raises(TypeError, match="key= callable"):
+            run(fn(1))
