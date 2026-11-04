@@ -30,7 +30,6 @@ from nitrostack.protocol.jsonrpc import (
     map_exception_to_jsonrpc,
     parse_jsonrpc_request,
 )
-from nitrostack.protocol.layers import RuntimeLayer
 from nitrostack.protocol.cache_hints import (
     build_list_endpoint_cache_hint_meta,
     resolve_resource_cache_hint_meta,
@@ -127,7 +126,6 @@ __all__ = [
     "supported_protocol_versions_for_era",
     "wire_mode_for_era",
     "MCPExtensionId",
-    "RuntimeLayer",
     "LEGACY_SESSION_HEADER",
     "MAX_CIMD_BYTES",
     "MAX_SCHEMA_DEPTH",

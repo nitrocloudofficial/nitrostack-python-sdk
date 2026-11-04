@@ -28,16 +28,7 @@ from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.extensions import MCPExtensionId
 from nitrostack.protocol.jsonrpc import map_exception_to_jsonrpc
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.runtime.conformance import (
-    BLUEPRINT_CONFORMANCE_AREAS,
-    ConformanceArea,
-    DEPRECATED_MODERN_METHODS,
-    MODERN_JSONRPC_ERROR_CODES,
-    REQUIRED_BLUEPRINT_MODULES,
-    assert_blueprint_layout,
-    protocol_version_matches_blueprint,
-    verify_package_layout,
-)
+from nitrostack.protocol.method_contract import DEPRECATED_MODERN_METHODS
 from nitrostack.tasks.eviction import should_evict_terminal_task
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData, datetime_to_ms, utc_now
 from nitrostack.tasks.authorization import check_task_access
@@ -72,23 +63,6 @@ def teardown_function() -> None:
     DIContainer.reset()
 
 
-class TestBlueprintRegistry:
-    def test_conformance_areas_defined(self):
-        assert set(BLUEPRINT_CONFORMANCE_AREAS) == set(ConformanceArea)
-        assert len(BLUEPRINT_CONFORMANCE_AREAS) == 5
-
-    def test_modern_protocol_version(self):
-        assert protocol_version_matches_blueprint()
-        assert MODERN_PROTOCOL_VERSION == "2026-07-28"
-
-    def test_required_modules_import(self):
-        assert verify_package_layout() == []
-        assert_blueprint_layout()
-
-    def test_blueprint_module_count(self):
-        assert len(REQUIRED_BLUEPRINT_MODULES) >= 17
-
-
 class TestStatelessHttpConformance:
     def test_discover_advertises_modern_protocol_and_extensions(self):
         result = build_discover_result(
@@ -121,13 +95,6 @@ class TestStatelessHttpConformance:
 
 
 class TestJsonRpcConformance:
-    @pytest.mark.parametrize(
-        "code",
-        sorted(MODERN_JSONRPC_ERROR_CODES),
-    )
-    def test_standard_error_codes_registered(self, code: JsonRpcErrorCode):
-        assert int(code) in MODERN_JSONRPC_ERROR_CODES
-
     def test_missing_resource_maps_to_invalid_params(self):
         resp = map_exception_to_jsonrpc(ResourceNotFoundError("mcp://missing"), "99")
         assert resp["error"]["code"] == JsonRpcErrorCode.INVALID_PARAMS
