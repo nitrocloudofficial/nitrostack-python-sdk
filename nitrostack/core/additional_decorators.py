@@ -1,13 +1,12 @@
+import json
 import time
 import inspect
-from collections import OrderedDict, deque
-from functools import wraps
-from typing import Callable, Any, Deque, Dict, Optional, Tuple
 import asyncio
 import threading
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
-from typing import Callable, Any, Dict, List, Tuple, TypedDict, Literal, Optional
+from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple, TypedDict
 from nitrostack.core.context import ExecutionContext
 from nitrostack.core.errors import RateLimitExceededError
 
@@ -17,13 +16,52 @@ def copy_mcp_attributes(src: Any, dst: Any) -> None:
         if attr.startswith("_mcp_"):
             setattr(dst, attr, getattr(src, attr))
 
-def cache(ttl: int = 60, max_size: Optional[int] = 1024):
+
+def _make_cache_key_part(value: Any, label: str) -> Any:
+    """Convert *value* into a hashable cache-key component.
+
+    Pydantic BaseModel instances are serialized via model_dump(mode="json").
+    Natively hashable values are used as-is.
+    Anything else raises a descriptive TypeError.
+    """
+    try:
+        from pydantic import BaseModel as PydanticBaseModel  # type: ignore
+        if isinstance(value, PydanticBaseModel):
+            dumped = value.model_dump(mode="json")
+            return ("__pydantic__", type(value).__name__, json.dumps(dumped, sort_keys=True))
+    except ImportError:
+        pass
+
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        pass
+
+    raise TypeError(
+        f"cache: argument {label!r} of type {type(value).__name__!r} is not hashable "
+        f"and has no built-in serialization strategy. "
+        f"Pass a key= callable to cache() to handle this type explicitly."
+    )
+
+
+def cache(ttl: int = 60, max_size: Optional[int] = 1024, key: Optional[Callable[..., Any]] = None):
     """
     Caches method outputs for a specific TTL (in seconds).
     Skips ExecutionContext parameters when generating the cache key.
     Holds at most max_size entries, evicting expired entries first and then
     the least recently used. max_size=None disables the cap.
     The wrapped function exposes cache_clear() to empty the cache.
+
+    Args:
+        ttl:      Time-to-live for cached entries in seconds (must be > 0).
+        max_size: Maximum number of cache entries. None means unlimited.
+        key:      Optional callable that receives the same *args* and **kwargs
+                  as the decorated function (after ExecutionContext arguments
+                  are filtered out) and returns a hashable cache key.
+                  When provided it overrides the default key-building logic,
+                  which serializes Pydantic models automatically and raises a
+                  descriptive TypeError for other unhashable arguments.
     """
     if ttl <= 0:
         raise ValueError(f"cache ttl must be > 0, got {ttl!r}.")
@@ -48,20 +86,30 @@ def cache(ttl: int = 60, max_size: Optional[int] = 1024):
                     continue
                 filtered_kwargs[k] = v
 
-            key = (tuple(filtered_args), frozenset(filtered_kwargs.items()))
+            if key is not None:
+                cache_key = key(*filtered_args, **filtered_kwargs)
+            else:
+                key_args = tuple(
+                    _make_cache_key_part(v, f"args[{i}]") for i, v in enumerate(filtered_args)
+                )
+                key_kwargs = frozenset(
+                    (k, _make_cache_key_part(v, k)) for k, v in filtered_kwargs.items()
+                )
+                cache_key = (key_args, key_kwargs)
 
+            cache_lookup_key = cache_key
             now = time.time()
-            entry = cache_store.get(key)
+            entry = cache_store.get(cache_lookup_key)
             if entry is not None:
                 val, expiry = entry
                 if now < expiry:
-                    cache_store.move_to_end(key)
+                    cache_store.move_to_end(cache_lookup_key)
                     return val
-                del cache_store[key]
+                del cache_store[cache_lookup_key]
 
             result = await func(*args, **kwargs)
-            cache_store[key] = (result, now + ttl)
-            cache_store.move_to_end(key)
+            cache_store[cache_lookup_key] = (result, now + ttl)
+            cache_store.move_to_end(cache_lookup_key)
 
             if max_size is not None and len(cache_store) > max_size:
                 for stale in [k for k, (_, exp) in cache_store.items() if exp <= now]:
