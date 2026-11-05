@@ -154,8 +154,9 @@ Implementation issue scopes:
    Preserve the CLI entry point and `nitrostack.core.app` compatibility imports.
 3. [**Split remaining over-limit Python files by responsibility**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/113) (**open, umbrella**). The implementation scopes are tracked as standalone issues:
    [widget route templates and views (#121)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/121),
-   [HTTP transport and OAuth (#122)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/122),
-   and [CLI packaging (#123)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/123).
+   [OAuth (#122)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/122),
+   [CLI packaging (#123)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/123),
+   and [HTTP transport (#125)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/125).
    The standalone issues exclude tests and example-related files.
 
 Before starting an overlapping split, refresh open-PR changed-file lists and
