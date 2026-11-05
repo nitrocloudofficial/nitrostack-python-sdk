@@ -1,0 +1,16 @@
+{
+  "examples/flight_booking_server.py": 582,
+  "nitrostack/auth/oauth.py": 516,
+  "nitrostack/cli/main.py": 2019,
+  "nitrostack/cli/pack.py": 507,
+  "nitrostack/core/app.py": 2273,
+  "nitrostack/transports/http.py": 797,
+  "nitrostack/widgets/route_templates.py": 870,
+  "nitrostack/widgets/views.py": 569,
+  "tests/test_cli.py": 1589,
+  "tests/test_oauth.py": 1011,
+  "tests/test_secret_value.py": 515,
+  "tests/test_tasks.py": 574,
+  "tests/test_transports.py": 732,
+  "tests/test_widgets.py": 629
+}
