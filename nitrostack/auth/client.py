@@ -17,8 +17,11 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from nitrostack.auth import cimd
+from nitrostack.auth.secret import SecretValue, unwrap_secret
 from nitrostack.auth.pkce import generate_pkce_params, is_valid_code_verifier, validate_pkce_support
-from nitrostack.auth.token_store import MemoryTokenStore, StoredToken, TokenStore, token_response_to_stored
+from nitrostack.auth.token_store import (
+    MemoryTokenStore, StoredToken, TokenStore, is_token_expired, token_response_to_stored,
+)
 
 
 _OAUTH_ERRORS = frozenset({
@@ -45,7 +48,7 @@ class OAuthClientError(ValueError):
 @dataclass(frozen=True)
 class OAuth2ClientConfig:
     client_id: str | None = field(default=None, repr=False)
-    client_secret: str | None = field(default=None, repr=False)
+    client_secret: str | SecretValue | None = field(default=None, repr=False)
     issuer: str | None = field(default=None, repr=False)
     redirect_uri: str | None = field(default=None, repr=False)
     authorization_endpoint: str | None = field(default=None, repr=False)
@@ -57,8 +60,11 @@ class OAuth2ClientConfig:
 
     def __post_init__(self):
         if any(value is not None and (not isinstance(value, str) or not value)
-               for value in (getattr(self, item.name) for item in fields(self))):
+               for value in (getattr(self, item.name) for item in fields(self) if item.name != "client_secret")):
             raise OAuthClientError("configuration")
+        if self.client_secret is not None and not isinstance(self.client_secret, SecretValue):
+            if not isinstance(self.client_secret, str) or not self.client_secret:
+                raise OAuthClientError("configuration")
 
 
 @dataclass(frozen=True)
@@ -156,6 +162,7 @@ class OAuth2Client:
         self.max_response_bytes = max_response_bytes
         self._metadata: dict[str, Any] = {}
         self._refresh_tasks: dict[str, asyncio.Task[StoredToken]] = {}
+        self._force_refresh: dict[str, bool] = {}
         self._key_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._trusted_urls = {
             value for item in fields(self.config)
@@ -350,8 +357,14 @@ class OAuth2Client:
         params["client_id"] = self._client_id()
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         if self.config.client_secret is not None:
+            try:
+                secret = unwrap_secret(self.config.client_secret)
+                if not secret:
+                    raise ValueError
+            except Exception:
+                raise OAuthClientError("client authentication") from None
             credentials = ":".join(urllib.parse.quote_plus(value, safe="") for value in
-                                   (self._client_id(), self.config.client_secret))
+                                   (self._client_id(), secret))
             headers["Authorization"] = "Basic " + base64.b64encode(credentials.encode("ascii")).decode("ascii")
         return headers
 
@@ -393,15 +406,18 @@ class OAuth2Client:
         async with self._key_lock(key):
             return await self._obtain_token(key, params, resource=resource)
 
-    async def _refresh(self, key: str) -> StoredToken:
+    async def _refresh(self, key: str, *, only_if_expired: bool = False) -> StoredToken:
         async with self._key_lock(key):
-            return await self._refresh_locked(key)
+            return await self._refresh_locked(key, only_if_expired=only_if_expired)
 
-    async def _refresh_locked(self, key: str) -> StoredToken:
+    async def _refresh_locked(self, key: str, *, only_if_expired: bool = False) -> StoredToken:
         try:
             previous = await self.store.get_token(key)
         except Exception:
             raise OAuthClientError("token retrieval") from None
+        if (only_if_expired and not self._force_refresh.get(key, False)
+                and previous is not None and not is_token_expired(previous)):
+            return previous
         if previous is None or not previous.refresh_token:
             raise OAuthClientError("refresh credential")
         params = {"grant_type": "refresh_token", "refresh_token": previous.refresh_token}
@@ -409,39 +425,64 @@ class OAuth2Client:
             params["scope"] = previous.scope
         return await self._obtain_token(key, params, resource=previous.resource, previous=previous)
 
+    async def get_access_token(self, key: str) -> str:
+        """Return a usable access token, refreshing and persisting when necessary."""
+        token = await self._coalesced_refresh(key, only_if_expired=True)
+        if is_token_expired(token):
+            raise OAuthClientError("access token expiry")
+        return token.access_token
+
     async def refresh_token(self, key: str) -> StoredToken:
+        return await self._coalesced_refresh(key)
+
+    async def _coalesced_refresh(self, key: str, *, only_if_expired: bool = False) -> StoredToken:
         if not isinstance(key, str) or not key:
             raise OAuthClientError("token key")
         task = self._refresh_tasks.get(key)
-        if task is None:
-            task = asyncio.create_task(self._refresh(key))
+        if task is None or task.done():
+            self._force_refresh[key] = not only_if_expired
+            task = asyncio.create_task(self._refresh(key, only_if_expired=only_if_expired))
             self._refresh_tasks[key] = task
 
             def completed(done):
                 if self._refresh_tasks.get(key) is done:
                     self._refresh_tasks.pop(key, None)
+                    self._force_refresh.pop(key, None)
                 if not done.cancelled():
                     done.exception()  # Consume failures even if every waiter cancelled.
 
             task.add_done_callback(completed)
+        elif not only_if_expired:
+            self._force_refresh[key] = True
         return await asyncio.shield(task)
 
-    async def revoke_token(self, key: str, *, token_type_hint: str | None = None) -> None:
+    async def revoke_token(
+        self, key: str, *, token_type_hint: str | None = None, local_fallback: bool = False,
+    ) -> None:
+        """Revoke remotely; opt in to local deletion if remote revocation fails."""
+        if type(local_fallback) is not bool:
+            raise OAuthClientError("revocation configuration")
         async with self._key_lock(key):
-            await self._revoke_locked(key, token_type_hint)
+            await self._revoke_locked(key, token_type_hint, local_fallback)
 
-    async def _revoke_locked(self, key: str, token_type_hint: str | None) -> None:
+    async def _revoke_locked(self, key: str, token_type_hint: str | None, local_fallback: bool) -> None:
         try:
             stored = await self.store.get_token(key)
             if stored is None:
                 return
-            hint = token_type_hint or ("refresh_token" if stored.refresh_token else "access_token")
+            hint = token_type_hint if token_type_hint is not None else (
+                "refresh_token" if stored.refresh_token else "access_token"
+            )
             if hint not in ("access_token", "refresh_token") or not getattr(stored, hint):
                 raise OAuthClientError("revocation configuration")
             params = {"token": getattr(stored, hint), "token_type_hint": hint}
-            headers = self._authenticate(params)
-            await self._request("revocation", "POST", self._endpoint("revocation_endpoint"),
-                                body=urllib.parse.urlencode(params).encode("utf-8"), headers=headers)
+            try:
+                headers = self._authenticate(params)
+                await self._request("revocation", "POST", self._endpoint("revocation_endpoint"),
+                                    body=urllib.parse.urlencode(params).encode("utf-8"), headers=headers)
+            except OAuthClientError:
+                if not local_fallback:
+                    raise
             await self.store.delete_token(key)
         except OAuthClientError:
             raise
