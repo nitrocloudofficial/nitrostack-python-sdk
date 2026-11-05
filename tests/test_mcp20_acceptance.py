@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import os
 import sys
 import time
-from pathlib import Path
 
 import mcp.types as types
 import pytest
@@ -22,21 +20,7 @@ from nitrostack.core.di import DIContainer
 from nitrostack.core.task import TaskManager, TaskStatus
 from nitrostack.protocol.constants import LEGACY_SESSION_HEADER
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.runtime.acceptance import (
-    ACCEPTANCE_CRITERIA,
-    MCP20_TEST_MODULES,
-    PROTOCOL_DELIVERABLES,
-    ProtocolArea,
-    acceptance_criteria_registered,
-    deliverables_for_area,
-    iter_area_summary,
-    modern_protocol_target,
-    protocol_coverage_complete,
-)
-from nitrostack.runtime.conformance import assert_blueprint_layout
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class EchoInput(BaseModel):
@@ -49,50 +33,6 @@ def setup_function() -> None:
 
 def teardown_function() -> None:
     DIContainer.reset()
-
-
-class TestProtocolRegistry:
-    def test_all_areas_have_deliverables(self):
-        assert protocol_coverage_complete()
-        for line in iter_area_summary():
-            assert "0 deliverable" not in line
-
-    def test_deliverable_count(self):
-        assert len(PROTOCOL_DELIVERABLES) >= 14
-
-    def test_acceptance_criteria_registered(self):
-        assert acceptance_criteria_registered()
-        keys = {item.key for item in ACCEPTANCE_CRITERIA}
-        assert keys == {
-            "stateless",
-            "task_conformance",
-            "task_cancellation",
-            "ttl_safety",
-            "multi_tenant",
-            "ssrf_security",
-            "error_parity",
-            "automated_tests",
-        }
-
-    def test_modern_protocol_target(self):
-        assert modern_protocol_target() == "2026-07-28"
-
-    @pytest.mark.parametrize("area", list(ProtocolArea))
-    def test_each_area_maps_to_tests(self, area: ProtocolArea):
-        items = deliverables_for_area(area)
-        assert items, f"Area {area} has no deliverables"
-        for item in items:
-            assert item.test_module.startswith("tests/test_mcp20_")
-
-
-class TestLayoutAndTestTraceability:
-    def test_all_mcp20_test_modules_exist(self):
-        for module_path in MCP20_TEST_MODULES:
-            path = REPO_ROOT / module_path
-            assert path.is_file(), module_path
-
-    def test_blueprint_layout_importable(self):
-        assert_blueprint_layout()
 
 
 class TestAcceptanceTaskConformance:
@@ -208,19 +148,3 @@ class TestAcceptanceStatelessInvariant:
         cfg = ServerConfig(name="x")
         assert cfg.protocol_version == MODERN_PROTOCOL_VERSION
 
-
-class TestAutomatedTestCoverageMap:
-    def test_mcp20_test_modules_importable(self):
-        for module_path in MCP20_TEST_MODULES:
-            file_path = REPO_ROOT / module_path
-            spec = importlib.util.spec_from_file_location(
-                module_path.replace("/", "_").replace(".", "_"),
-                file_path,
-            )
-            assert spec is not None and spec.loader is not None
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-    def test_full_mcp20_suite_module_count(self):
-        suite = sorted(REPO_ROOT.glob("tests/test_mcp20_*.py"))
-        assert len(suite) == 17

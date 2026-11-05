@@ -59,8 +59,15 @@ class CimdFetchError(ValueError):
 
 
 def validate_client_identifier_url(client_id_url: str, *, allow_loopback: bool = False) -> str:
+    """CIMD identifiers additionally require a non-root document path."""
+    return validate_fetch_url(client_id_url, allow_loopback=allow_loopback, require_non_root_path=True)
+
+
+def validate_fetch_url(
+    client_id_url: str, *, allow_loopback: bool = False, require_non_root_path: bool = False,
+) -> str:
     """
-    Validate a CIMD ``client_id`` URL before any network fetch.
+    Validate a fetch URL, optionally requiring CIMD's non-root document path.
 
     Returns the normalized URL string on success.
     """
@@ -85,10 +92,10 @@ def validate_client_identifier_url(client_id_url: str, *, allow_loopback: bool =
         raise CimdValidationError("client_id URL must not contain a fragment")
 
     path = parsed.path or ""
-    if not path or path == "/":
+    if require_non_root_path and (not path or path == "/"):
         raise CimdValidationError("client_id URL must include a non-root path")
 
-    segments = [segment for segment in path.split("/") if segment]
+    segments = [segment for segment in urllib.parse.unquote(path).split("/") if segment]
     if any(segment in {".", ".."} for segment in segments):
         raise CimdValidationError("client_id URL path must not contain '.' or '..' segments")
 
@@ -154,9 +161,11 @@ def cimd_host_matches_request(
     return cimd_url_matches_request_host(cimd_url, headers, peer, trusted=trusted)
 
 
-async def assert_safe_fetch_target(url_str: str, *, allow_loopback: bool = False) -> Optional[str]:
+async def assert_safe_fetch_target(
+    url_str: str, *, allow_loopback: bool = False, require_non_root_path: bool = True,
+) -> Optional[str]:
     """DNS pre-resolution and IP range filtering. Returns the pinned destination IP."""
-    validate_client_identifier_url(url_str, allow_loopback=allow_loopback)
+    validate_fetch_url(url_str, allow_loopback=allow_loopback, require_non_root_path=require_non_root_path)
     parsed = urllib.parse.urlparse(url_str)
     hostname = parsed.hostname
     if not hostname:
@@ -216,27 +225,29 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 
 class _PinnedHTTPHandler(urllib.request.HTTPHandler):
-    def __init__(self, hostname: str, pinned_ip: str) -> None:
+    def __init__(self, hostname: str, pinned_ip: str, port: Optional[int] = None) -> None:
         super().__init__()
         self._hostname = hostname
         self._pinned_ip = pinned_ip
+        self._port = port
 
     def http_open(self, req: urllib.request.Request):
         return self.do_open(
-            lambda host, **kwargs: _PinnedHTTPConnection(self._hostname, self._pinned_ip, **kwargs),
+            lambda host, **kwargs: _PinnedHTTPConnection(self._hostname, self._pinned_ip, port=self._port, **kwargs),
             req,
         )
 
 
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
-    def __init__(self, hostname: str, pinned_ip: str) -> None:
+    def __init__(self, hostname: str, pinned_ip: str, port: Optional[int] = None) -> None:
         super().__init__()
         self._hostname = hostname
         self._pinned_ip = pinned_ip
+        self._port = port
 
     def https_open(self, req: urllib.request.Request):
         return self.do_open(
-            lambda host, **kwargs: _PinnedHTTPSConnection(self._hostname, self._pinned_ip, **kwargs),
+            lambda host, **kwargs: _PinnedHTTPSConnection(self._hostname, self._pinned_ip, port=self._port, **kwargs),
             req,
         )
 
@@ -252,22 +263,24 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         )
 
 
+def _build_fetch_opener(url_str: str, pinned_ip: Optional[str] = None):
+    """Share redirect denial and DNS-pinned, hostname-verified connections."""
+    parsed = urllib.parse.urlparse(url_str)
+    handlers: list[urllib.request.BaseHandler] = [_NoRedirectHandler()]
+    if pinned_ip and parsed.hostname:
+        handlers.append(urllib.request.ProxyHandler({}))
+        handler = _PinnedHTTPHandler if parsed.scheme == "http" else _PinnedHTTPSHandler
+        handlers.append(handler(parsed.hostname, pinned_ip, parsed.port))
+    return urllib.request.build_opener(*handlers)
+
+
 def _fetch_cimd_bytes(
     url_str: str,
     *,
     timeout_sec: float,
     pinned_ip: Optional[str] = None,
 ) -> bytes:
-    parsed = urllib.parse.urlparse(url_str)
-    hostname = parsed.hostname
-    handlers: list[urllib.request.BaseHandler] = [_NoRedirectHandler()]
-    if pinned_ip and hostname:
-        if (parsed.scheme or "").lower() == "http":
-            handlers.append(_PinnedHTTPHandler(hostname, pinned_ip))
-        else:
-            handlers.append(_PinnedHTTPSHandler(hostname, pinned_ip))
-
-    opener = urllib.request.build_opener(*handlers)
+    opener = _build_fetch_opener(url_str, pinned_ip)
     request = urllib.request.Request(url_str, headers={"Accept": "application/json"}, method="GET")
 
     try:
