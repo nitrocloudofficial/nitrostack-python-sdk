@@ -21,10 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+token-encryption = ["cryptography>=41"]
 code-mode = [
     "quickjs>=1.19.4",
 ]
 dev = [
+    "cryptography>=41",
     "setuptools>=70.1",
     "quickjs>=1.19.4",
     "pytest-cov>=4.1.0",
