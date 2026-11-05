@@ -90,6 +90,18 @@ def test_init_skip_install_does_not_hang_on_open_unused_stdin():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_init_without_args_uses_defaults_on_open_unused_stdin():
+    tmp = tempfile.mkdtemp(prefix="nitro-cli-noargs-")
+    try:
+        code, stdout, stderr = _run_init_open_stdin(tmp, ["init", "--skip-install"])
+        assert code == 0, f"exit {code}\n{stdout}\n{stderr}"
+        project = Path(tmp) / "my-mcp-server"
+        assert (project / "main.py").is_file()
+    finally:
+        import shutil
+
+        shutil.rmtree(tmp, ignore_errors=True)
+
 def test_init_existing_dir_exits_without_overwrite_prompt():
     tmp = tempfile.mkdtemp(prefix="nitro-cli-exists-")
     try:
