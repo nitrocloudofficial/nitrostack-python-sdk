@@ -1084,9 +1084,21 @@ def print_banner():
 ╚══════════════════════════════════════════════════════════╝\033[0m"""
     print(banner)
 
+def _stdin_is_interactive() -> bool:
+    """False for Studio/CI, which inherit an stdin that may never write."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        return False
+
+
 def _prompt(message: str, default: str = "") -> str:
     default_hint = f" [{default}]" if default else ""
     sys.stdout.write(f"\033[32m? \033[1;37m{message}:\033[0m{default_hint} ")
+    if not _stdin_is_interactive():
+        sys.stdout.write(f"{default}\n")
+        sys.stdout.flush()
+        return default
     sys.stdout.flush()
     try:
         value = sys.stdin.readline().strip()
@@ -1202,6 +1214,10 @@ def _upsert_env_var(lines, key, value):
 def _prompt_yes_no(message: str, default_yes: bool = True) -> bool:
     hint = "Y/n" if default_yes else "y/N"
     sys.stdout.write(f"\033[32m? \033[1;37m{message}:\033[0m ({hint}) ")
+    if not _stdin_is_interactive():
+        sys.stdout.write(("yes" if default_yes else "no") + "\n")
+        sys.stdout.flush()
+        return default_yes
     sys.stdout.flush()
     try:
         ans = sys.stdin.readline().strip().lower()
@@ -1262,6 +1278,9 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
 
     # 2. Overwrite check
     if os.path.exists(name):
+        if not _stdin_is_interactive():
+            print(f"Error: Directory '{name}' already exists.")
+            sys.exit(1)
         sys.stdout.write(f"\033[32m? \033[1;37mDirectory '{name}' already exists. Overwrite?\033[0m (Yes/No) [No]: ")
         sys.stdout.flush()
         ans = sys.stdin.readline().strip().lower()
@@ -1276,7 +1295,7 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     else:
         template = _resolve_template(template)
 
-    # 4. Description and Author
+    # 4. Description and Author (defaults when stdin is not a TTY)
     description = _prompt("Description", "My awesome MCP server")
     author = _prompt("Author", "developer")
 

@@ -36,7 +36,9 @@ def run(args, cwd, *, python=None, installed=False):
 
 @pytest.mark.parametrize("choice,expected", [("4", "python-enterprise-search"), ("5", "python-code-mode"), ("python-enterprise-search", "python-enterprise-search"), ("python-code-mode", "python-code-mode")])
 def test_new_template_prompt_choices(choice, expected, monkeypatch):
-    monkeypatch.setattr(sys, "stdin", io.StringIO(choice + "\n"))
+    stdin = io.StringIO(choice + "\n")
+    stdin.isatty = lambda: True  # prompts read only from a TTY
+    monkeypatch.setattr(sys, "stdin", stdin)
     assert _prompt_template() == expected
     assert OFFICIAL_TEMPLATES[expected] in {"enterprise-search", "code-mode"}
 

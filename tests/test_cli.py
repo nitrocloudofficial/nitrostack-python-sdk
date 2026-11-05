@@ -18,6 +18,14 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+
+class _TtyInput(io.StringIO):
+    """Scripted answers for prompts, which only read stdin when it is a TTY."""
+
+    def isatty(self):
+        return True
+
+
 from nitrostack.cli.main import (
     DEFAULT_MCP_PORT,
     DEFAULT_PROJECT_NAME,
@@ -124,7 +132,7 @@ def test_init_with_name_and_explicit_template():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("A test server\nTester\n")
+        sys.stdin = _TtyInput("A test server\nTester\n")
         init_project("cli-demo", template="python-starter", skip_install=True)
         project = os.path.join(tmp, "cli-demo")
         assert os.path.isfile(os.path.join(project, "main.py"))
@@ -151,7 +159,7 @@ def test_init_prompts_for_name_when_omitted():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("prompted-server\n\n\n")
+        sys.stdin = _TtyInput("prompted-server\n\n\n")
         init_project(None, template="python-starter", skip_install=True)
         assert os.path.isdir(os.path.join(tmp, "prompted-server"))
         print("Success! Missing name is asked on the next readline.")
@@ -167,7 +175,7 @@ def test_init_default_name_when_blank_readline():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n\n")
+        sys.stdin = _TtyInput("\n\n\n")
         init_project(None, template="python-pizzaz", skip_install=True)
         assert os.path.isdir(os.path.join(tmp, DEFAULT_PROJECT_NAME))
         env_text = open(os.path.join(tmp, DEFAULT_PROJECT_NAME, ".env"), encoding="utf-8").read()
@@ -191,7 +199,7 @@ def test_init_python_oauth_template():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         init_project("oauth-demo", template="python-oauth", skip_install=True)
         project = os.path.join(tmp, "oauth-demo")
         assert os.path.isfile(os.path.join(project, "OAUTH_SETUP.md"))
@@ -280,7 +288,7 @@ def test_init_port_and_widget_flags_override_defaults():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         init_project(
             "ports-demo",
             template="python-starter",
@@ -308,7 +316,7 @@ def test_init_install_dependencies_prompt_no():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("desc\nauthor\nn\n")
+        sys.stdin = _TtyInput("desc\nauthor\nn\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             init_project("no-npm", template="python-starter")
             pip_install.assert_not_called()
@@ -365,12 +373,25 @@ def test_run_npm_does_not_use_shell():
     print("Success! npm is invoked as an argv list without shell=True.")
 
 
+def test_prompts_return_defaults_without_tty():
+    """Studio and CI inherit a non-TTY stdin: prompts must not read from it."""
+    original = sys.stdin
+    try:
+        sys.stdin = io.StringIO("typed\n")
+        assert _prompt("Name", "fallback") == "fallback"
+        assert _prompt_template() == "python-starter"
+        assert _prompt_yes_no("Install", default_yes=False) is False
+        assert sys.stdin.read() == "typed\n"
+        print("Success! prompts use defaults and leave a non-TTY stdin unread.")
+    finally:
+        sys.stdin = original
+
 def test_prompt_uses_value_or_default():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("custom\n")
+        sys.stdin = _TtyInput("custom\n")
         assert _prompt("Name", "fallback") == "custom"
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt("Name", "fallback") == "fallback"
 
         class Boom:
@@ -394,13 +415,13 @@ def test_resolve_template_accepts_official_names():
 def test_prompt_template_choice_and_explicit_name():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("2\n")
+        sys.stdin = _TtyInput("2\n")
         assert _prompt_template() == "python-pizzaz"
-        sys.stdin = io.StringIO("python-oauth\n")
+        sys.stdin = _TtyInput("python-oauth\n")
         assert _prompt_template() == "python-oauth"
-        sys.stdin = io.StringIO("nope\n3\n")
+        sys.stdin = _TtyInput("nope\n3\n")
         assert _prompt_template() == "python-oauth"
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_template() == "python-starter"
         print("Success! _prompt_template handles numbers, names, retries, and default.")
     finally:
@@ -458,19 +479,19 @@ def test_upsert_env_var_replaces_and_appends():
 def test_prompt_yes_no_answers():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_yes_no("Install", default_yes=True) is True
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_yes_no("Install", default_yes=False) is False
-        sys.stdin = io.StringIO("y\n")
+        sys.stdin = _TtyInput("y\n")
         assert _prompt_yes_no("Install", default_yes=False) is True
-        sys.stdin = io.StringIO("yes\n")
+        sys.stdin = _TtyInput("yes\n")
         assert _prompt_yes_no("Install") is True
-        sys.stdin = io.StringIO("n\n")
+        sys.stdin = _TtyInput("n\n")
         assert _prompt_yes_no("Install") is False
-        sys.stdin = io.StringIO("no\n")
+        sys.stdin = _TtyInput("no\n")
         assert _prompt_yes_no("Install") is False
-        sys.stdin = io.StringIO("maybe\n")
+        sys.stdin = _TtyInput("maybe\n")
         assert _prompt_yes_no("Install", default_yes=True) is True
         print("Success! _prompt_yes_no handles Y/n, empty default, and unknown input.")
     finally:
@@ -543,7 +564,7 @@ def test_init_project_rejects_blank_name_and_overwrite_cancel():
         except SystemExit:
             pass
         os.mkdir("taken")
-        sys.stdin = io.StringIO("n\n")
+        sys.stdin = _TtyInput("n\n")
         try:
             init_project("taken", template="python-starter", skip_install=True)
             raise AssertionError("overwrite cancel should exit")
@@ -567,14 +588,14 @@ def test_init_project_overwrite_and_install_yes_calls_npm():
         os.chdir(tmp)
         os.mkdir("taken")
         open(os.path.join("taken", "old.txt"), "w", encoding="utf-8").write("x")
-        sys.stdin = io.StringIO("y\ndesc\nauthor\n")
+        sys.stdin = _TtyInput("y\ndesc\nauthor\n")
         with patch("nitrostack.cli.main._run_npm") as npm:
             init_project("taken", template="python-starter", skip_install=True)
             npm.assert_not_called()
         assert os.path.isfile(os.path.join("taken", "main.py"))
         assert not os.path.exists(os.path.join("taken", "old.txt"))
 
-        sys.stdin = io.StringIO("d\na\nY\n")
+        sys.stdin = _TtyInput("d\na\nY\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             with patch("nitrostack.cli.main._run_npm") as npm:
                 init_project("installed", template="python-starter")
@@ -583,7 +604,7 @@ def test_init_project_overwrite_and_install_yes_calls_npm():
                 npm.assert_not_called()
         assert os.path.isfile(os.path.join("installed", "widgets", "out", "calculator-result.html"))
 
-        sys.stdin = io.StringIO("d\na\n\n")
+        sys.stdin = _TtyInput("d\na\n\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             init_project("installed-enter", template="python-starter")
             pip_install.assert_called_once()
@@ -931,7 +952,7 @@ def test_init_rewrites_pyproject_identity_and_copies_uv_files(template):
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("Rewritten description\nTester\n")
+        sys.stdin = _TtyInput("Rewritten description\nTester\n")
         init_project("My_App", template=template, skip_install=True)
         project = os.path.join(tmp, "My_App")
         pyproject = open(os.path.join(project, "pyproject.toml"), encoding="utf-8").read()
@@ -960,7 +981,7 @@ def test_init_runs_uv_lock_in_project_dir():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
@@ -982,7 +1003,7 @@ def test_init_succeeds_when_uv_is_missing():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value=None):
@@ -1001,7 +1022,7 @@ def test_init_succeeds_when_uv_lock_fails():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
