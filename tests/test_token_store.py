@@ -209,3 +209,58 @@ def test_default_store_helpers_are_explicit(tmp_path, monkeypatch):
     assert Path(get_default_store_path()) == tmp_path / ".nitrostack" / "tokens.json"
     assert isinstance(create_default_token_store(), FileTokenStore)
     assert not (tmp_path / ".nitrostack").exists()
+
+@pytest.mark.parametrize("value,seconds", [("3600", 3600), ("0", 0), (" 1.5 ", 1.5), ("1e2", 100)])
+def test_provider_numeric_string_expiry(monkeypatch, value, seconds):
+    monkeypatch.setattr("nitrostack.auth.token_store.time.time", lambda: 1000)
+    assert token_response_to_stored({"access_token": ACCESS, "expires_in": value}).expires_at == int((1000 + seconds) * 1000)
+
+
+@pytest.mark.parametrize("value", ["", " ", "no", "-1", "NaN", "Infinity", "1e999", "1e308", True])
+def test_provider_invalid_expiry_is_sanitized(value):
+    with pytest.raises(TokenStoreError, match="Invalid OAuth token response"):
+        token_response_to_stored({"access_token": ACCESS, "expires_in": value})
+
+
+@pytest.mark.asyncio
+async def test_key_is_derived_once_per_instance(tmp_path, monkeypatch):
+    original = hashlib.pbkdf2_hmac
+    calls = []
+    def derive(*args):
+        calls.append(1)
+        return original(*args)
+    monkeypatch.setattr(hashlib, "pbkdf2_hmac", derive)
+    path = tmp_path / "tokens"
+    store = FileTokenStore(path, KEY)
+    assert len(calls) == 1 and KEY not in vars(store).values()
+    await store.save_token("a", token())
+    first = path.read_text().split(":")[0]
+    await store.get_token("a")
+    await store.save_token("b", token())
+    assert path.read_text().split(":")[0] != first
+    assert len(calls) == 1
+    assert await FileTokenStore(path, KEY).get_token("a") == token()
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_fixed_lock_pool_same_path_and_collisions(tmp_path):
+    from nitrostack.auth.token_store import _path_locks
+    stores = [FileTokenStore(tmp_path / str(i)) for i in range(600)]
+    assert len(_path_locks) == 256
+    assert len({id(store._lock) for store in stores}) <= 256
+    same = FileTokenStore(tmp_path / "." / "0")
+    assert same._lock is stores[0]._lock
+    await asyncio.gather(*(FileTokenStore(tmp_path / "shared").save_token(str(i), token()) for i in range(30)))
+    assert len(await FileTokenStore(tmp_path / "shared").list_keys()) == 30
+    by_lock = {}
+    for store in stores:
+        if id(store._lock) in by_lock:
+            other = by_lock[id(store._lock)]
+            await asyncio.gather(store.save_token("first", token()), other.save_token("second", token()))
+            assert await store.list_keys() == ["first"]
+            assert await other.list_keys() == ["second"]
+            break
+        by_lock[id(store._lock)] = store
+    else:
+        pytest.fail("Expected a collision in the fixed pool")
