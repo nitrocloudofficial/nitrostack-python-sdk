@@ -149,7 +149,7 @@ Implementation issue scopes:
    add the CI step; document the scope and update/create `CONTRIBUTING.md`.
    Out of scope: splitting files or changing line counting to logical SLOC.
 2. [**Split core application and CLI modules behind compatibility facades**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/112) (**open, umbrella**). Its two implementation scopes are tracked as standalone issues:
-   [CLI `main.py` (#119)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/119)
+   [CLI `main.py` and flight-booking example (#119)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/119)
    and [core `app.py` (#120)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/120).
    Preserve the CLI entry point and `nitrostack.core.app` compatibility imports.
 3. [**Split remaining over-limit Python files by responsibility**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/113) (**open, umbrella**). The implementation scopes are tracked as standalone issues:
@@ -157,11 +157,11 @@ Implementation issue scopes:
    [OAuth (#122)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/122),
    [CLI packaging (#123)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/123),
    and [HTTP transport (#125)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/125).
-   The standalone issues exclude tests and example-related files.
+   The standalone issues exclude tests. The flight-booking example is included
+   in #119; other example-related files remain out of scope.
 
 Before starting an overlapping split, refresh open-PR changed-file lists and
 remeasure from the latest `develop`. PRs #37 and #16 were previously identified
 as overlapping the core app, HTTP transport, and CLI main targets; confirm their
-current status before work begins. The large test modules and flight-booking
-example listed above are not included in issues #119–#123 and need separate
-scoping if they are to be split.
+current status before work begins. The large test modules listed above are not
+included in issues #119–#125 and need separate scoping if they are to be split.
