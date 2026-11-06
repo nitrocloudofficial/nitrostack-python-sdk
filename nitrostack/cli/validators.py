@@ -376,6 +376,12 @@ def validate_module_references(root: str) -> List[ValidationIssue]:
 
 _WIDGET_DECORATOR_RE = re.compile(r"""@widget\(\s*["']([^"']+)["']""")
 _WIDGET_OPTIONS_RE = re.compile(r"""WidgetOptions\(\s*route\s*=\s*["']([^"']+)["']""")
+# A helper that builds the options from one route: @widget(my_widget("route")) or
+# @widget(my_widget(route="route", ...)). A call with other positional arguments is
+# skipped, because its first string is not necessarily the route.
+_WIDGET_HELPER_RE = re.compile(
+    r"""@widget\(\s*[A-Za-z_][\w.]*\(\s*(?:["']([^"']+)["']\s*\)|route\s*=\s*["']([^"']+)["']\s*[,)])"""
+)
 _WIDGET_ROUTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -398,9 +404,11 @@ def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
         except OSError:
             continue
 
+        helper_routes = [a or b for a, b in _WIDGET_HELPER_RE.findall(text)]
         for route in (
             _WIDGET_DECORATOR_RE.findall(text)
             + _WIDGET_OPTIONS_RE.findall(text)
+            + helper_routes
         ):
             if route not in seen:
                 seen.add(route)

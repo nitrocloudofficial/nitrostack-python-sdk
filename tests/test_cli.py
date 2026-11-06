@@ -1587,3 +1587,19 @@ if __name__ == "__main__":
     test_main_dispatches_commands()
     test_official_templates_map_to_existing_dirs()
     print("\nAll CLI tests passed.")
+
+
+def test_validate_checks_pizzaz_helper_wrapped_widgets(tmp_path: Path):
+    import shutil
+
+    project = tmp_path / "pizzaz"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "nitrostack" / "templates" / "pizzaz", project)
+    code, output = _invoke_cli(["validate"], project)
+    assert code == 0
+    assert "widget route" not in output
+
+    (project / "widgets" / "out" / "pizza-list.html").unlink()
+    code, output = _invoke_cli(["validate"], project)
+    assert "widget route 'pizza-list'" in output
+    assert "file is missing" in output
+    assert "pizza-map" not in output and "pizza-shop" not in output
