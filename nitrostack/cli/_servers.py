@@ -65,9 +65,9 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
 
     try:
         start_process()
-        
+
         watched_extensions = {".py", ".env"}
-        
+
         def get_mtimes():
             mtimes = {}
             for root, dirs, files in os.walk("."):
@@ -87,7 +87,7 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
         try:
             from watchfiles import watch
             print("Using watchfiles for high-performance file monitoring.")
-            
+
             while True:
                 for changes in watch("."):
                     should_restart = False
@@ -101,11 +101,11 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
                     if should_restart:
                         print("File changes detected! Restarting server...")
                         start_process()
-                
+
                 time.sleep(0.5)
                 if process and process.poll() is not None:
                     print("Server process exited. Waiting for file changes to restart...")
-                    
+
         except ImportError:
             print("watchfiles library not found. Falling back to standard polling...")
             last_mtimes = get_mtimes()

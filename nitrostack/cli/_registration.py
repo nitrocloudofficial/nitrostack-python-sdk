@@ -7,7 +7,7 @@ import sys
 def get_claude_config_paths():
     paths = []
     home = os.path.expanduser("~")
-    
+
     # Windows
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
@@ -30,24 +30,24 @@ def get_claude_config_paths():
     # Linux
     else:
         paths.append(os.path.join(home, ".config", "Claude", "claude_desktop_config.json"))
-        
+
     return [p for p in paths if os.path.exists(os.path.dirname(p))]
 
 def register_server(name: str, file_path: str, *, _build_server_entry, get_claude_config_paths):
     import json
-    
+
     if not os.path.exists(file_path):
         print(f"Error: Script file '{file_path}' does not exist.")
         sys.exit(1)
-        
+
     server_entry = _build_server_entry(file_path)
-    
+
     config_paths = get_claude_config_paths()
     if not config_paths:
         print("Error: Could not find any Claude Desktop installation directories.")
         print("Please ensure Claude Desktop is installed on your machine.")
         sys.exit(1)
-        
+
     registered_any = False
     for path in config_paths:
         try:
@@ -60,22 +60,22 @@ def register_server(name: str, file_path: str, *, _build_server_entry, get_claud
                             config = json.loads(content)
                         except json.JSONDecodeError:
                             print(f"Warning: Configuration file at '{path}' is not valid JSON. Resetting it.")
-            
+
             if "mcpServers" not in config:
                 config["mcpServers"] = {}
-                
+
             config["mcpServers"][name] = server_entry
-            
+
             # Create directory if needed
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
-                
+
             print(f"Successfully registered server '{name}' in: {path}")
             registered_any = True
         except Exception as e:
             print(f"Error writing to config at '{path}': {e}")
-            
+
     if registered_any:
         print("\nAll done! Please fully restart Claude Desktop to load your new server.")
     else:

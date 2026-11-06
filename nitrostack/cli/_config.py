@@ -13,4 +13,3 @@ OFFICIAL_TEMPLATES = {
     "python-enterprise-search": "enterprise-search",
     "python-code-mode": "code-mode",
 }
-

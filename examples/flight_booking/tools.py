@@ -80,7 +80,7 @@ class BookingTools:
             passengers_array = json.loads(input.passengers)
         except Exception:
             raise ValueError("Invalid passengers JSON format")
-            
+
         passengers = []
         for p in passengers_array:
             passengers.append({
@@ -92,7 +92,7 @@ class BookingTools:
                 "email": p.get("email"),
                 "phone_number": p.get("phoneNumber")
             })
-            
+
         order_params = {
             "selectedOffers": [input.offerId],
             "passengers": passengers

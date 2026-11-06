@@ -18,7 +18,7 @@ class DuffelService:
     def _request(self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if self.is_mock:
             raise ValueError("Duffel API key is not configured. Running in mock mode.")
-        
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Duffel-Version": "v1",
@@ -26,7 +26,7 @@ class DuffelService:
         }
         url = f"https://api.duffel.com{path}"
         req_data = json.dumps({"data": data}).encode("utf-8") if data else None
-        
+
         req = urllib.request.Request(url, data=req_data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
@@ -69,11 +69,11 @@ class DuffelService:
                     }
                 ]
             }
-        
+
         slices = [{"origin": params["origin"], "destination": params["destination"], "departure_date": params["departureDate"]}]
         if params.get("returnDate"):
             slices.append({"origin": params["destination"], "destination": params["origin"], "departure_date": params["returnDate"]})
-            
+
         duffel_params = {
             "slices": slices,
             "passengers": params.get("passengers", [{"type": "adult"}]),
@@ -183,7 +183,7 @@ class DuffelService:
                     }
                 ]
             }
-        
+
         order_payload = {
             "selected_offers": params["selectedOffers"],
             "passengers": params["passengers"],
