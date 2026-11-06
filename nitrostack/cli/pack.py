@@ -23,6 +23,7 @@ from nitrostack.cli._shared import (
     read_text,
     requirement_name,
 )
+from nitrostack.cli.telemetry import track_deploy_completed, track_deploy_failed
 
 _EXCLUDE_DIR_NAMES = EXCLUDE_DIR_NAMES
 
@@ -480,28 +481,34 @@ def pack_project(
     staging = tempfile.mkdtemp(prefix="nitrostack-pack-")
     wheel_tmp = tempfile.mkdtemp(prefix="nitrostack-wheel-")
     try:
-        _copy_selected(root, staging, files)
-        _ensure_env_example(staging)
-        deps = requirements_from_project(root)
-        write_requirements_txt(staging, deps)
-        _ensure_pyproject(staging, name, version, deps)
+        try:
+            _copy_selected(root, staging, files)
+            _ensure_env_example(staging)
+            deps = requirements_from_project(root)
+            write_requirements_txt(staging, deps)
+            _ensure_pyproject(staging, name, version, deps)
 
-        wheel_path = _build_wheel(staging, wheel_tmp, name, version, deps)
-        extra = []
-        env_example = os.path.join(staging, ".env.example")
-        reqs = os.path.join(staging, "requirements.txt")
-        extra.append((".env.example", env_example))
-        extra.append(("requirements.txt", reqs))
-        _inject_into_wheel(wheel_path, extra)
+            wheel_path = _build_wheel(staging, wheel_tmp, name, version, deps)
+            extra = []
+            env_example = os.path.join(staging, ".env.example")
+            reqs = os.path.join(staging, "requirements.txt")
+            extra.append((".env.example", env_example))
+            extra.append(("requirements.txt", reqs))
+            _inject_into_wheel(wheel_path, extra)
 
-        if not _is_valid_wheel(wheel_path):
-            raise RuntimeError(f"Built file is not a valid wheel: {wheel_path}")
+            if not _is_valid_wheel(wheel_path):
+                raise RuntimeError(f"Built file is not a valid wheel: {wheel_path}")
 
-        os.makedirs(dest_dir, exist_ok=True)
-        final_path = os.path.join(dest_dir, os.path.basename(wheel_path))
-        shutil.copy2(wheel_path, final_path)
-        print(f"\nCreated wheel: {final_path}")
-        return {"files": files, "wheel": final_path, "dry_run": False}
+            os.makedirs(dest_dir, exist_ok=True)
+            final_path = os.path.join(dest_dir, os.path.basename(wheel_path))
+            shutil.copy2(wheel_path, final_path)
+            print(f"\nCreated wheel: {final_path}")
+            track_deploy_completed()
+            return {"files": files, "wheel": final_path, "dry_run": False}
+        except Exception as exc:
+            name_t = type(exc).__name__
+            track_deploy_failed(error_code=name_t[:80])
+            raise
     finally:
         _rmtree(staging)
         _rmtree(wheel_tmp)
