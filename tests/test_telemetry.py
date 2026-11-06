@@ -17,6 +17,7 @@ from nitrostack.cli import telemetry as telemetry_mod
 from nitrostack.cli.telemetry import (
     identify_from_cloud_login,
     maybe_print_first_run_notice,
+    resolved_posthog_api_key,
     shutdown_telemetry,
     track_command_invoked,
     track_deploy_completed,
@@ -42,7 +43,7 @@ def reset_telemetry_state():
 
 @pytest.fixture
 def telemetry_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("NITROSTACK_POSTHOG_API_KEY", "phc_test_stub_key")
+    monkeypatch.setenv("NITROSTACK_POSTHOG_KEY", "phc_test_stub_key")
     monkeypatch.setenv("NITROSTACK_POSTHOG_HOST", "https://stub.example")
     monkeypatch.setenv("NITROSTACK_ENVIRONMENT", "development")
     monkeypatch.delenv("DO_NOT_TRACK", raising=False)
@@ -60,7 +61,7 @@ def telemetry_env(monkeypatch, tmp_path):
 
 
 def test_opt_out_do_not_track():
-    os.environ["NITROSTACK_POSTHOG_API_KEY"] = "phc_x"
+    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
     os.environ["DO_NOT_TRACK"] = "1"
     importlib.reload(telemetry_mod)
     assert telemetry_mod.is_telemetry_disabled() is True
@@ -68,7 +69,7 @@ def test_opt_out_do_not_track():
 
 def test_opt_out_telemetry_flag_sends_nothing(monkeypatch):
     """With opt-out, _get_client is never called."""
-    os.environ["NITROSTACK_POSTHOG_API_KEY"] = "phc_x"
+    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
     os.environ.pop("DO_NOT_TRACK", None)
     os.environ["NITROSTACK_TELEMETRY"] = "0"
     importlib.reload(telemetry_mod)
@@ -80,12 +81,18 @@ def test_opt_out_telemetry_flag_sends_nothing(monkeypatch):
 
 
 def test_ci_default_off_without_explicit_enable():
-    os.environ["NITROSTACK_POSTHOG_API_KEY"] = "phc_x"
+    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
     os.environ.pop("DO_NOT_TRACK", None)
     os.environ.pop("NITROSTACK_TELEMETRY", None)
     os.environ["CI"] = "true"
     importlib.reload(telemetry_mod)
     assert telemetry_mod.is_telemetry_disabled() is True
+
+
+def test_builtin_posthog_key_used_when_env_unset(monkeypatch):
+    """Without NITROSTACK_POSTHOG_KEY, config resolves to the shipped public project key (no network)."""
+    monkeypatch.delenv("NITROSTACK_POSTHOG_KEY", raising=False)
+    assert resolved_posthog_api_key() == telemetry_mod.DEFAULT_POSTHOG_PROJECT_KEY
 
 
 def test_track_event_payload_exact(telemetry_env, monkeypatch):

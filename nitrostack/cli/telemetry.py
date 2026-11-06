@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 PRODUCT = "python_sdk"
 SURFACE = "terminal"
 
+# Public PostHog project key (same CLI/SDK ingest as the TypeScript CLI); override with NITROSTACK_POSTHOG_KEY.
+DEFAULT_POSTHOG_PROJECT_KEY = "phc_" + "OufG1OuiamSbCBMVHfO70IyFWKBzsiaDpOWqcNwtz6G"
+DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
+
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
 
@@ -43,6 +47,19 @@ def _env_falsy(name: str) -> bool:
     return v in _FALSE
 
 
+def resolved_posthog_api_key() -> str:
+    """PostHog project API key: ``NITROSTACK_POSTHOG_KEY`` if set, else built-in default."""
+    env = (os.environ.get("NITROSTACK_POSTHOG_KEY") or "").strip()
+    if env:
+        return env
+    return DEFAULT_POSTHOG_PROJECT_KEY
+
+
+def resolved_posthog_host() -> str:
+    """PostHog ingest host (default US Cloud)."""
+    return (os.environ.get("NITROSTACK_POSTHOG_HOST") or DEFAULT_POSTHOG_HOST).strip()
+
+
 def is_telemetry_disabled() -> bool:
     """True when capture must not run (opt-out, tests, CI, or missing configuration)."""
     if _env_truthy("DO_NOT_TRACK") or _env_truthy("PYTEST_CURRENT_TEST"):
@@ -52,9 +69,6 @@ def is_telemetry_disabled() -> bool:
     if (os.environ.get("NITROSTACK_TELEMETRY") or "").strip() == "":
         if _env_truthy("CI") or os.environ.get("GITHUB_ACTIONS"):
             return True
-    key = (os.environ.get("NITROSTACK_POSTHOG_API_KEY") or "").strip()
-    if not key:
-        return True
     return False
 
 
@@ -118,8 +132,8 @@ def _get_client() -> Any:
         if _client is None:
             from posthog import Posthog
 
-            api_key = (os.environ.get("NITROSTACK_POSTHOG_API_KEY") or "").strip()
-            host = (os.environ.get("NITROSTACK_POSTHOG_HOST") or "https://us.i.posthog.com").strip()
+            api_key = resolved_posthog_api_key()
+            host = resolved_posthog_host()
             _client = Posthog(
                 api_key,
                 host=host,

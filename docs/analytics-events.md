@@ -1,6 +1,6 @@
 # NitroStack Python SDK CLI — analytics events
 
-Telemetry is **opt-in by configuration**: set `NITROSTACK_POSTHOG_API_KEY` to enable. It is **off** when the key is unset, when `DO_NOT_TRACK=1`, when `NITROSTACK_TELEMETRY=0` (or `false`/`off`/`no`), during pytest (`PYTEST_CURRENT_TEST`), and in CI unless you explicitly enable it.
+Telemetry uses a **built-in public PostHog project key** (same ingest as the TypeScript CLI). Set `NITROSTACK_POSTHOG_KEY` only if you need to override that key. Telemetry is **off** when `DO_NOT_TRACK=1`, when `NITROSTACK_TELEMETRY=0` (or `false`/`off`/`no`), during pytest (`PYTEST_CURRENT_TEST`), and in CI when `NITROSTACK_TELEMETRY` is unset (set it to a truthy value to allow capture in CI).
 
 ## Super properties
 
