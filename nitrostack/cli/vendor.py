@@ -108,6 +108,7 @@ def _write_minimal_pyproject(dest: Path) -> None:
         '    "anyio>=4.0.0",\n'
         '    "packaging>=23.0.0",\n'
         '    "tomli>=2.0.0; python_version < \'3.11\'",\n'
+        '    "posthog>=3,<5",\n'
         "]\n\n"
         "[project.scripts]\n"
         'nitrostack-py = "nitrostack.cli.main:main"\n\n'
