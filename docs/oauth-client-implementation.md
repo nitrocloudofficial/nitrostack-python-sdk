@@ -66,9 +66,10 @@ multiple writer processes; Windows directory privacy depends on ACLs.
 
 ## Client configuration and transport
 
-`auth/client.py` defines typed, redacted config, authorization-flow and
-registration results. Constructor mappings use the same snake_case names as the
-config model. The client creates a memory store unless the caller supplies one.
+`auth/_client_types.py` defines typed, redacted config, authorization-flow and
+registration results. `auth/client.py` owns the client lifecycle and transport,
+and re-exports these types to preserve existing imports. Constructor mappings
+use the same snake_case names as the config model. The client creates a memory store unless the caller supplies one.
 Request timeout and response limits are validated once at construction. Client
 secrets can remain wrapped in `SecretValue` until authentication calls
 `unwrap_secret()`; empty or unusable wrappers produce sanitized errors.
