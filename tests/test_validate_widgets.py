@@ -1,7 +1,12 @@
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
-from nitrostack.cli.validators import validate_project, validate_widgets
+import pytest
+
+from nitrostack.cli.validators import _collect_widget_routes, validate_project, validate_widgets
 
 TOOL = (
     "from nitrostack import tool, widget\n\n"
@@ -83,3 +88,120 @@ def test_validate_project_reports_widget_warnings_only(tmp_path: Path, monkeypat
     issues = [i for i in validate_project(str(tmp_path)) if "widget route" in i.message]
     assert len(issues) == 1
     assert issues[0].severity == "warning"
+
+HELPER = (
+    "from nitrostack import WidgetOptions, widget\n\n"
+    "def pizzaz_widget(route: str) -> WidgetOptions:\n"
+    "    return WidgetOptions(route=route, prefers_border=True)\n\n"
+    "class helpers:\n"
+    "    @staticmethod\n"
+    "    def make(route):\n"
+    "        return WidgetOptions(route=route)\n\n"
+    "class T:\n"
+    "    @widget(pizzaz_widget('pizza-map'))\n"
+    "    def a(self): ...\n\n"
+    "    @widget(helpers.make(\"pizza-list\"))\n"
+    "    def b(self): ...\n\n"
+    "    @widget(pizzaz_widget(route='pizza-shop', extra=1))\n"
+    "    def c(self): ...\n"
+)
+
+
+def test_helper_wrapped_routes_are_collected(tmp_path: Path):
+    issues = validate_widgets(str(_project(tmp_path, HELPER)))
+    assert sorted(i.message.split("'")[1] for i in issues) == ["pizza-list", "pizza-map", "pizza-shop"]
+    assert all("file is missing" in i.message for i in issues)
+
+
+def test_helper_wrapped_route_with_html_passes(tmp_path: Path):
+    _project(tmp_path, HELPER)
+    for route in ("pizza-map", "pizza-list", "pizza-shop"):
+        _write_html(tmp_path, route, "<html></html>")
+    assert validate_widgets(str(tmp_path)) == []
+
+
+def test_helper_call_with_other_positional_arguments_is_not_guessed(tmp_path: Path):
+    src = (
+        "from nitrostack import WidgetOptions, widget\n"
+        "def helper(route, flag): return WidgetOptions(route=route)\n"
+        "@widget(helper('not-a-route', True))\ndef f(): ...\n"
+    )
+    assert validate_widgets(str(_project(tmp_path, src))) == []
+
+
+def test_unrelated_helper_call_is_not_taken_as_a_route(tmp_path: Path):
+    # Not defined in the project and never builds a WidgetOptions: no false warning.
+    src = "@widget(something('x'))\ndef f(): ...\n"
+    assert validate_widgets(str(_project(tmp_path, src))) == []
+    src = "def something(name): return {'n': name}\n@widget(something('x'))\ndef f(): ...\n"
+    assert validate_widgets(str(_project(tmp_path, src))) == []
+
+
+def test_helper_defined_in_another_file_is_found(tmp_path: Path):
+    (tmp_path / "helpers.py").write_text(
+        "from nitrostack import WidgetOptions\ndef panel(route): return WidgetOptions(route=route)\n",
+        encoding="utf-8",
+    )
+    src = "from helpers import panel\n@widget(panel('chart'))\ndef f(): ...\n"
+    issues = validate_widgets(str(_project(tmp_path, src)))
+    assert len(issues) == 1 and "'chart'" in issues[0].message
+
+
+def test_widget_options_positional_route_is_collected(tmp_path: Path):
+    src = "from nitrostack import WidgetOptions, widget\n@widget(WidgetOptions('chart'))\ndef f(): ...\n"
+    issues = validate_widgets(str(_project(tmp_path, src)))
+    assert len(issues) == 1 and "'chart'" in issues[0].message
+
+
+def test_invalid_helper_route_is_reported(tmp_path: Path):
+    src = "def helper(r): return WidgetOptions(route=r)\n@widget(helper('../evil'))\ndef f(): ...\n"
+    issues = validate_widgets(str(_project(tmp_path, src)))
+    assert len(issues) == 1
+    assert "not a single alphanumeric path segment" in issues[0].message
+
+
+TEMPLATES = Path(__file__).resolve().parents[1] / "nitrostack" / "templates"
+
+
+@pytest.mark.parametrize("template, expected", [
+    ("pizzaz", {"pizza-map", "pizza-list", "pizza-shop"}),
+    ("starter", {"calculator-result"}),
+    ("flight-booking", {
+        "flight-search-results", "flight-details", "airport-search",
+        "order-summary", "seat-selection", "order-cancellation",
+    }),
+])
+def test_shipped_templates_report_every_widget_route(template, expected):
+    routes = {route for route, _ in _collect_widget_routes(str(TEMPLATES / template))}
+    assert routes == expected
+
+
+def test_pizzaz_template_warns_when_a_widget_html_is_removed(tmp_path: Path):
+    project = tmp_path / "pizzaz"
+    shutil.copytree(TEMPLATES / "pizzaz", project)
+    assert validate_widgets(str(project)) == []
+    (project / "widgets" / "out" / "pizza-list.html").unlink()
+    issues = validate_widgets(str(project))
+    assert len(issues) == 1
+    assert "'pizza-list'" in issues[0].message and "file is missing" in issues[0].message
+
+
+def test_cli_validate_checks_pizzaz_helper_wrapped_widgets(tmp_path: Path):
+    project = tmp_path / "pizzaz"
+    shutil.copytree(TEMPLATES / "pizzaz", project)
+
+    def validate():
+        return subprocess.run(
+            [sys.executable, "-m", "nitrostack.cli.main", "validate"],
+            cwd=project, env={**os.environ, "PYTHONPATH": str(TEMPLATES.parents[1])},
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+
+    clean = validate()
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    assert "widget route" not in clean.stdout
+
+    (project / "widgets" / "out" / "pizza-list.html").unlink()
+    broken = validate().stdout
+    assert "widget route 'pizza-list'" in broken and "file is missing" in broken
+    assert "pizza-map" not in broken and "pizza-shop" not in broken
