@@ -11,6 +11,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence, Set, Tuple
 
+from nitrostack.cli.widget_routes import collect_widget_routes
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
@@ -374,40 +375,10 @@ def validate_module_references(root: str) -> List[ValidationIssue]:
     return issues
 
 
-_WIDGET_DECORATOR_RE = re.compile(r"""@widget\(\s*["']([^"']+)["']""")
-_WIDGET_OPTIONS_RE = re.compile(r"""WidgetOptions\(\s*route\s*=\s*["']([^"']+)["']""")
-# A helper that builds the options from one route: @widget(my_widget("route")) or
-# @widget(my_widget(route="route", ...)). Only helpers defined in the project that
-# build a WidgetOptions count (see _widget_helper_names), so an unrelated call such as
-# @widget(something("x")) is not taken as a route. A call with other positional
-# arguments is skipped, because its first string is not necessarily the route.
-_WIDGET_HELPER_RE = re.compile(
-    r"""@widget\(\s*([A-Za-z_][\w.]*)\(\s*(?:["']([^"']+)["']\s*\)|route\s*=\s*["']([^"']+)["']\s*[,)])"""
-)
 _WIDGET_ROUTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
-def _widget_helper_names(texts: Iterable[str]) -> Set[str]:
-    """Names of functions that build a ``WidgetOptions``, plus ``WidgetOptions`` itself."""
-    names = {"WidgetOptions"}
-    for text in texts:
-        try:
-            tree = ast.parse(text)
-        except (SyntaxError, ValueError):
-            continue
-        for fn in ast.walk(tree):
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-                isinstance(call, ast.Call)
-                and getattr(call.func, "id", getattr(call.func, "attr", None)) == "WidgetOptions"
-                for call in ast.walk(fn)
-            ):
-                names.add(fn.name)
-    return names
-
-
 def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
-    found: List[Tuple[str, str]] = []
-    seen: Set[str] = set()
     root_abs = os.path.abspath(root)
     sources: List[Tuple[str, str]] = []
 
@@ -424,23 +395,7 @@ def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
         except OSError:
             continue
 
-    helpers = _widget_helper_names(text for _, text in sources)
-    for rel_path, text in sources:
-        helper_routes = [
-            positional or keyword
-            for name, positional, keyword in _WIDGET_HELPER_RE.findall(text)
-            if name.rsplit(".", 1)[-1] in helpers
-        ]
-        for route in (
-            _WIDGET_DECORATOR_RE.findall(text)
-            + _WIDGET_OPTIONS_RE.findall(text)
-            + helper_routes
-        ):
-            if route not in seen:
-                seen.add(route)
-                found.append((route, rel_path))
-
-    return found
+    return collect_widget_routes(sources)
 
 
 
