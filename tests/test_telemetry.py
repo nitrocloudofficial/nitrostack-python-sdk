@@ -31,11 +31,13 @@ from nitrostack.cli.telemetry import (
 def reset_telemetry_state():
     """Isolate module globals between tests."""
     telemetry_mod._client = None  # noqa: SLF001
+    telemetry_mod._posthog_unavailable = False  # noqa: SLF001
     telemetry_mod._anonymous_distinct_id = None  # noqa: SLF001
     telemetry_mod._distinct_id_override = None  # noqa: SLF001
     telemetry_mod._shutdown_done = False  # noqa: SLF001
     yield
     telemetry_mod._client = None  # noqa: SLF001
+    telemetry_mod._posthog_unavailable = False  # noqa: SLF001
     telemetry_mod._anonymous_distinct_id = None  # noqa: SLF001
     telemetry_mod._distinct_id_override = None  # noqa: SLF001
     telemetry_mod._shutdown_done = False  # noqa: SLF001
@@ -60,37 +62,73 @@ def telemetry_env(monkeypatch, tmp_path):
     importlib.reload(telemetry_mod)
 
 
-def test_opt_out_do_not_track():
-    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
-    os.environ["DO_NOT_TRACK"] = "1"
-    importlib.reload(telemetry_mod)
-    assert telemetry_mod.is_telemetry_disabled() is True
+def _track_with_mock_client(telemetry_env, monkeypatch):
+    """Return a MagicMock wired as the telemetry PostHog client."""
+    mock = MagicMock()
+    monkeypatch.setattr(telemetry_mod, "get_distinct_id", lambda: "test-distinct-id")
+    monkeypatch.setattr(telemetry_mod, "_get_client", lambda: mock)
+    return mock
 
 
-def test_opt_out_telemetry_flag_sends_nothing(monkeypatch):
-    """With opt-out, _get_client is never called."""
-    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
-    os.environ.pop("DO_NOT_TRACK", None)
-    os.environ["NITROSTACK_TELEMETRY"] = "0"
+def test_opt_out_do_not_track(telemetry_env, monkeypatch):
+    mock = _track_with_mock_client(telemetry_env, monkeypatch)
+    track_event("cli_command_invoked", {"command": "baseline"})
+    assert mock.capture.call_count == 1
+
+    monkeypatch.setenv("DO_NOT_TRACK", "1")
     importlib.reload(telemetry_mod)
-    assert telemetry_mod.is_telemetry_disabled() is True
-    mock_get = MagicMock()
-    monkeypatch.setattr(telemetry_mod, "_get_client", mock_get)
+    mock.reset_mock()
+    monkeypatch.setattr(telemetry_mod, "_get_client", lambda: mock)
     track_event("cli_command_invoked", {"command": "x"})
-    mock_get.assert_not_called()
+    mock.capture.assert_not_called()
 
 
-def test_ci_default_off_without_explicit_enable():
-    os.environ["NITROSTACK_POSTHOG_KEY"] = "phc_x"
-    os.environ.pop("DO_NOT_TRACK", None)
-    os.environ.pop("NITROSTACK_TELEMETRY", None)
-    os.environ["CI"] = "true"
+def test_opt_out_telemetry_flag_sends_nothing(telemetry_env, monkeypatch):
+    mock = _track_with_mock_client(telemetry_env, monkeypatch)
+    track_event("cli_command_invoked", {"command": "baseline"})
+    assert mock.capture.call_count == 1
+
+    monkeypatch.setenv("NITROSTACK_TELEMETRY", "0")
     importlib.reload(telemetry_mod)
-    assert telemetry_mod.is_telemetry_disabled() is True
+    mock.reset_mock()
+    monkeypatch.setattr(telemetry_mod, "_get_client", lambda: mock)
+    track_event("cli_command_invoked", {"command": "x"})
+    mock.capture.assert_not_called()
+
+
+def test_ci_default_off_without_explicit_enable(telemetry_env, monkeypatch):
+    mock = _track_with_mock_client(telemetry_env, monkeypatch)
+    track_event("cli_command_invoked", {"command": "baseline"})
+    assert mock.capture.call_count == 1
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.delenv("NITROSTACK_TELEMETRY", raising=False)
+    importlib.reload(telemetry_mod)
+    mock.reset_mock()
+    monkeypatch.setattr(telemetry_mod, "_get_client", lambda: mock)
+    track_event("cli_command_invoked", {"command": "x"})
+    mock.capture.assert_not_called()
+
+
+def test_posthog_missing_is_silent_noop(telemetry_env, monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
+        if name == "posthog":
+            raise ImportError("posthog not installed")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    importlib.reload(telemetry_mod)
+    track_event("cli_command_invoked", {"command": "x"})
+    assert telemetry_mod._posthog_unavailable is True  # noqa: SLF001
+    track_event("cli_command_invoked", {"command": "y"})
 
 
 def test_builtin_posthog_key_used_when_env_unset(monkeypatch):
-    """Without NITROSTACK_POSTHOG_KEY, config resolves to the shipped public project key (no network)."""
+    """Built-in public project key when NITROSTACK_POSTHOG_KEY is unset (no network)."""
     monkeypatch.delenv("NITROSTACK_POSTHOG_KEY", raising=False)
     assert resolved_posthog_api_key() == telemetry_mod.DEFAULT_POSTHOG_PROJECT_KEY
 
