@@ -2,6 +2,10 @@
 
 Telemetry uses a **built-in public PostHog project key** (same ingest as the TypeScript CLI). Set `NITROSTACK_POSTHOG_KEY` only if you need to override that key. Telemetry is **off** when `DO_NOT_TRACK=1`, when `NITROSTACK_TELEMETRY=0` (or `false`/`off`/`no`), during pytest (`PYTEST_CURRENT_TEST`), and in CI when `NITROSTACK_TELEMETRY` is unset (set it to a truthy value to allow capture in CI).
 
+On process exit the CLI runs a **best-effort flush** (PostHog `shutdown` on a background thread, joined for up to **2 seconds**). Events still in the queue after that window may not be delivered; command completion is never blocked longer than that timeout.
+
+`pack --dry-run` lists files that would be packed but does **not** emit `cli_deploy_completed` or `cli_deploy_failed`.
+
 ## Super properties
 
 Sent on every captured event:

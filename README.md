@@ -84,7 +84,7 @@ Once scaffolded, follow the next steps printed by the CLI to run your server, co
 
 The CLI is installed with the SDK (`nitrostack-py`, or `python -m nitrostack.cli.main`). Run `nitrostack-py --help` to list commands.
 
-**Usage telemetry** — The CLI sends anonymous usage events to PostHog using a built-in public project key (same CLI/SDK project as the TypeScript CLI). Set `NITROSTACK_POSTHOG_KEY` to override that key, `NITROSTACK_POSTHOG_HOST` to override the ingest URL (default `https://us.i.posthog.com`). Disable with `DO_NOT_TRACK=1` or `NITROSTACK_TELEMETRY=0`. See [`docs/analytics-events.md`](docs/analytics-events.md) for the event list and properties.
+**Usage telemetry** — The CLI sends anonymous usage events to PostHog using a built-in public project key (same CLI/SDK project as the TypeScript CLI). Set `NITROSTACK_POSTHOG_KEY` to override that key, `NITROSTACK_POSTHOG_HOST` to override the ingest URL (default `https://us.i.posthog.com`). Disable with `DO_NOT_TRACK=1` or `NITROSTACK_TELEMETRY=0`. Exit runs a best-effort flush (up to 2s); see [`docs/analytics-events.md`](docs/analytics-events.md) for events, opt-out, and delivery notes.
 
 ### Project lifecycle
 
