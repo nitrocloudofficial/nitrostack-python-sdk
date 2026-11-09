@@ -1,55 +1,52 @@
 import os
 import sys
-import time
-import json
-import urllib.request
-import urllib.parse
+import urllib.parse  # noqa: F401  (kept: callers patch nitrostack.auth.oauth.urllib.request)
+import urllib.request  # noqa: F401
 from typing import List, Optional, Dict, Any, Tuple, Union
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer
 import threading
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
-from nitrostack.auth.secret import SecretValue, unwrap_secret
-from nitrostack.auth.oauth_module import (
+from nitrostack.auth.secret import SecretValue
+from nitrostack.auth.oauth_types import (
+    TokenInfo,
+    _has_secret,
+    generate_www_authenticate_header,
+    is_oauth_required,
+)
+from nitrostack.auth.oauth_cache import cache_get, cache_set
+from nitrostack.auth.oauth_tokens import (
+    get_jwks_client,
+    introspect_via_endpoint,
+    introspect_via_jwks,
+    validate_audience,
+)
+from nitrostack.auth.oauth_discovery import start_discovery_server
+# Re-exported only so existing ``from nitrostack.auth.oauth import ...`` lines keep working.
+from nitrostack.auth.secret import unwrap_secret  # noqa: F401
+from nitrostack.auth.cimd import CimdFetchError, CimdValidationError  # noqa: F401
+from nitrostack.auth.oauth_module import (  # noqa: F401
     apply_cimd_to_registration_body,
     build_authorization_server_metadata,
     build_protected_resource_metadata,
     build_registration_response,
     is_client_registration_enabled,
 )
-from nitrostack.auth.cimd import CimdFetchError, CimdValidationError
 from nitrostack.core.errors import AudienceMismatchError, ConfigurationError, TokenInactiveError
 
-
-def is_oauth_required() -> bool:
-    """TS ``OAuthModule.isAuthRequired()`` — Studio/local default is off.
-
-    Set ``OAUTH_REQUIRED=true`` to enforce Bearer tokens. Unset/false lets
-    NitroStudio and Inspector call tools against mock Duffel data.
-    """
-    return (os.environ.get("OAUTH_REQUIRED") or "").strip().lower() == "true"
-
+# Everything that used to live in this module is still importable from it. The
+# implementation is split by responsibility: oauth_types (helpers), oauth_cache,
+# oauth_tokens (validation), oauth_discovery (metadata server). This module keeps
+# OAuthService, OAuthModule and the fail-open warning state.
+__all__ = [
+    "OAuthModule",
+    "OAuthService",
+    "generate_www_authenticate_header",
+    "is_oauth_required",
+    "warn_if_oauth_fail_open",
+]
 
 _oauth_fail_open_warned = False
-
-
-def generate_www_authenticate_header(
-    *,
-    realm: str = "mcp",
-    resource_metadata: Optional[str] = None,
-    error: Optional[str] = None,
-    error_description: Optional[str] = None,
-) -> str:
-    """RFC 6750 / RFC 9728 WWW-Authenticate value for protected MCP resources."""
-    parts = [f'Bearer realm="{realm}"']
-    if resource_metadata:
-        parts.append(f'resource_metadata="{resource_metadata}"')
-    if error:
-        parts.append(f'error="{error}"')
-    if error_description:
-        escaped = error_description.replace('"', "'")
-        parts.append(f'error_description="{escaped}"')
-    return ", ".join(parts)
 
 
 def warn_if_oauth_fail_open() -> None:
@@ -64,12 +61,6 @@ def warn_if_oauth_fail_open() -> None:
         "Set OAUTH_REQUIRED=true to enforce Bearer tokens.\n"
     )
     sys.stderr.flush()
-
-def _has_secret(value: Any) -> bool:
-    """True when a secret was given. A SecretValue counts even if it holds no value (it is
-    falsy after pickling), so it is never silently replaced by an environment variable;
-    unwrapping it raises instead."""
-    return isinstance(value, SecretValue) or bool(value)
 
 
 class OAuthService:
@@ -154,143 +145,7 @@ class OAuthService:
 
     def start_discovery_server(self) -> None:
         """Starts a background HTTP discovery server for OAuth Protected Resource metadata."""
-        if self._server is not None:
-            return
-
-        service_instance = self
-        registration_path = "/oauth/v2/register"
-
-        def _write_json(handler: BaseHTTPRequestHandler, status: int, payload: Dict[str, Any]) -> None:
-            raw = json.dumps(payload).encode("utf-8")
-            handler.send_response(status)
-            handler.send_header("Content-Type", "application/json")
-            handler.send_header("Content-Length", str(len(raw)))
-            handler.send_header("Connection", "close")
-            handler.end_headers()
-            handler.wfile.write(raw)
-
-        def _write_empty(handler: BaseHTTPRequestHandler, status: int) -> None:
-            handler.send_response(status)
-            handler.send_header("Content-Length", "0")
-            handler.send_header("Connection", "close")
-            handler.end_headers()
-
-        class DiscoveryHandler(BaseHTTPRequestHandler):
-            def log_message(self, format, *args):
-                # Suppress server logging to stdout/stderr to keep stdio clean
-                pass
-
-            def do_OPTIONS(self):
-                # TS discovery handlers honor CORS preflight without leaking credentials.
-                self.send_response(200)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-                self.send_header("Content-Length", "0")
-                self.send_header("Connection", "close")
-                self.end_headers()
-
-            def _proxy_headers(self) -> Dict[str, str]:
-                return {key: value for key, value in self.headers.items()}
-
-            def _proxy_peer(self) -> Optional[str]:
-                return self.client_address[0] if self.client_address else None
-
-            def _trusted_public_origin(self) -> Optional[str]:
-                from nitrostack.transports.proxy import public_origin, trusted_forwarded_host
-
-                headers = self._proxy_headers()
-                peer = self._proxy_peer()
-                if not trusted_forwarded_host(headers, peer):
-                    return None
-                return public_origin(
-                    headers,
-                    peer,
-                    fallback_host=f"localhost:{service_instance.discovery_port}",
-                    fallback_proto="http",
-                )
-
-            def do_GET(self):
-                if self.path == "/.well-known/oauth-protected-resource":
-                    _write_json(self, 200, build_protected_resource_metadata(service_instance))
-                elif self.path == "/.well-known/oauth-authorization-server":
-                    origin = self._trusted_public_origin()
-                    registration_endpoint = (
-                        registration_path if is_client_registration_enabled(service_instance) else None
-                    )
-                    _write_json(
-                        self,
-                        200,
-                        build_authorization_server_metadata(
-                            service_instance,
-                            registration_endpoint,
-                            public_origin=origin,
-                        ),
-                    )
-                else:
-                    _write_empty(self, 404)
-
-            def do_POST(self):
-                if self.path != registration_path:
-                    _write_empty(self, 404)
-                    return
-
-                if not is_client_registration_enabled(service_instance):
-                    _write_json(
-                        self,
-                        404,
-                        {"error": "not_found", "error_description": "Client registration is not enabled"},
-                    )
-                    return
-
-                length = int(self.headers.get("Content-Length", 0))
-                raw_body = self.rfile.read(length) if length else b""
-                try:
-                    body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
-                except Exception:
-                    body = {}
-
-                try:
-                    body = apply_cimd_to_registration_body(
-                        body,
-                        headers=self._proxy_headers(),
-                        peer=self._proxy_peer(),
-                    )
-                except (CimdValidationError, CimdFetchError) as exc:
-                    _write_json(
-                        self,
-                        400,
-                        {
-                            "error": "invalid_client_metadata",
-                            "error_description": str(exc),
-                        },
-                    )
-                    return
-
-                _write_json(self, 200, build_registration_response(service_instance, body))
-
-        def run_server():
-            # Try binding to OAUTH_DISCOVERY_PORT
-            port = int(os.environ.get("OAUTH_DISCOVERY_PORT", self.discovery_port))
-            try:
-                self._server = HTTPServer(("localhost", port), DiscoveryHandler)
-                # Notify client via stderr
-                oauth_metadata = {
-                    "port": port,
-                    "resource_uri": self.resource_uri,
-                    "authorization_servers": self.authorization_servers
-                }
-                sys.stderr.write(
-                    f"[NITROSTACK_OAUTH]{json.dumps(oauth_metadata)}[/NITROSTACK_OAUTH]\n"
-                )
-                sys.stderr.flush()
-                self._server.serve_forever()
-            except Exception as e:
-                sys.stderr.write(f"Failed to start OAuth Discovery Server on port {port}: {e}\n")
-                sys.stderr.flush()
-
-        self._thread = threading.Thread(target=run_server, daemon=True)
-        self._thread.start()
+        start_discovery_server(self)
 
     def raise_if_invalid(self, token_info: Dict[str, Any]) -> Dict[str, Any]:
         """Raise ``TokenInactiveError`` / ``AudienceMismatchError`` for an introspection result."""
@@ -352,118 +207,27 @@ class OAuthService:
 
     def _introspect_via_jwks(self, token: str) -> Dict[str, Any]:
         """JWT signature verification using a cached JWKS client (RFC 7517/7519)."""
-        try:
-            import jwt
-            jwks_client = self._get_jwks_client(self.jwks_uri)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-
-            data = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=self.audience,
-                issuer=self.issuer,
-            )
-            return {
-                "active": True,
-                "scope": data.get("scope", ""),
-                "sub": data.get("sub"),
-                "client_id": data.get("client_id"),
-                "aud": data.get("aud"),
-                "exp": data.get("exp"),
-                "iat": data.get("iat"),
-                "iss": data.get("iss"),
-            }
-        except Exception as e:
-            sys.stderr.write(f"OAuth JWKS verification failed: {e}\n")
-            sys.stderr.flush()
-            return {"active": False}
+        return introspect_via_jwks(self, token)
 
     async def _introspect_via_endpoint(self, token: str) -> Dict[str, Any]:
         """RFC 7662 token introspection: POST the token to the authorization server
         and ask whether it's active."""
-        data = urllib.parse.urlencode({"token": token}).encode("utf-8")
-        req = urllib.request.Request(self.token_introspection_endpoint, data=data, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-
-        # Add basic auth if client credentials provided
-        if self.token_introspection_client_id and _has_secret(self.token_introspection_client_secret):
-            import base64
-            client_secret = unwrap_secret(self.token_introspection_client_secret)
-            auth_str = f"{self.token_introspection_client_id}:{client_secret}"
-            encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
-            req.add_header("Authorization", f"Basic {encoded_auth}")
-
-        try:
-            # urllib.request is synchronous; run it on a thread so it doesn't block
-            # the event loop this async method is running on.
-            import asyncio
-            loop = asyncio.get_event_loop()
-
-            def do_request():
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    return json.loads(response.read().decode("utf-8"))
-
-            return await loop.run_in_executor(None, do_request)
-        except Exception as e:
-            sys.stderr.write(f"OAuth Introspection Request Failed: {e}\n")
-            sys.stderr.flush()
-            return {"active": False}
+        return await introspect_via_endpoint(self, token)
 
     def _get_jwks_client(self, jwks_uri: str):
-        """Return a cached PyJWKClient for this URI, creating it on first use.
-
-        PyJWKClient already caches individual signing keys internally; this cache
-        is one level up — it avoids reconstructing the client object itself (and
-        re-fetching the whole key set) on every single token check.
-        """
-        import jwt
-        client = self._jwks_clients.get(jwks_uri)
-        if client is None:
-            client = jwt.PyJWKClient(jwks_uri)
-            self._jwks_clients[jwks_uri] = client
-        return client
+        """Return a cached PyJWKClient for this URI, creating it on first use."""
+        return get_jwks_client(self, jwks_uri)
 
     def _validate_audience(self, introspection: Dict[str, Any]) -> bool:
-        """
-        RFC 8707 resource-indicator check: does this token's `aud` claim include
-        the resource it's being presented to? Without this, a token minted for a
-        *different* service could be replayed here and accepted — the token is
-        legitimately signed/active, just not meant for this resource.
-
-        `aud` is legal as either a single string or a list of strings per JWT
-        conventions, so it's normalized to a list before comparing.
-        """
-        expected = self.audience or self.resource_uri
-        if not expected:
-            # Nothing configured to check against — permissive, matching the
-            # TypeScript SDK's default when no audience is configured.
-            return True
-
-        raw_aud = introspection.get("aud")
-        if raw_aud is None:
-            # No audience claim on the token at all — nothing to validate against.
-            # Treat as permissive rather than rejecting tokens from authorization
-            # servers that don't emit `aud`.
-            return True
-
-        token_audiences = raw_aud if isinstance(raw_aud, list) else [raw_aud]
-        return expected in token_audiences
+        """RFC 8707 resource-indicator check on the token's ``aud`` claim."""
+        return validate_audience(self, introspection)
 
     def _cache_get(self, token: str) -> Optional[Dict[str, Any]]:
-        cached = self._token_cache.get(token)
-        if cached is None:
-            return None
-        result, expires_at = cached
-        if time.monotonic() >= expires_at:
-            del self._token_cache[token]
-            return None
-        return result
+        return cache_get(self._token_cache, token)
 
     def _cache_set(self, token: str, result: Dict[str, Any]) -> None:
-        if self.token_cache_seconds <= 0:
-            return
-        self._token_cache[token] = (result, time.monotonic() + self.token_cache_seconds)
+        cache_set(self._token_cache, token, result, self.token_cache_seconds)
+
 
 @module(name="OAuthModule")
 class OAuthModule:
