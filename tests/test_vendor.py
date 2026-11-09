@@ -69,6 +69,7 @@ def test_minimal_pyproject_uses_distribution_version(tmp_path: Path, monkeypatch
     text = (dest / "pyproject.toml").read_text(encoding="utf-8")
     assert 'version = "9.9.9"' in text
     assert "0.3.2" not in text
+    assert "posthog" not in text
 
 
 def test_distribution_version_has_no_hardcoded_fallback(monkeypatch):

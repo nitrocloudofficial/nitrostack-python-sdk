@@ -84,6 +84,8 @@ Once scaffolded, follow the next steps printed by the CLI to run your server, co
 
 The CLI is installed with the SDK (`nitrostack-py`, or `python -m nitrostack.cli.main`). Run `nitrostack-py --help` to list commands.
 
+**Usage telemetry** — The CLI sends anonymous usage events to PostHog using a built-in public project key (same CLI/SDK project as the TypeScript CLI). Set `NITROSTACK_POSTHOG_KEY` to override that key, `NITROSTACK_POSTHOG_HOST` to override the ingest URL (default `https://us.i.posthog.com`). Disable with `DO_NOT_TRACK=1` or `NITROSTACK_TELEMETRY=0`. Exit runs a best-effort flush (up to 2s); see [`docs/analytics-events.md`](docs/analytics-events.md) for events, opt-out, and delivery notes.
+
 ### Project lifecycle
 
 ```bash
@@ -265,6 +267,10 @@ The SDK reads standard settings from the environment or `.env` files:
 | `NITROSTACK_LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `NITROSTACK_LOG_TO_STDOUT` | Set to `true` to allow logging to stdout under stdio transport (Caution: may corrupt protocol stream). |
 | `NITROSTACK_HTTP_DEBUG` | Set to `1` to log every HTTP request (method, path, headers, body) and response status to stderr. Use when diagnosing a client that fails to connect: uvicorn's access log shows neither headers nor timestamps. |
+| `NITROSTACK_POSTHOG_KEY` | Optional. Override the PostHog project key used for CLI telemetry (see `docs/analytics-events.md`); if unset, a built-in public key is used. |
+| `NITROSTACK_POSTHOG_HOST` | Optional. PostHog ingest host (default `https://us.i.posthog.com`). |
+| `NITROSTACK_ENVIRONMENT` | `production`, `staging`, or `development` for analytics super-properties. |
+| `NITROSTACK_TELEMETRY` | Set to `0` / `false` / `off` to disable CLI telemetry (in addition to `DO_NOT_TRACK=1`). |
 
 ### Keeping secrets out of logs (`SecretValue`)
 

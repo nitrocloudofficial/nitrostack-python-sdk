@@ -1,16 +1,24 @@
+import argparse
 import os
 import re
-import sys
-import argparse
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-from nitrostack.cli.generate import generate_component, generate_module as generate_module_from_template
+from nitrostack.cli.generate import generate_component
+from nitrostack.cli.generate import generate_module as generate_module_from_template
 from nitrostack.cli.install import install_dependencies, lock_with_uv, rewrite_pyproject_identity
 from nitrostack.cli.pack import pack_project
 from nitrostack.cli.skills import run_skills_flow
+from nitrostack.cli.telemetry import (
+    identify_from_cloud_login,
+    maybe_print_first_run_notice,
+    shutdown_telemetry,
+    track_command_invoked,
+    track_init_completed,
+)
 from nitrostack.cli.upgrade import upgrade_project
 from nitrostack.cli.validators import format_report, validate_project
 
@@ -1267,6 +1275,7 @@ def _add_port_flags(parser):
 
 def init_project(name: str = None, template: str = None, skip_install: bool = False, port=None, widget=None, force: bool = False):
     print_banner()
+    init_started = time.monotonic()
 
     # 1. Project name — optional CLI arg, otherwise the next readline
     if not name:
@@ -1437,6 +1446,13 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
         else:
             print("    Try search_tools with 'overdue invoices', then invoke it through call_tool")
         print("\nHappy coding! 🚀\n")
+        duration_ms = int((time.monotonic() - init_started) * 1000)
+        track_init_completed(
+            template=template,
+            skip_install=skip_install,
+            duration_ms=duration_ms,
+            has_custom_description=description.strip() != "My awesome MCP server",
+        )
         return
     if template == "python-oauth":
         print(" 2. Configure OAuth credentials in your \033[34m.env\033[0m file")
@@ -1453,6 +1469,22 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     print(" 6. NitroStudio cannot folder-connect a Python project (it looks for @nitrostack/core).")
     print("    Use Inspector HTTP as above, or Studio's custom MCP URL if it offers Streamable HTTP.")
     print("\nHappy coding! 🚀\n")
+    duration_ms = int((time.monotonic() - init_started) * 1000)
+    track_init_completed(
+        template=template,
+        skip_install=skip_install,
+        duration_ms=duration_ms,
+        has_custom_description=description.strip() != "My awesome MCP server",
+    )
+
+def run_login(user_id: str, email: str, org_id: str | None = None):
+    """Associate the anonymous CLI distinct id with a NitroCloud user (analytics)."""
+    identify_from_cloud_login(
+        user_id=(user_id or "").strip(),
+        email=(email or "").strip(),
+        organization_id=(org_id or "").strip() or None,
+    )
+
 
 def run_dev(port=None, widget=None):
     target = "main.py"
@@ -1513,9 +1545,9 @@ def run_dev(port=None, widget=None):
 
     try:
         start_process()
-        
+
         watched_extensions = {".py", ".env"}
-        
+
         def get_mtimes():
             mtimes = {}
             for root, dirs, files in os.walk("."):
@@ -1535,7 +1567,7 @@ def run_dev(port=None, widget=None):
         try:
             from watchfiles import watch
             print("Using watchfiles for high-performance file monitoring.")
-            
+
             while True:
                 for changes in watch("."):
                     should_restart = False
@@ -1549,11 +1581,11 @@ def run_dev(port=None, widget=None):
                     if should_restart:
                         print("File changes detected! Restarting server...")
                         start_process()
-                
+
                 time.sleep(0.5)
                 if process and process.poll() is not None:
                     print("Server process exited. Waiting for file changes to restart...")
-                    
+
         except ImportError:
             print("watchfiles library not found. Falling back to standard polling...")
             last_mtimes = get_mtimes()
@@ -1673,7 +1705,7 @@ def generate_module(name: str):
 def get_claude_config_paths():
     paths = []
     home = os.path.expanduser("~")
-    
+
     # Windows
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
@@ -1696,24 +1728,24 @@ def get_claude_config_paths():
     # Linux
     else:
         paths.append(os.path.join(home, ".config", "Claude", "claude_desktop_config.json"))
-        
+
     return [p for p in paths if os.path.exists(os.path.dirname(p))]
 
 def register_server(name: str, file_path: str):
     import json
-    
+
     if not os.path.exists(file_path):
         print(f"Error: Script file '{file_path}' does not exist.")
         sys.exit(1)
-        
+
     server_entry = _build_server_entry(file_path)
-    
+
     config_paths = get_claude_config_paths()
     if not config_paths:
         print("Error: Could not find any Claude Desktop installation directories.")
         print("Please ensure Claude Desktop is installed on your machine.")
         sys.exit(1)
-        
+
     registered_any = False
     for path in config_paths:
         try:
@@ -1726,22 +1758,22 @@ def register_server(name: str, file_path: str):
                             config = json.loads(content)
                         except json.JSONDecodeError:
                             print(f"Warning: Configuration file at '{path}' is not valid JSON. Resetting it.")
-            
+
             if "mcpServers" not in config:
                 config["mcpServers"] = {}
-                
+
             config["mcpServers"][name] = server_entry
-            
+
             # Create directory if needed
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
-                
+
             print(f"Successfully registered server '{name}' in: {path}")
             registered_any = True
         except Exception as e:
             print(f"Error writing to config at '{path}': {e}")
-            
+
     if registered_any:
         print("\nAll done! Please fully restart Claude Desktop to load your new server.")
     else:
@@ -1958,62 +1990,95 @@ def main():
         help="Lint project config, @mcp_app imports, and @module() class references",
     )
 
+    login_parser = subparsers.add_parser(
+        "login",
+        help=(
+            "Record NitroCloud user identity for analytics "
+            "(alias anonymous id to Cloud user id)"
+        ),
+    )
+    login_parser.add_argument(
+        "--user-id",
+        required=True,
+        dest="user_id",
+        help="Stable NitroCloud user id",
+    )
+    login_parser.add_argument(
+        "--email",
+        required=True,
+        help="User email (e.g. user@example.com)",
+    )
+    login_parser.add_argument(
+        "--org-id",
+        default=None,
+        dest="org_id",
+        help="Organization id for group analytics (optional)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         sys.exit(1)
 
-    def _run_command(fn, *fn_args, **fn_kwargs):
-        try:
-            return fn(*fn_args, **fn_kwargs)
-        except Exception as exc:
-            print(f"Error: {exc}")
-            sys.exit(1)
+    try:
+        maybe_print_first_run_notice()
+        track_command_invoked(args.command)
 
-    if args.command == "init":
-        init_project(
-            args.name,
-            args.template,
-            skip_install=args.skip_install,
-            port=args.port,
-            widget=args.widget,
-            force=args.force,
-        )
-    elif args.command == "dev":
-        run_dev(port=args.port, widget=args.widget)
-    elif args.command == "start":
-        run_start(port=args.port, widget=args.widget)
-    elif args.command == "register":
-        register_server(args.name, args.file)
-    elif args.command == "cursor":
-        register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
-    elif args.command == "generate":
-        if not args.generator:
-            gen_parser.print_help()
-            sys.exit(1)
-        if args.generator == "tool":
-            generate_tool(args.name)
-        elif args.generator == "module":
-            generate_module(args.name)
-        else:
-            generate_component(args.generator, args.name)
-    elif args.command == "pack":
-        _run_command(pack_project, dry_run=args.dry_run)
-    elif args.command == "upgrade":
-        _run_command(
-            upgrade_project,
-            version=args.target_version,
-            dry_run=args.dry_run,
-            allow_downgrade=args.allow_downgrade,
-        )
-    elif args.command == "install":
-        _run_command(install_dependencies, production=args.production)
-    elif args.command == "validate":
-        issues = _run_command(validate_project)
-        print(format_report(issues))
-        if any(issue.severity == "error" for issue in issues):
-            sys.exit(1)
+        def _run_command(fn, *fn_args, **fn_kwargs):
+            try:
+                return fn(*fn_args, **fn_kwargs)
+            except Exception as exc:
+                print(f"Error: {exc}")
+                sys.exit(1)
+
+        if args.command == "init":
+            init_project(
+                args.name,
+                args.template,
+                skip_install=args.skip_install,
+                port=args.port,
+                widget=args.widget,
+                force=args.force,
+            )
+        elif args.command == "dev":
+            run_dev(port=args.port, widget=args.widget)
+        elif args.command == "start":
+            run_start(port=args.port, widget=args.widget)
+        elif args.command == "register":
+            register_server(args.name, args.file)
+        elif args.command == "cursor":
+            register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
+        elif args.command == "generate":
+            if not args.generator:
+                gen_parser.print_help()
+                sys.exit(1)
+            if args.generator == "tool":
+                generate_tool(args.name)
+            elif args.generator == "module":
+                generate_module(args.name)
+            else:
+                generate_component(args.generator, args.name)
+        elif args.command == "pack":
+            _run_command(pack_project, dry_run=args.dry_run)
+        elif args.command == "upgrade":
+            _run_command(
+                upgrade_project,
+                version=args.target_version,
+                dry_run=args.dry_run,
+                allow_downgrade=args.allow_downgrade,
+            )
+        elif args.command == "install":
+            _run_command(install_dependencies, production=args.production)
+        elif args.command == "validate":
+            issues = _run_command(validate_project)
+            print(format_report(issues))
+            if any(issue.severity == "error" for issue in issues):
+                sys.exit(1)
+        elif args.command == "login":
+            _run_command(run_login, args.user_id, args.email, args.org_id)
+    finally:
+        shutdown_telemetry()
 
 if __name__ == "__main__":
     main()
