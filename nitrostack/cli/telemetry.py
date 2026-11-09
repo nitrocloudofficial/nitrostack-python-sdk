@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 PRODUCT = "python_sdk"
 SURFACE = "terminal"
 
-# Public PostHog project key (same CLI/SDK ingest as the TypeScript CLI); override with NITROSTACK_POSTHOG_KEY.
+# Public PostHog project key (same CLI/SDK ingest as the TypeScript CLI).
+# Override with NITROSTACK_POSTHOG_KEY.
 DEFAULT_POSTHOG_PROJECT_KEY = "phc_" + "OufG1OuiamSbCBMVHfO70IyFWKBzsiaDpOWqcNwtz6G"
 DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
 
@@ -32,6 +33,7 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 
 _POSTHOG_LOCK = threading.Lock()
 _client: Any = None
+_posthog_unavailable = False
 _anonymous_distinct_id: Optional[str] = None
 _distinct_id_override: Optional[str] = None
 _shutdown_done = False
@@ -125,12 +127,19 @@ def _super_properties() -> Dict[str, Any]:
 
 
 def _get_client() -> Any:
-    global _client
+    global _client, _posthog_unavailable
     if is_telemetry_disabled():
+        return None
+    if _posthog_unavailable:
         return None
     with _POSTHOG_LOCK:
         if _client is None:
-            from posthog import Posthog
+            try:
+                from posthog import Posthog
+            except ImportError:
+                _posthog_unavailable = True
+                logger.debug("nitrostack telemetry: posthog package not installed")
+                return None
 
             api_key = resolved_posthog_api_key()
             host = resolved_posthog_host()
