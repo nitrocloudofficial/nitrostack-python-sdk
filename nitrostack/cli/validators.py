@@ -11,6 +11,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence, Set, Tuple
 
+from nitrostack.cli.widget_routes import collect_widget_routes
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
@@ -374,16 +375,12 @@ def validate_module_references(root: str) -> List[ValidationIssue]:
     return issues
 
 
-_WIDGET_DECORATOR_RE = re.compile(r"""@widget\(\s*["']([^"']+)["']""")
-_WIDGET_OPTIONS_RE = re.compile(r"""WidgetOptions\(\s*route\s*=\s*["']([^"']+)["']""")
 _WIDGET_ROUTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
-
 def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
-    found: List[Tuple[str, str]] = []
-    seen: Set[str] = set()
     root_abs = os.path.abspath(root)
+    sources: List[Tuple[str, str]] = []
 
     for path in sorted(_iter_python_files(root)):
         rel_path = os.path.relpath(path, root_abs)
@@ -394,19 +391,11 @@ def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
             continue
 
         try:
-            text = _read(path)
+            sources.append((rel_path, _read(path)))
         except OSError:
             continue
 
-        for route in (
-            _WIDGET_DECORATOR_RE.findall(text)
-            + _WIDGET_OPTIONS_RE.findall(text)
-        ):
-            if route not in seen:
-                seen.add(route)
-                found.append((route, rel_path))
-
-    return found
+    return collect_widget_routes(sources)
 
 
 
