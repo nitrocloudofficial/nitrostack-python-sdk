@@ -80,11 +80,36 @@ class OAuthService:
         enable_client_registration: Optional[bool] = None,
         static_client_id: Optional[str] = None,
         static_client_secret: Union[SecretValue, str, None] = None,
+        discovery_auto_retry: Optional[bool] = None,
+        discovery_max_retries: Optional[int] = None,
     ):
         self.resource_uri = resource_uri
         self.authorization_servers = authorization_servers
         self.scopes_supported = scopes_supported
         self.discovery_port = discovery_port
+        if discovery_auto_retry is not None:
+            self.discovery_auto_retry = discovery_auto_retry
+        else:
+            env_retry = os.environ.get("OAUTH_DISCOVERY_AUTO_RETRY")
+            self.discovery_auto_retry = (
+                env_retry.strip().lower() not in ("false", "0", "no", "off")
+                if env_retry is not None
+                else True
+            )
+
+        if discovery_max_retries is not None:
+            self.discovery_max_retries = discovery_max_retries
+        else:
+            raw_max_retries = os.environ.get("OAUTH_DISCOVERY_MAX_RETRIES")
+            if raw_max_retries is not None:
+                try:
+                    self.discovery_max_retries = int(raw_max_retries)
+                except ValueError:
+                    self.discovery_max_retries = 50
+            else:
+                self.discovery_max_retries = 50
+
+        self.bound_port: Optional[int] = None
 
         # Introspection settings fall back to the environment when not passed
         # explicitly. Both spellings of the endpoint variable are accepted: the
@@ -147,6 +172,10 @@ class OAuthService:
         """Starts a background HTTP discovery server for OAuth Protected Resource metadata."""
         start_discovery_server(self)
 
+    def get_port(self) -> Optional[int]:
+        """Returns the actual port bound by the discovery server, or None if not running."""
+        return self.bound_port
+
     def raise_if_invalid(self, token_info: Dict[str, Any]) -> Dict[str, Any]:
         """Raise ``TokenInactiveError`` / ``AudienceMismatchError`` for an introspection result."""
         if token_info.get("error") == "audience_mismatch" or (
@@ -160,10 +189,12 @@ class OAuthService:
     def stop_discovery_server(self) -> None:
         if self._server:
             self._server.shutdown()
+            self._server.server_close()
             self._server = None
         if self._thread:
             self._thread.join(timeout=1.0)
             self._thread = None
+        self.bound_port = None
 
     async def introspect_token(self, token: str) -> Dict[str, Any]:
         """
@@ -248,6 +279,8 @@ class OAuthModule:
         enable_client_registration: Optional[bool] = None,
         static_client_id: Optional[str] = None,
         static_client_secret: Union[SecretValue, str, None] = None,
+        discovery_auto_retry: Optional[bool] = None,
+        discovery_max_retries: Optional[int] = None,
     ):
         if not resource_uri or not str(resource_uri).strip():
             raise ConfigurationError("OAuthModule.for_root requires resource_uri")
@@ -270,6 +303,8 @@ class OAuthModule:
             enable_client_registration=enable_client_registration,
             static_client_id=static_client_id,
             static_client_secret=static_client_secret,
+            discovery_auto_retry=discovery_auto_retry,
+            discovery_max_retries=discovery_max_retries,
         )
         DIContainer.get_instance().register_value(OAuthService, service)
         warn_if_oauth_fail_open()
