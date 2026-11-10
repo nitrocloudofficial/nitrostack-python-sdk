@@ -5,6 +5,10 @@ ways: a string literal (``@widget("card")``), a ``WidgetOptions`` call with a li
 route, and a call to a *factory*, meaning a function whose parameter reaches
 ``WidgetOptions(route=...)`` (``@widget(my_widget("pizza-map"))``).
 
+``widget`` and ``WidgetOptions`` only count when they resolve to the SDK's own, directly,
+through ``import nitrostack``, or through a project module that re-exports them, so
+``@pytest.mark.widget("smoke")`` is ignored.
+
 A factory call only counts when the name resolves, through the calling module's own
 definitions and imports, to a real factory, and the string sits in the argument that
 feeds ``route``. So ``panel("x")`` is ignored when ``panel`` never passes that argument
@@ -24,6 +28,7 @@ _LEGACY_DECORATOR_RE = re.compile(r"""@widget\(\s*["']([^"']+)["']""")
 _LEGACY_OPTIONS_RE = re.compile(r"""WidgetOptions\(\s*route\s*=\s*["']([^"']+)["']""")
 
 _WIDGET_OPTIONS = object()  # the SDK's WidgetOptions class
+_WIDGET = object()          # the SDK's @widget decorator
 _NITROSTACK = object()      # the nitrostack package or one of its submodules
 _PLAIN = object()           # a project function or class that is not a factory
 
@@ -142,23 +147,40 @@ class _Project:
         matches = [m for key, m in self.modules.items() if key.endswith("." + dotted)]
         return matches[0] if len(matches) == 1 else None  # e.g. a src/ layout
 
-    def _name(self, module: _Module, name: str) -> object:
+    @staticmethod
+    def _sdk(attr: str) -> object:
+        if attr == "WidgetOptions":
+            return _WIDGET_OPTIONS
+        return _WIDGET if attr == "widget" else _NITROSTACK
+
+    def _binding(self, module: _Module, name: str, seen: set) -> object:
+        """What ``name`` means inside ``module``, following re-exports through project modules."""
+        if (module.name, name) in seen:  # an import cycle
+            return None
+        seen.add((module.name, name))
         if name in module.ns.defs:
             return module.ns.defs[name]
         imported = module.imports.get(name)
-        if imported:
-            source, attr = imported
-            if _is_nitrostack(source):
-                return _WIDGET_OPTIONS if attr == "WidgetOptions" else _NITROSTACK
-            if not attr:
-                found = self._find(source)
-                return found.ns if found else None
-            found = self._find(source)
-            if found and attr in found.ns.defs:
-                return found.ns.defs[attr]
-            sub = self._find(f"{source}.{attr}")  # ``from pkg import module``
-            return sub.ns if sub else None
-        return _WIDGET_OPTIONS if name == "WidgetOptions" else None
+        if not imported:
+            return None
+        source, attr = imported
+        if _is_nitrostack(source):
+            return self._sdk(attr)
+        found = self._find(source)
+        if not attr:
+            return found.ns if found else None
+        if found:
+            bound = self._binding(found, attr, seen)
+            if bound is not None:
+                return bound
+        sub = self._find(f"{source}.{attr}")  # ``from pkg import module``
+        return sub.ns if sub else None
+
+    def _name(self, module: _Module, name: str) -> object:
+        bound = self._binding(module, name, set())
+        if bound is None and name not in module.ns.defs and name not in module.imports:
+            return self._sdk(name) if name in ("WidgetOptions", "widget") else None
+        return bound
 
     def resolve(self, expr: ast.AST, module: _Module) -> object:
         if isinstance(expr, ast.Name):
@@ -166,7 +188,7 @@ class _Project:
         if isinstance(expr, ast.Attribute):
             base = self.resolve(expr.value, module)
             if base is _NITROSTACK:
-                return _WIDGET_OPTIONS if expr.attr == "WidgetOptions" else _NITROSTACK
+                return self._sdk(expr.attr)
             if isinstance(base, _Namespace):
                 if expr.attr in base.defs:
                     return base.defs[expr.attr]
@@ -236,9 +258,9 @@ class _Project:
         found: List[Tuple[int, int, str]] = []
         for node in ast.walk(module.tree):
             for decorator in getattr(node, "decorator_list", []):
-                func = getattr(decorator, "func", None)
-                is_widget = (isinstance(func, ast.Name) and func.id == "widget") or (
-                    isinstance(func, ast.Attribute) and func.attr == "widget"
+                is_widget = (
+                    isinstance(decorator, ast.Call)
+                    and self.resolve(decorator.func, module) is _WIDGET
                 )
                 if isinstance(decorator, ast.Call) and is_widget and decorator.args:
                     route = self._decorator_route(decorator.args[0], module)
