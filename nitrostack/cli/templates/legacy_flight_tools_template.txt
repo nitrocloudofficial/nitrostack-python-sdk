@@ -1,0 +1,74 @@
+from nitrostack import injectable, tool, use_guards, OAuthGuard, ExecutionContext
+from services.duffel_service import DuffelService
+from guards.oauth_guard import create_scope_guard
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class SearchFlightsInput(BaseModel):
+    origin: str = Field(description="Origin airport IATA code (e.g., 'JFK', 'LHR')")
+    destination: str = Field(description="Destination airport IATA code (e.g., 'LAX', 'CDG')")
+    departureDate: str = Field(description="Departure date in YYYY-MM-DD format")
+    returnDate: Optional[str] = Field(default=None, description="Return date in YYYY-MM-DD format for round trip")
+    adults: int = Field(default=1, description="Number of adult passengers (18+)")
+    cabinClass: str = Field(default="economy", description="Preferred cabin class (economy, premium_economy, business, first)")
+
+class FlightDetailsInput(BaseModel):
+    offerId: str = Field(description="The flight offer ID from search results")
+
+class AirportSearchInput(BaseModel):
+    query: str = Field(description="The search query for airports (e.g., 'London', 'New York')")
+
+class GetAirlinesInput(BaseModel):
+    pass
+
+@injectable(deps=[DuffelService])
+class FlightTools:
+    def __init__(self, service: DuffelService):
+        self.service = service
+
+    @tool(
+        name="search_flights",
+        title="Search Flights",
+        description="Search for flight offers based on origin, destination, dates, and preferences.",
+        input_schema=SearchFlightsInput
+    )
+    @use_guards(OAuthGuard, create_scope_guard(["read"]))
+    async def search_flights(self, input: SearchFlightsInput, context: ExecutionContext) -> dict:
+        context.logger.info(f"Searching flights from {input.origin} to {input.destination}")
+        res = await self.service.search_flights(input.model_dump())
+        return res
+
+    @tool(
+        name="get_flight_details",
+        title="Get Flight Details",
+        description="Get detailed information about a specific flight offer including baggage allowance, conditions.",
+        input_schema=FlightDetailsInput
+    )
+    @use_guards(OAuthGuard, create_scope_guard(["read"]))
+    async def get_flight_details(self, input: FlightDetailsInput, context: ExecutionContext) -> dict:
+        context.logger.info(f"Fetching flight details for offer {input.offerId}")
+        res = await self.service.get_offer(input.offerId)
+        return res
+
+    @tool(
+        name="search_airports",
+        title="Search Airports",
+        description="Search for airports by query string.",
+        input_schema=AirportSearchInput
+    )
+    @use_guards(OAuthGuard, create_scope_guard(["read"]))
+    async def search_airports(self, input: AirportSearchInput, context: ExecutionContext) -> dict:
+        context.logger.info(f"Searching airports for query: {input.query}")
+        return {"airports": [{"iataCode": "JFK", "name": "John F. Kennedy Airport"}]}
+
+    @tool(
+        name="get_airlines",
+        title="Get Airlines",
+        description="Get list of common airlines.",
+        input_schema=GetAirlinesInput
+    )
+    @use_guards(OAuthGuard, create_scope_guard(["read"]))
+    async def get_airlines(self, input: GetAirlinesInput, context: ExecutionContext) -> dict:
+        context.logger.info("Fetching common airlines")
+        res = await self.service.get_airlines()
+        return {"airlines": res}

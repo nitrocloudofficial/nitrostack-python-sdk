@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Widget preview</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    iframe { width: 100%; height: 380px; border: 1px solid #ddd; border-radius: 8px; }
+    button { margin: 0 8px 12px 0; }
+    textarea { width: 100%; height: 110px; font-family: ui-monospace, monospace; }
+    .note { color: #475569; font-size: 0.9rem; max-width: 820px; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <p class="note">
+    This static file does <strong>not</strong> follow MCP Inspector tool calls.
+    Inspector JSON is the live result (e.g. all matching pizza shops). Open
+    <code>http://localhost:3000/widgets/preview</code> with the server running to
+    render that same output, or paste <code>structuredContent</code> below and Inject.
+  </p>
+  <div id="buttons"></div>
+  <textarea id="json">__DEFAULT_JSON__</textarea>
+  <p><button id="inject">Inject JSON into iframe</button></p>
+  <iframe id="frame" src="out/__FIRST__.html"></iframe>
+  <script>
+    const routes = __ROUTES__;
+    const buttons = document.getElementById("buttons");
+    const frame = document.getElementById("frame");
+    routes.forEach((route) => {
+      const b = document.createElement("button");
+      b.textContent = route;
+      b.onclick = () => { frame.src = "out/" + route + ".html"; };
+      buttons.appendChild(b);
+    });
+    function inject() {
+      let data = {};
+      try { data = JSON.parse(document.getElementById("json").value); } catch (e) { alert("Invalid JSON"); return; }
+      const win = frame.contentWindow;
+      if (!win) return;
+      const payload = { structuredContent: data };
+      try {
+        win.openai = Object.assign(win.openai || {}, { toolOutput: payload });
+        win.dispatchEvent(new CustomEvent("openai:set_globals", { detail: { globals: { toolOutput: payload } } }));
+      } catch (e) {}
+      win.postMessage({ type: "setGlobals", globals: { toolOutput: payload } }, "*");
+      win.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: payload }, "*");
+    }
+    document.getElementById("inject").onclick = inject;
+    frame.addEventListener("load", () => setTimeout(inject, 80));
+  </script>
+</body>
+</html>
