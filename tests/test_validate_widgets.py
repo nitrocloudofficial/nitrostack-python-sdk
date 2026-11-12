@@ -308,3 +308,101 @@ def test_unimported_widget_options_alias_and_attribute_forms(tmp_path: Path):
 def test_a_file_that_does_not_parse_still_yields_its_literal_routes(tmp_path: Path):
     src = "@widget('legacy')\ndef f(:\n    pass\nWidgetOptions(route='legacy-options')\n"
     assert sorted(_routes(tmp_path, {"broken.py": src})) == ["legacy", "legacy-options"]
+
+
+def test_widget_options_reexported_by_a_project_package_is_followed(tmp_path: Path):
+    files = {
+        "shared/__init__.py": "from nitrostack import WidgetOptions, widget\n",
+        "tools.py": (
+            "from shared import WidgetOptions, widget\n"
+            "@widget(WidgetOptions(route='missing-card'))\ndef a(): ...\n"
+        ),
+    }
+    assert sorted(_routes(tmp_path, files)) == ["missing-card"]
+
+
+def test_reexport_through_an_alias_and_two_hops_is_followed(tmp_path: Path):
+    files = {
+        "core/options.py": "from nitrostack import WidgetOptions as Options, widget as ui\n",
+        "core/__init__.py": "from .options import Options, ui\n",
+        "shared.py": "from core import Options as Opts, ui as sdk_widget\n",
+        "tools.py": (
+            "from shared import Opts, sdk_widget\n"
+            "@sdk_widget('direct')\ndef a(): ...\n"
+            "@sdk_widget(Opts(route='via-options'))\ndef b(): ...\n"
+        ),
+    }
+    assert sorted(_routes(tmp_path, files)) == ["direct", "via-options"]
+
+
+def test_reexported_factory_is_still_a_factory(tmp_path: Path):
+    files = {
+        "shared/__init__.py": "from .helpers import panel\n",
+        "shared/helpers.py": FACTORY,
+        "tools.py": "from nitrostack import widget\nfrom shared import panel\n@widget(panel('reexported'))\ndef a(): ...\n",
+    }
+    assert _routes(tmp_path, files) == ["reexported"]
+
+
+def test_import_cycle_between_reexporting_modules_terminates(tmp_path: Path):
+    files = {
+        "a.py": "from b import thing\n",
+        "b.py": "from a import thing\n",
+        "tools.py": "from a import thing\n@thing('x')\ndef f(): ...\n",
+    }
+    assert _routes(tmp_path, files) == []
+
+
+def test_a_name_reexported_from_a_non_sdk_module_is_not_the_sdk(tmp_path: Path):
+    files = {
+        "shared/__init__.py": "from .own import WidgetOptions\n",
+        "shared/own.py": "class WidgetOptions:\n    def __init__(self, route): ...\n",
+        "tools.py": "from shared import WidgetOptions\nWidgetOptions(route='not-a-widget')\n",
+    }
+    assert _routes(tmp_path, files) == []
+
+
+def test_missing_html_check_runs_for_a_reexported_widget_options(tmp_path: Path):
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "__init__.py").write_text("from nitrostack import WidgetOptions, widget\n")
+    (tmp_path / "tools.py").write_text(
+        "from shared import WidgetOptions, widget\n"
+        "@widget(WidgetOptions(route='missing-card'))\ndef a(): ...\n"
+    )
+    issues = validate_widgets(str(tmp_path))
+    assert [i.severity for i in issues] == ["warning"]
+    assert "missing-card.html" in issues[0].message
+
+
+@pytest.mark.parametrize(
+    "decorator, imports",
+    [
+        ("@pytest.mark.widget('smoke')", "import pytest\n"),
+        ("@marks.widget('smoke')", "from tests import marks\n"),
+        ("@widget('smoke')", "from other_lib import widget\n"),
+        ("@widget('smoke')", "def widget(name):\n    return lambda f: f\n"),
+        ("@app.widget('smoke')", "from fastapi import FastAPI\napp = FastAPI()\n"),
+    ],
+)
+def test_widget_decorators_that_are_not_the_sdks_are_ignored(tmp_path: Path, decorator, imports):
+    src = f"{imports}\n{decorator}\ndef test_it(): ...\n"
+    assert _routes(tmp_path, {"test_tools.py": src}) == []
+    assert validate_widgets(str(tmp_path)) == []
+
+
+def test_pytest_widget_marker_does_not_hide_the_real_widget(tmp_path: Path):
+    src = (
+        "import pytest\nfrom nitrostack import widget\n"
+        "@pytest.mark.widget('smoke')\ndef test_it(): ...\n"
+        "@widget('card')\ndef real(): ...\n"
+    )
+    assert _routes(tmp_path, {"tools.py": src}) == ["card"]
+
+
+def test_qualified_sdk_decorators_are_still_collected(tmp_path: Path):
+    src = (
+        "import nitrostack\nimport nitrostack.decorators as deco\n"
+        "@nitrostack.widget('top')\ndef a(): ...\n"
+        "@deco.widget('submodule')\ndef b(): ...\n"
+    )
+    assert sorted(_routes(tmp_path, {"tools.py": src})) == ["submodule", "top"]
