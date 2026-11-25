@@ -127,12 +127,15 @@ class RegistrationMixin:
         #    onto the owned low-level server. This is factored out so additional server
         #    instances (e.g. one per HTTP session) can be configured identically.
         for entry in self._tools.values():
+            entry.has_spillover = self._has_spillover(entry.method)
             for candidate in getattr(entry.method, "_mcp_interceptors", []):
                 interceptor = (
                     container.resolve(candidate) if isinstance(candidate, type) else candidate
                 )
                 if isinstance(interceptor, DataSpilloverInterceptor):
                     self._spillover.register(interceptor)
+        for entry in self._tools.values():
+            entry.input_json_schema = self._tool_input_schema(entry.input_model)
         self._setup_handlers(self.mcp_server)
 
     def _assert_declared_dependencies(
