@@ -21,6 +21,12 @@ from nitrostack.cli.main import OFFICIAL_TEMPLATES, _prompt_template, _resolve_t
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "tests" / "support" / "project_templates_probe.py"
 TEMPLATES = [("python-enterprise-search", "enterprise-search"), ("python-code-mode", "code-mode")]
+PACK_TEMPLATES = [
+    ("python-starter", "starter"),
+    ("python-pizzaz", "pizzaz"),
+    ("python-oauth", "flight-booking"),
+    *TEMPLATES,
+]
 
 
 def run(args, cwd, *, python=None, installed=False):
@@ -52,6 +58,17 @@ def test_unprefixed_template_aliases_are_not_accepted(alias):
 def test_new_templates_in_cli_help(tmp_path):
     output = run(["cli", "init", "--help"], tmp_path)
     assert all(name in output for name, _ in TEMPLATES)
+
+
+@pytest.mark.parametrize("name,kind", PACK_TEMPLATES)
+def test_packed_wheel_includes_main_and_app_module(name, kind, tmp_path):
+    run(["cli", "init", "pack-demo", "--template", name, "--skip-install"], tmp_path)
+    project = tmp_path / "pack-demo"
+    run(["cli", "pack"], project)
+    [wheel] = (project / "dist").glob("*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        assert "main.py" in names and "app_module.py" in names
 
 
 @pytest.mark.parametrize("name,kind", TEMPLATES)
