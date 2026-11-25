@@ -40,7 +40,8 @@ def test_widget_render_error_keeps_json_result():
     assert "expensive" in text
 
 
-def test_custom_meta_merges_widget_meta():
+def test_custom_meta_merges_widget_meta(monkeypatch):
+    monkeypatch.setenv("NITROSTACK_APP_MODE", "universal")
     host = _Host()
     component = Component(id="sample", name="Sample", html="<p>ok</p>")
     result = types.CallToolResult(

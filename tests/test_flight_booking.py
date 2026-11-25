@@ -100,6 +100,7 @@ class FlightStudioModule:
 
 def test_studio_can_search_flights_without_token():
     os.environ.pop("OAUTH_REQUIRED", None)
+    os.environ["NITROSTACK_APP_MODE"] = "universal"
 
     async def run():
         harness = await NitroTestingModule.create(FlightStudioModule)
