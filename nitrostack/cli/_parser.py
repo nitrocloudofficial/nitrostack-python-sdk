@@ -136,4 +136,29 @@ def build_parser(*, _add_port_flags, OFFICIAL_TEMPLATES):
         help="Lint project config, @mcp_app imports, and @module() class references",
     )
 
+    login_parser = subparsers.add_parser(
+        "login",
+        help=(
+            "Record NitroCloud user identity for analytics "
+            "(alias anonymous id to Cloud user id)"
+        ),
+    )
+    login_parser.add_argument(
+        "--user-id",
+        required=True,
+        dest="user_id",
+        help="Stable NitroCloud user id",
+    )
+    login_parser.add_argument(
+        "--email",
+        required=True,
+        help="User email (e.g. user@example.com)",
+    )
+    login_parser.add_argument(
+        "--org-id",
+        default=None,
+        dest="org_id",
+        help="Organization id for group analytics (optional)",
+    )
+
     return parser, gen_parser

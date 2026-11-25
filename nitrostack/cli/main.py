@@ -40,6 +40,12 @@ from nitrostack.cli.generate import generate_component, generate_module as gener
 from nitrostack.cli.install import install_dependencies, lock_with_uv, rewrite_pyproject_identity
 from nitrostack.cli.pack import pack_project
 from nitrostack.cli.skills import run_skills_flow
+from nitrostack.cli.telemetry import (
+    identify_from_cloud_login,
+    maybe_print_first_run_notice,
+    shutdown_telemetry,
+    track_command_invoked,
+)
 from nitrostack.cli.upgrade import upgrade_project
 from nitrostack.cli.validators import format_report, validate_project
 from nitrostack.cli._parser import build_parser
@@ -186,6 +192,15 @@ def init_project(name: str = None, template: str = None, skip_install: bool = Fa
     )
 
 
+def run_login(user_id: str, email: str, org_id: str | None = None):
+    """Associate the anonymous CLI distinct id with a NitroCloud user (analytics)."""
+    identify_from_cloud_login(
+        user_id=(user_id or "").strip(),
+        email=(email or "").strip(),
+        organization_id=(org_id or "").strip() or None,
+    )
+
+
 def run_dev(port=None, widget=None):
     return _servers.run_dev(
         port,
@@ -272,56 +287,64 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    def _run_command(fn, *fn_args, **fn_kwargs):
-        try:
-            return fn(*fn_args, **fn_kwargs)
-        except Exception as exc:
-            print(f"Error: {exc}")
-            sys.exit(1)
+    try:
+        maybe_print_first_run_notice()
+        track_command_invoked(args.command)
 
-    if args.command == "init":
-        init_project(
-            args.name,
-            args.template,
-            skip_install=args.skip_install,
-            port=args.port,
-            widget=args.widget,
-            force=args.force,
-        )
-    elif args.command == "dev":
-        run_dev(port=args.port, widget=args.widget)
-    elif args.command == "start":
-        run_start(port=args.port, widget=args.widget)
-    elif args.command == "register":
-        register_server(args.name, args.file)
-    elif args.command == "cursor":
-        register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
-    elif args.command == "generate":
-        if not args.generator:
-            gen_parser.print_help()
-            sys.exit(1)
-        if args.generator == "tool":
-            generate_tool(args.name)
-        elif args.generator == "module":
-            generate_module(args.name)
-        else:
-            generate_component(args.generator, args.name)
-    elif args.command == "pack":
-        _run_command(pack_project, dry_run=args.dry_run)
-    elif args.command == "upgrade":
-        _run_command(
-            upgrade_project,
-            version=args.target_version,
-            dry_run=args.dry_run,
-            allow_downgrade=args.allow_downgrade,
-        )
-    elif args.command == "install":
-        _run_command(install_dependencies, production=args.production)
-    elif args.command == "validate":
-        issues = _run_command(validate_project)
-        print(format_report(issues))
-        if any(issue.severity == "error" for issue in issues):
-            sys.exit(1)
+        def _run_command(fn, *fn_args, **fn_kwargs):
+            try:
+                return fn(*fn_args, **fn_kwargs)
+            except Exception as exc:
+                print(f"Error: {exc}")
+                sys.exit(1)
+
+        if args.command == "init":
+            init_project(
+                args.name,
+                args.template,
+                skip_install=args.skip_install,
+                port=args.port,
+                widget=args.widget,
+                force=args.force,
+            )
+        elif args.command == "dev":
+            run_dev(port=args.port, widget=args.widget)
+        elif args.command == "start":
+            run_start(port=args.port, widget=args.widget)
+        elif args.command == "register":
+            register_server(args.name, args.file)
+        elif args.command == "cursor":
+            register_cursor_server(args.name, args.file, global_config=args.global_config, transport=args.transport)
+        elif args.command == "generate":
+            if not args.generator:
+                gen_parser.print_help()
+                sys.exit(1)
+            if args.generator == "tool":
+                generate_tool(args.name)
+            elif args.generator == "module":
+                generate_module(args.name)
+            else:
+                generate_component(args.generator, args.name)
+        elif args.command == "pack":
+            _run_command(pack_project, dry_run=args.dry_run)
+        elif args.command == "upgrade":
+            _run_command(
+                upgrade_project,
+                version=args.target_version,
+                dry_run=args.dry_run,
+                allow_downgrade=args.allow_downgrade,
+            )
+        elif args.command == "install":
+            _run_command(install_dependencies, production=args.production)
+        elif args.command == "validate":
+            issues = _run_command(validate_project)
+            print(format_report(issues))
+            if any(issue.severity == "error" for issue in issues):
+                sys.exit(1)
+        elif args.command == "login":
+            _run_command(run_login, args.user_id, args.email, args.org_id)
+    finally:
+        shutdown_telemetry()
 
 
 if __name__ == "__main__":

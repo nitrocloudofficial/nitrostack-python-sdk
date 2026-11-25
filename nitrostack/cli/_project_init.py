@@ -4,6 +4,9 @@ import os
 import sys
 import shutil
 import subprocess
+import time
+
+from nitrostack.cli.telemetry import track_init_completed
 
 
 def init_project(
@@ -34,6 +37,7 @@ def init_project(
     run_skills_flow,
 ):
     print_banner()
+    init_started = time.monotonic()
 
     # 1. Project name — optional CLI arg, otherwise the next readline
     if not name:
@@ -204,6 +208,13 @@ def init_project(
         else:
             print("    Try search_tools with 'overdue invoices', then invoke it through call_tool")
         print("\nHappy coding! 🚀\n")
+        duration_ms = int((time.monotonic() - init_started) * 1000)
+        track_init_completed(
+            template=template,
+            skip_install=skip_install,
+            duration_ms=duration_ms,
+            has_custom_description=description.strip() != "My awesome MCP server",
+        )
         return
     if template == "python-oauth":
         print(" 2. Configure OAuth credentials in your \033[34m.env\033[0m file")
@@ -220,3 +231,10 @@ def init_project(
     print(" 6. NitroStudio cannot folder-connect a Python project (it looks for @nitrostack/core).")
     print("    Use Inspector HTTP as above, or Studio's custom MCP URL if it offers Streamable HTTP.")
     print("\nHappy coding! 🚀\n")
+    duration_ms = int((time.monotonic() - init_started) * 1000)
+    track_init_completed(
+        template=template,
+        skip_install=skip_install,
+        duration_ms=duration_ms,
+        has_custom_description=description.strip() != "My awesome MCP server",
+    )
