@@ -70,6 +70,7 @@ class StartupMixin:
             protocol_era=era,
             wire_mode=wire_mode,
             http_engine=http_engine,
+            json_body_limit=self.server_config.json_body_limit,
         )
 
         # The official MCP SDK owns the complete Streamable HTTP request lifecycle

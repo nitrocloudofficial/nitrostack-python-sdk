@@ -33,11 +33,12 @@ from nitrostack.transports.http.constants import (
     DEFAULT_ENDPOINT,
     logger,
 )
-from nitrostack.transports.http.env import _env_flag, _env_list
+from nitrostack.transports.http.env import _env_flag, _env_list, resolve_json_body_limit
 from nitrostack.transports.http.handlers import make_handlers
 from nitrostack.transports.http.middleware import (
     ExactEndpointSlashMiddleware,
     HeaderCompatMiddleware,
+    JsonBodyLimitMiddleware,
     SessionCapMiddleware,
 )
 from nitrostack.transports.http.tracing import (
@@ -72,6 +73,7 @@ def build_http_app(
     protocol_era: ProtocolEra = "auto",
     wire_mode: WireMode = "stateless",
     http_engine: Optional[HttpEngine] = None,
+    json_body_limit: str | int | None = None,
 ) -> Starlette:
     """
     Build the Starlette app exposing NitroStack's owned low-level server over
@@ -263,6 +265,12 @@ def build_http_app(
     if _env_flag("NITROSTACK_HTTP_DEBUG"):
         _enable_trace_logging()
         middleware.insert(0, Middleware(RequestTraceMiddleware))
+
+    limit_bytes = resolve_json_body_limit(json_body_limit)
+    middleware.insert(
+        0,
+        Middleware(JsonBodyLimitMiddleware, limit_bytes=limit_bytes),
+    )
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
     app.state.protocol_era = protocol_era

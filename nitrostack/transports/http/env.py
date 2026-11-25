@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import os
-from typing import List
+import re
+from typing import List, Union
+
+DEFAULT_JSON_BODY_LIMIT = "100kb"
 
 
 def _env_list(name: str) -> List[str]:
@@ -14,3 +17,26 @@ def _env_list(name: str) -> List[str]:
 
 def _env_flag(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_json_body_limit(value: Union[str, int]) -> int:
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().lower().replace(" ", "")
+    match = re.fullmatch(r"(\d+)(b|kb|mb)?", text)
+    if not match:
+        raise ValueError(f"Invalid JSON body limit: {value!r}")
+    amount = int(match.group(1))
+    unit = match.group(2) or "b"
+    if unit == "kb":
+        return amount * 1024
+    if unit == "mb":
+        return amount * 1024 * 1024
+    return amount
+
+
+def resolve_json_body_limit(config_value: Union[str, int, None] = None) -> int:
+    """Config wins, then ``NITROSTACK_JSON_BODY_LIMIT`` / ``MCP_JSON_BODY_LIMIT``, else 100kb."""
+    env = os.environ.get("NITROSTACK_JSON_BODY_LIMIT") or os.environ.get("MCP_JSON_BODY_LIMIT")
+    raw = config_value if config_value is not None else (env or DEFAULT_JSON_BODY_LIMIT)
+    return parse_json_body_limit(raw)

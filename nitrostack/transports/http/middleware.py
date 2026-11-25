@@ -10,6 +10,54 @@ from nitrostack.transports.headers import strip_legacy_session_headers_asgi
 from nitrostack.transports.http.constants import MCP_ACCEPT, logger
 
 
+class JsonBodyLimitMiddleware:
+    """Reject oversized JSON HTTP bodies with 413 before the MCP stack parses them."""
+
+    def __init__(self, app: ASGIApp, *, limit_bytes: int) -> None:
+        self.app = app
+        self.limit_bytes = limit_bytes
+
+    @staticmethod
+    def _is_json_post(scope: Scope) -> bool:
+        if scope.get("type") != "http" or scope.get("method") != "POST":
+            return False
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"content-type" and b"application/json" in value.lower():
+                return True
+        return False
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not self._is_json_post(scope):
+            await self.app(scope, receive, send)
+            return
+
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"content-length":
+                try:
+                    if int(value) > self.limit_bytes:
+                        response = JSONResponse({"error": "Payload too large"}, status_code=413)
+                        await response(scope, receive, send)
+                        return
+                except ValueError:
+                    break
+
+        seen = 0
+
+        async def limited_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                chunk = message.get("body", b"") or b""
+                seen += len(chunk)
+                if seen > self.limit_bytes:
+                    response = JSONResponse({"error": "Payload too large"}, status_code=413)
+                    await response(scope, receive, send)
+                    return {"type": "http.disconnect"}
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
 class ExactEndpointSlashMiddleware:
     """Internally rewrite `/mcp` -> `/mcp/` so Starlette does not 307."""
 
