@@ -66,10 +66,11 @@ def test_generated_project_lifecycle(name, kind, tmp_path):
     run([kind], project)
     if kind == "code-mode":
         run(["cleanup"], project)
-    run(["cli", "upgrade", "--version", "0.3.2"], project)
+    run(["cli", "upgrade", "--version", "0.4.2"], project)
     assert "No issues found" in run(["cli", "validate"], project)
+    from nitrostack.cli.vendor import vendored_version
+    assert vendored_version(str(project)) == "0.4.2"
     requirements = (project / "requirements.txt").read_text()
-    assert "nitrostack==0.3.2" in requirements
     if kind == "code-mode":
         assert "quickjs>=1.19.4" in requirements
         assert "quickjs>=1.19.4" in (project / "pyproject.toml").read_text()

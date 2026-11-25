@@ -22,6 +22,7 @@ from nitrostack.cli._shared import (
     read_text,
     split_requirement,
 )
+from nitrostack.cli.vendor import VENDOR_REL
 
 
 @dataclass
@@ -40,7 +41,9 @@ class ValidationIssue:
 
 
 def _iter_python_files(root: str) -> Iterable[str]:
-    vendored_sdk = os.path.join(os.path.abspath(root), "vendor", "nitrostack")
+    # The vendored SDK is not project code; its testing helpers apply @mcp_app
+    # inside functions, which reads as an app with no decorated class.
+    vendored_sdk = os.path.join(os.path.abspath(root), VENDOR_REL)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames

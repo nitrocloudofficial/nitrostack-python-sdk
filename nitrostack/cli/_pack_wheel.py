@@ -69,6 +69,8 @@ def _write_purelib_wheel(
     name: str,
     version: str,
     deps: Sequence[str],
+    *,
+    include_env: bool = False,
 ) -> str:
     """Write a PEP 427 py3-none-any wheel from the staged project files."""
     os.makedirs(wheel_dir, exist_ok=True)
@@ -78,7 +80,7 @@ def _write_purelib_wheel(
     wheel_path = os.path.join(wheel_dir, wheel_filename)
     dist_info = f"{dist_name}-{version}.dist-info"
 
-    contents = _collect_staging_bytes(src_root)
+    contents = _collect_staging_bytes(src_root, include_env=include_env)
     metadata_lines = [
         "Metadata-Version: 2.1",
         f"Name: {display_name}",

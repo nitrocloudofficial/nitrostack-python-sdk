@@ -89,12 +89,17 @@ def build_parser(*, _add_port_flags, OFFICIAL_TEMPLATES):
     # pack command
     pack_parser = subparsers.add_parser(
         "pack",
-        help="Build a deployable wheel of the current project (never includes .env/secrets)",
+        help="Build a deployable wheel of the current project (excludes .env by default)",
     )
     pack_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show files that would be packed without creating the artifact",
+    )
+    pack_parser.add_argument(
+        "--include-env",
+        action="store_true",
+        help="Include .env files in the wheel (use with caution!)",
     )
 
     # upgrade command

@@ -1,5 +1,7 @@
 # NitroStack Python SDK
 
+<a href="https://www.producthunt.com/products/nitrostack?embed=true&amp;utm_source=badge-top-post-badge&amp;utm_medium=badge&amp;utm_campaign=badge-nitrostack" target="_blank" rel="noopener noreferrer"><img alt="NitroStack - Build, test, and deploy MCP servers in one place | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1273961&amp;theme=neutral&amp;period=daily&amp;t=1792301273013"></a>
+
 A Python-idiomatic port of the **NitroStack** Model Context Protocol (MCP) framework, enabling NestJS-like modular architecture, dependency injection, execution pipelines, background task processing, built-in authentication modules, and a diagnostic testing harness.
 
 ---
@@ -128,15 +130,16 @@ Attach generated pipeline classes with `@use_guards`, `@use_pipes`, `@use_interc
 ```bash
 nitrostack-py pack --dry-run    # list files; does not write an artifact
 nitrostack-py pack              # write dist/*.whl
+nitrostack-py pack --include-env  # also pack .env files (use with caution!)
 ```
 
-`pack` builds a wheel with setuptools (the same backend as this SDK), refreshes `requirements.txt` from `pyproject.toml` when possible, and always includes `.env.example`. The real `.env` file and other secrets are never packed. Temporary build directories are deleted afterwards.
+`pack` builds a wheel with setuptools (the same backend as this SDK), refreshes `requirements.txt` from `pyproject.toml` when possible, and always includes `.env.example`. `.env`, `.env.local`, and `.env.production` are excluded unless you pass `--include-env`. Temporary build directories are deleted afterwards.
 
 ### Upgrade, install, validate
 
 ```bash
-nitrostack-py upgrade                 # latest nitrostack on PyPI (writes nitrostack>=latest)
-nitrostack-py upgrade --version 0.3.2 # pin exactly this version (writes nitrostack==0.3.2)
+nitrostack-py upgrade                 # move the project to the latest nitrostack on PyPI
+nitrostack-py upgrade --version 0.4.2 # move it to exactly this version
 nitrostack-py upgrade --dry-run       # print the change; do not edit files
 nitrostack-py upgrade --allow-downgrade --version 0.1.0  # required to pin an older version
 
@@ -155,7 +158,7 @@ nitrostack = { path = "/path/to/nitrostack-python-sdk", editable = true }
 
 then `uv lock` / `uv sync`. Without `uv`, install falls back to `.venv` + `pip`.
 
-`upgrade` updates the `nitrostack` dependency spec in `pyproject.toml` in place (and `requirements.txt` when it already pins nitrostack). `--version X` writes `nitrostack==X`. Without `--version`, the latest PyPI release is written as `nitrostack>=latest`. A target older than the currently declared version is rejected unless `--allow-downgrade` is passed. `validate` reports missing/conflicting dependencies, `@mcp_app` modules that fail to import, and `@module()` `imports`/`exports` that are not real classes.
+`upgrade` in a project with `vendor/nitrostack` (every project `init` creates) replaces the vendored copy with the target release: the wheel is downloaded from PyPI and checked against its published sha256, or copied from the running CLI when it is that release. The dependency stays the plain name `nitrostack`. In other projects, `upgrade` updates the `nitrostack` spec in `pyproject.toml`'s `dependencies` (and `requirements.txt` when it already pins nitrostack): `--version X` writes `nitrostack==X`, and without `--version` the latest release is written as `nitrostack>=latest`. Either way, run `nitrostack-py install` afterwards, and a target older than the current version is rejected unless `--allow-downgrade` is passed. `validate` reports missing/conflicting dependencies, `@mcp_app` modules that fail to import, and `@module()` `imports`/`exports` that are not real classes.
 
 ---
 
@@ -247,7 +250,29 @@ if __name__ == "__main__":
 
 ### 2. Configure Environment Variables
 
-The SDK reads standard settings from the environment or `.env` files:
+The SDK reads settings from the process environment and the project's `.env` file. **The process environment wins:** a variable already set when the server starts (for example `PORT=3001` from NitroStudio or your shell) is not overwritten by `.env`. `.env` fills in what isn't set, and `ConfigModule.for_root(defaults=...)` fills in the rest. (Before 0.4.1, `.env` overwrote the environment.)
+
+Read your own settings through `ConfigService`:
+
+```python
+from nitrostack import ConfigModule, ConfigService, injectable, module
+
+@injectable(deps=[ConfigService])
+class WeatherService:
+    def __init__(self, config: ConfigService):
+        self.units = config.get("WEATHER_UNITS", "metric")
+        self.api_key = config.get_or_throw("WEATHER_API_KEY")  # KeyError if unset
+
+@module(
+    name="app",
+    imports=[ConfigModule.for_root(env_file_path=".env", defaults={"WEATHER_UNITS": "metric"})],
+    providers=[WeatherService],
+)
+class AppModule:
+    pass
+```
+
+Common transport and telemetry variables:
 
 | Environment Variable | Description |
 |---|---|
@@ -323,6 +348,214 @@ OAuthModule.for_root(**setup_oauth_auth())     # reads RESOURCE_URI, AUTH_SERVER
 
 `generate_test_credentials()` returns random `SecretValue` credentials for tests and local
 demos only. They are never printed; call `.unwrap()` to read one.
+
+## Building Blocks
+
+The examples below build on each other (later ones reuse `LookupInput` and `NoInput`) and are methods on a controller (an `@injectable` class listed in a module's `controllers`). Every tool takes `(self, input, context)`, where `input` is an instance of its `input_schema` model and `context` is the `ExecutionContext` (logger, auth, task, request metadata).
+
+### Tools
+
+```python
+from pydantic import BaseModel, Field
+from nitrostack import tool, initial_tool, ToolAnnotations, ToolExamples, ExecutionContext
+
+class LookupInput(BaseModel):
+    city: str = Field(description="City name")
+
+class Weather(BaseModel):
+    city: str
+    temp: float
+    units: str
+
+class NoInput(BaseModel):
+    pass
+
+class WeatherController:
+    @tool(
+        name="get_weather",
+        title="Get Weather",
+        description="Current weather for a city",
+        input_schema=LookupInput,
+        output_schema=Weather,  # optional; adds structuredContent
+        annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True),
+        examples=ToolExamples(input={"city": "Paris"}, output={"city": "Paris", "temp": 21, "units": "metric"}),
+    )
+    async def get_weather(self, input: LookupInput, context: ExecutionContext) -> dict:
+        return {"city": input.city, "temp": 21, "units": "metric"}
+
+    @tool(name="whats_new", description="Shown when a client connects", input_schema=NoInput)
+    @initial_tool  # clients that support it call this on connect
+    async def whats_new(self, input: NoInput, context: ExecutionContext) -> str:
+        return "Try get_weather."
+```
+
+A tool with no arguments still needs an input model; use an empty `BaseModel` subclass like `NoInput` (not `BaseModel` itself). `visibility="hidden"` keeps a tool callable but out of `tools/list`. Raise an exception to return an MCP error to the client.
+
+### Resources and prompts
+
+```python
+from typing import List
+from nitrostack import resource, prompt, PromptArgument, PromptMessage, ExecutionContext
+
+class WeatherController:
+    @resource(uri="weather://units", name="Units", description="Units in use", mime_type="text/plain")
+    async def units(self, context: ExecutionContext) -> str:
+        return "metric"
+
+    @prompt(
+        name="forecast_brief",
+        description="Write a short forecast",
+        arguments=[PromptArgument(name="city", description="City", required=True)],
+    )
+    async def forecast_brief(self, args: dict, context: ExecutionContext) -> List[PromptMessage]:
+        return [PromptMessage(role="user", content=f"Write a short forecast for {args['city']}.")]
+```
+
+### Guards, interceptors, pipes, middleware and filters
+
+Each is a small class with one async method; attach it with a decorator below `@tool`. Generate stubs with `nitrostack-py generate guard|pipe|interceptor|filter <Name>`.
+
+| Stage | Method | Attach with | Runs |
+|---|---|---|---|
+| Guard | `can_activate(context) -> bool` | `@use_guards(...)` | first; `False` rejects the call ("Access denied by guard") |
+| Pipe | `transform(value, metadata)` | `@use_pipes(...)` | on the tool input, after guards |
+| Middleware | `use(context, next_fn)` | `@use_middleware(...)` | around interceptors and the tool |
+| Interceptor | `intercept(context, next_fn)` | `@use_interceptors(...)` | around the tool; can change its result |
+| Exception filter | `catch(error, context)` | `@use_filters(...)` | on errors; its return value becomes the result |
+
+```python
+from nitrostack import tool, use_guards, use_interceptors, use_filters, ExecutionContext
+
+class OfficeHoursGuard:
+    async def can_activate(self, context: ExecutionContext) -> bool:
+        return context.metadata.get("office_open", True)
+
+class TimingInterceptor:
+    async def intercept(self, context: ExecutionContext, next_fn):
+        result = await next_fn()
+        context.logger.info(f"{context.tool_name} finished")
+        return result
+
+class FriendlyErrors:
+    async def catch(self, error: Exception, context: ExecutionContext):
+        return {"error": str(error)}
+
+class WeatherController:
+    @tool(name="get_forecast", description="Forecast for a city", input_schema=LookupInput)
+    @use_guards(OfficeHoursGuard)
+    @use_interceptors(TimingInterceptor)
+    @use_filters(FriendlyErrors)
+    async def get_forecast(self, input: LookupInput, context: ExecutionContext) -> dict:
+        return {"city": input.city, "forecast": "sunny"}
+```
+
+### Authentication
+
+Register an auth module in the root module, then guard tools. Guards fill `context.auth` (`subject`, `scopes`, `client_id`, `claims`, ...).
+
+| Module | Guard | Configured by |
+|---|---|---|
+| `ApiKeyModule.for_root(keys_env_prefix="API_KEY", hashed=False)` | `ApiKeyGuard` | `x-api-key` header checked against `API_KEY`, `API_KEY_1`, `API_KEY_2`, ... (SHA-256 hashes when `hashed=True`) |
+| `JWTModule.for_root(secret_env_var="JWT_SECRET", audience=..., issuer=...)` | `JwtGuard` | `Authorization: Bearer <jwt>` |
+| `OAuthModule.for_root(resource_uri=..., authorization_servers=[...], scopes_supported=[...], token_introspection_endpoint=... or jwks_uri=...)` | `OAuthGuard` | OAuth 2.1 access tokens, audience-bound; `OAUTH_REQUIRED=true` to require one |
+
+```python
+from nitrostack import (
+    ApiKeyGuard, ApiKeyModule, ExecutionContext, OAuthGuard, module, require_scopes, tool, use_guards,
+)
+
+class AccountController:
+    @tool(name="get_balance", description="Account balance", input_schema=NoInput)
+    @use_guards(ApiKeyGuard)
+    async def get_balance(self, input: NoInput, context: ExecutionContext) -> dict:
+        return {"balance": 42}
+
+    @tool(name="close_account", description="Close the account", input_schema=NoInput)
+    @use_guards(OAuthGuard)
+    @require_scopes("admin")  # needs context.auth with every listed scope
+    async def close_account(self, input: NoInput, context: ExecutionContext) -> dict:
+        return {"closed": True}
+
+@module(name="app", imports=[ApiKeyModule.for_root()], controllers=[AccountController])
+class AppModule:
+    pass
+```
+
+Register `ApiKeyModule` when you use `ApiKeyGuard`: without it, the guard falls back to the `API_KEY` variable, and with neither set it lets every call through.
+
+`has_scope`, `has_any_scope` and `has_all_scopes` check `context.auth` inside a tool. For OAuth, start from the `python-oauth` template and its `OAUTH_SETUP.md`; PKCE (`generate_pkce_params`, `verify_pkce`), client ID metadata documents (`resolve_cimd`) and `generate_www_authenticate_header` are exported for custom flows.
+
+### Caching and rate limits
+
+```python
+from nitrostack import cache, injectable, rate_limit, tool
+
+@injectable()
+class WeatherService:
+    @cache(ttl=60)  # seconds; keyed on the arguments
+    async def lookup(self, city: str) -> dict:
+        return {"city": city, "temp": 21}
+
+class WeatherController:
+    @tool(name="ping", description="Ping", input_schema=NoInput)
+    @rate_limit(max=10, window=60)  # 10 calls per 60 s, across all callers
+    async def ping(self, input: NoInput, context: ExecutionContext) -> str:
+        return "pong"
+```
+
+Put `@cache` on a service method with plain, hashable arguments (strings, numbers, tuples). It can't key on a tool's Pydantic input object.
+
+### Long-running tasks
+
+Set `task_support="optional"` (or `"required"`) and the client can run the tool as an MCP task: it polls `tasks/get`, can cancel it, and gets live `notifications/progress` when it sends a `progressToken`. `context.task` is `None` when the tool is called normally.
+
+```python
+import asyncio
+from pydantic import BaseModel
+from nitrostack import tool, ExecutionContext
+
+class ReportInput(BaseModel):
+    steps: int = 5
+
+class ReportController:
+    @tool(name="build_report", description="Build a report", input_schema=ReportInput, task_support="optional")
+    async def build_report(self, input: ReportInput, context: ExecutionContext) -> dict:
+        for step in range(1, input.steps + 1):
+            if context.task:
+                context.task.update_progress(f"Step {step}/{input.steps}")
+                context.task.throw_if_cancelled()
+            await asyncio.sleep(1)
+        return {"steps": input.steps}
+```
+
+### Events and health checks
+
+```python
+from typing import List
+from nitrostack import EventEmitter, health_check, injectable, on_event
+
+@injectable()
+class OrderService:
+    async def place(self, order_id: str) -> None:
+        await EventEmitter.get_instance().emit("order.placed", {"id": order_id})
+
+@injectable()
+class AuditLog:
+    def __init__(self):
+        self.entries: List[str] = []
+
+    @on_event("order.placed")
+    def record(self, payload: dict) -> None:
+        self.entries.append(payload["id"])
+
+    @health_check("audit")
+    def healthy(self) -> bool:
+        return True
+```
+
+Listeners and health checks are found on any provider or controller in a module. When any health check exists, the server exposes the `health://status` resource (`{"audit": "healthy"}`). Keep health checks synchronous.
+
+---
 
 ## Transport Options
 
@@ -450,6 +683,8 @@ from nitrostack import WidgetOptions, WidgetCsp, widget
     prefers_border=True,
     csp=WidgetCsp(connect_domains=["https://api.example.com"]),
 ))
+async def show_chart(self, input, context):
+    ...
 ```
 
 `nitrostack-py init` copies `widgets/out/{route}.html` for every `@widget`. Widget HTML

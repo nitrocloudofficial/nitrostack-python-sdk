@@ -200,7 +200,6 @@ def run_login(user_id: str, email: str, org_id: str | None = None):
         organization_id=(org_id or "").strip() or None,
     )
 
-
 def run_dev(port=None, widget=None):
     return _servers.run_dev(
         port,
@@ -326,7 +325,7 @@ def main():
             else:
                 generate_component(args.generator, args.name)
         elif args.command == "pack":
-            _run_command(pack_project, dry_run=args.dry_run)
+            _run_command(pack_project, dry_run=args.dry_run, include_env=args.include_env)
         elif args.command == "upgrade":
             _run_command(
                 upgrade_project,
@@ -345,7 +344,6 @@ def main():
             _run_command(run_login, args.user_id, args.email, args.org_id)
     finally:
         shutdown_telemetry()
-
 
 if __name__ == "__main__":
     main()

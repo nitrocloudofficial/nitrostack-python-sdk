@@ -1,8 +1,9 @@
 """Project packing for `nitrostack-py pack`.
 
 Builds a deployable wheel of the current project using the setuptools backend
-already declared in NitroStack's packaging config. Secrets (``.env``) are never
-included. Temporary build artifacts are cleaned up after packing.
+already declared in NitroStack's packaging config. Secrets (``.env``) are excluded
+by default; pass ``include_env`` to pack them. Temporary build artifacts are
+cleaned up after packing.
 """
 
 from __future__ import annotations
@@ -46,6 +47,17 @@ from nitrostack.cli._pack_wheel import (
 )
 
 
+def _secret_env_paths_in_pack(files: Sequence[str]) -> List[str]:
+    return sorted(rel for rel in files if _is_secret_env(rel.rsplit("/", 1)[-1]))
+
+
+def _warn_including_env_files(env_files: Sequence[str]) -> None:
+    if not env_files:
+        return
+    listed = ", ".join(env_files)
+    print(f"Warning: Including .env files in the wheel (use with caution!): {listed}")
+
+
 def _build_wheel_with_setuptools(src_root: str, wheel_dir: str) -> Optional[str]:
     """Resolve the backend callback here so existing facade patches still apply."""
     return _pack_wheel._build_wheel_with_setuptools(
@@ -59,11 +71,16 @@ def _build_wheel(
     name: str,
     version: str,
     deps: Sequence[str],
+    *,
+    include_env: bool = False,
 ) -> str:
+    def _write_purelib_with_env(sr, wd, n, v, d):
+        return _write_purelib_wheel(sr, wd, n, v, d, include_env=include_env)
+
     return _pack_wheel._build_wheel(
         src_root, wheel_dir, name, version, deps,
         build_with_setuptools=_build_wheel_with_setuptools,
-        write_purelib=_write_purelib_wheel,
+        write_purelib=_write_purelib_with_env,
     )
 
 
@@ -71,6 +88,7 @@ def pack_project(
     root: Optional[str] = None,
     *,
     dry_run: bool = False,
+    include_env: bool = False,
     output_dir: Optional[str] = None,
 ) -> dict:
     """Pack the project at ``root``.
@@ -80,11 +98,14 @@ def pack_project(
     root = os.path.abspath(root or os.getcwd())
     from nitrostack.cli.vendor import ensure_vendored_nitrostack
     ensure_vendored_nitrostack(root)
-    files = collect_pack_files(root)
+    files = collect_pack_files(root, include_env=include_env)
     name, version = _project_name_and_version(root)
     dist_name = _pep503_wheel_name(_normalize_dist_name(name))
     planned_wheel = f"{dist_name}-{version}-py3-none-any.whl"
     dest_dir = os.path.abspath(output_dir or os.path.join(root, "dist"))
+
+    if include_env:
+        _warn_including_env_files(_secret_env_paths_in_pack(files))
 
     print("Files that would be packed:" if dry_run else "Packing files:")
     for rel in files:
@@ -105,12 +126,17 @@ def pack_project(
             write_requirements_txt(staging, deps)
             _ensure_pyproject(staging, name, version, deps)
 
-            wheel_path = _build_wheel(staging, wheel_tmp, name, version, deps)
+            wheel_path = _build_wheel(
+                staging, wheel_tmp, name, version, deps, include_env=include_env,
+            )
             extra = []
             env_example = os.path.join(staging, ".env.example")
             reqs = os.path.join(staging, "requirements.txt")
             extra.append((".env.example", env_example))
             extra.append(("requirements.txt", reqs))
+            if include_env:
+                for rel in _secret_env_paths_in_pack(files):
+                    extra.append((rel, os.path.join(staging, rel.replace("/", os.sep))))
             _inject_into_wheel(wheel_path, extra)
 
             if not _is_valid_wheel(wheel_path):
