@@ -127,16 +127,17 @@ class RegistrationMixin:
         #    onto the owned low-level server. This is factored out so additional server
         #    instances (e.g. one per HTTP session) can be configured identically.
         for entry in self._tools.values():
-            entry.has_spillover = self._has_spillover(entry.method)
-            for candidate in getattr(entry.method, "_mcp_interceptors", []):
-                interceptor = (
-                    container.resolve(candidate) if isinstance(candidate, type) else candidate
-                )
-                if isinstance(interceptor, DataSpilloverInterceptor):
-                    self._spillover.register(interceptor)
-        for entry in self._tools.values():
-            entry.input_json_schema = self._tool_input_schema(entry.input_model)
+            self._wire_spillover_for_entry(entry)
         self._setup_handlers(self.mcp_server)
+
+    def _wire_spillover_for_entry(self, entry: _ToolEntry) -> None:
+        container = DIContainer.get_instance()
+        for candidate in getattr(entry.method, "_mcp_interceptors", []):
+            interceptor = (
+                container.resolve(candidate) if isinstance(candidate, type) else candidate
+            )
+            if isinstance(interceptor, DataSpilloverInterceptor):
+                self._spillover.register(interceptor)
 
     def _assert_declared_dependencies(
         self, resolved_modules: Set[Type], container: DIContainer
@@ -223,6 +224,8 @@ class RegistrationMixin:
         self._tools[tool_config.name] = entry
         if tool_config.is_initial:
             self._initial_tools.append((instance, method, tool_config))
+        if self.mcp_server is not None:
+            self._wire_spillover_for_entry(entry)
 
     def _register_widget_resource(self, component: Component) -> None:
         config = ResourceConfig(

@@ -1,5 +1,6 @@
 """Definitions implementation mixin."""
 
+import copy
 import logging
 from typing import Any, Dict, Type
 
@@ -25,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 class DefinitionsMixin:
+    def _ensure_tool_entry_wire_cache(self, entry: _ToolEntry) -> None:
+        """Lazily cache list-wire fields so tools registered after bootstrap stay correct."""
+        if entry.input_json_schema is None:
+            entry.input_json_schema = self._tool_input_schema(entry.input_model)
+        if entry.has_spillover is None:
+            entry.has_spillover = self._has_spillover(entry.method)
+
     def _tool_input_schema(self, input_model: Type[BaseModel]) -> Dict[str, Any]:
         """JSON Schema for `tools/list` with fields at the top level.
 
@@ -40,7 +48,8 @@ class DefinitionsMixin:
 
     def _build_tool_definition(self, entry: _ToolEntry) -> types.Tool:
         cfg = entry.config
-        input_schema = entry.input_json_schema or self._tool_input_schema(entry.input_model)
+        self._ensure_tool_entry_wire_cache(entry)
+        input_schema = copy.deepcopy(entry.input_json_schema)
 
         tasks_visible = self._tasks_visible_on_wire()
         meta: Dict[str, Any] = {

@@ -20,7 +20,7 @@ class _ToolEntry:
     method: Callable
     component: Optional[Component] = None
     input_json_schema: Optional[Dict[str, Any]] = None
-    has_spillover: bool = False
+    has_spillover: Optional[bool] = None
 
 
 @dataclass
