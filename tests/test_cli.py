@@ -139,7 +139,7 @@ def test_init_with_name_and_explicit_template():
         env_text = open(os.path.join(project, ".env"), encoding="utf-8").read()
         assert "PORT=3000" in env_text
         assert "WIDGETS_DEV_PORT=3001" in env_text
-        assert "NITROSTACK_APP_MODE=universal" in env_text
+        assert "NITROSTACK_APP_MODE=openai" in env_text
         assert "SERVER_DESC=\"A test server\"" in env_text
         assert "SERVER_AUTHOR=\"Tester\"" in env_text
         assert os.path.isfile(os.path.join(project, "widgets", "out", "calculator-result.html"))

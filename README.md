@@ -665,7 +665,7 @@ Place HTML at `widgets/out/{route}.html` (e.g. `widgets/out/card.html`). The SDK
 `ui://widget/card.html` as an MCP resource and sets mode-gated `_meta` on `tools/list` and
 `tools/call` results.
 
-**`NITROSTACK_APP_MODE`** (default `universal`):
+**`NITROSTACK_APP_MODE`** (default `openai`; also accepts `APP_MODE`):
 
 | Mode | Tool `_meta` | Resource MIME |
 |------|----------------|---------------|

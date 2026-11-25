@@ -151,7 +151,7 @@ def test_widget_mime_type_by_mode():
     with app_mode("universal"):
         assert get_widget_mime_type() == RESOURCE_MIME_TYPE_MCP_APP
     with app_mode(None):
-        assert get_widget_mime_type() == RESOURCE_MIME_TYPE_MCP_APP
+        assert get_widget_mime_type() == RESOURCE_MIME_TYPE_OPENAI
     assert OPENAI_SKYBRIDGE_MIME_TYPE == "text/html+skybridge"
     assert get_widget_mime_type() != OPENAI_SKYBRIDGE_MIME_TYPE
 

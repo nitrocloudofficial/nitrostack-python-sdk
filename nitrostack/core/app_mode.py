@@ -13,13 +13,19 @@ OPENAI_SKYBRIDGE_MIME_TYPE = "text/html+skybridge"
 
 
 def get_app_mode() -> AppMode:
-    """Parse ``NITROSTACK_APP_MODE`` with lenient aliases.
+    """Parse ``NITROSTACK_APP_MODE`` / ``APP_MODE`` with lenient aliases.
 
-    Default is ``universal`` so MCP Inspector (Apps tab) and ChatGPT both receive
-    widget MIME + ``_meta.ui.resourceUri`` without extra env setup.
+    Default is ``openai``. ``NITROSTACK_APP_MODE`` wins when both are set.
     """
-    raw = (os.environ.get("NITROSTACK_APP_MODE") or "universal").lower().strip()
-    if raw in ("mcp-app", "mcpapp", "mcp_app", "mcp app", "mcp", "mcpapps"):
+    raw = os.environ.get("NITROSTACK_APP_MODE") or os.environ.get("APP_MODE")
+    if raw is None:
+        return "openai"
+    raw = raw.lower().strip()
+    if not raw:
+        return "openai"
+    if raw in ("openai", "chatgpt"):
+        return "openai"
+    if raw in ("mcp-app", "mcpapp", "mcp_app", "mcp app"):
         return "mcp-app"
     if raw in ("universal", "all", "both"):
         return "universal"
