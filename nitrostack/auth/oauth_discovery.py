@@ -75,10 +75,11 @@ def start_discovery_server(service: "OAuthService") -> None:
             peer = self._proxy_peer()
             if not trusted_forwarded_host(headers, peer):
                 return None
+            port = service_instance.bound_port or service_instance.discovery_port
             return public_origin(
                 headers,
                 peer,
-                fallback_host=f"localhost:{service_instance.discovery_port}",
+                fallback_host=f"localhost:{port}",
                 fallback_proto="http",
             )
 
@@ -141,25 +142,52 @@ def start_discovery_server(service: "OAuthService") -> None:
 
             _write_json(self, 200, build_registration_response(service_instance, body))
 
-    def run_server():
-        # Try binding to OAUTH_DISCOVERY_PORT
-        port = int(os.environ.get("OAUTH_DISCOVERY_PORT", service.discovery_port))
+    raw_port = os.environ.get("OAUTH_DISCOVERY_PORT")
+    if raw_port is not None:
         try:
-            service._server = HTTPServer(("localhost", port), DiscoveryHandler)
-            # Notify client via stderr
-            oauth_metadata = {
-                "port": port,
-                "resource_uri": service.resource_uri,
-                "authorization_servers": service.authorization_servers
-            }
-            sys.stderr.write(
-                f"[NITROSTACK_OAUTH]{json.dumps(oauth_metadata)}[/NITROSTACK_OAUTH]\n"
-            )
-            sys.stderr.flush()
-            service._server.serve_forever()
-        except Exception as e:
-            sys.stderr.write(f"Failed to start OAuth Discovery Server on port {port}: {e}\n")
-            sys.stderr.flush()
+            start_port = int(raw_port)
+        except ValueError:
+            start_port = service.discovery_port
+    else:
+        start_port = service.discovery_port
 
-    service._thread = threading.Thread(target=run_server, daemon=True)
+    max_retries = max(0, service.discovery_max_retries) if service.discovery_auto_retry else 0
+    last_error: Optional[Exception] = None
+    bound_server: Optional[HTTPServer] = None
+
+    for attempt in range(max_retries + 1):
+        candidate_port = start_port + attempt
+        if candidate_port > 65535:
+            if last_error is None:
+                last_error = OverflowError("bind(): port must be 0-65535")
+            break
+        try:
+            server = HTTPServer(("localhost", candidate_port), DiscoveryHandler)
+            bound_server = server
+            service.bound_port = server.server_address[1]
+            break
+        except (OSError, OverflowError) as e:
+            last_error = e
+
+    if bound_server is None:
+        sys.stderr.write(f"Failed to start OAuth Discovery Server on port {start_port}: {last_error}\n")
+        sys.stderr.flush()
+        if isinstance(last_error, OSError):
+            raise last_error
+        raise OSError(f"Failed to start OAuth Discovery Server on port {start_port}: {last_error}") from last_error
+
+    service._server = bound_server
+
+    # Notify client via stderr
+    oauth_metadata = {
+        "port": service.bound_port,
+        "resource_uri": service.resource_uri,
+        "authorization_servers": service.authorization_servers,
+    }
+    sys.stderr.write(
+        f"[NITROSTACK_OAUTH]{json.dumps(oauth_metadata)}[/NITROSTACK_OAUTH]\n"
+    )
+    sys.stderr.flush()
+
+    service._thread = threading.Thread(target=service._server.serve_forever, daemon=True)
     service._thread.start()

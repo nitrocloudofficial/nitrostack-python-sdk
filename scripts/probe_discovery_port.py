@@ -43,8 +43,11 @@ try:
     server = getattr(service, "_server", None)
     print("server object:", server)
     print("bound to:", getattr(server, "server_address", None))
+    bound_port = getattr(service, "bound_port", None)
+    print("reported bound_port:", bound_port)
+    target_port = bound_port or port
     try:
-        url = f"http://127.0.0.1:{port}/.well-known/oauth-protected-resource"
+        url = f"http://127.0.0.1:{target_port}/.well-known/oauth-protected-resource"
         with urllib.request.urlopen(url, timeout=2) as resp:
             print("GET", url, "->", resp.status)
     except Exception as exc:

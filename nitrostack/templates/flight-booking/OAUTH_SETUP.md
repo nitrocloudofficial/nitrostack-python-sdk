@@ -52,6 +52,8 @@ TOKEN_ISSUER=https://your-tenant.us.auth0.com/
 # OAUTH_TOKEN_CACHE_SECONDS=300
 # Port for the .well-known discovery server (default 3005).
 # OAUTH_DISCOVERY_PORT=3005
+# OAUTH_DISCOVERY_AUTO_RETRY=true
+# OAUTH_DISCOVERY_MAX_RETRIES=50
 ```
 
 ## 2. Protected Routes
