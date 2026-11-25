@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, List, Set, Type
+from typing import Any, Callable, List, Sequence, Set, Type
 from unittest.mock import NonCallableMock
 
 import mcp.types as types
@@ -54,8 +54,9 @@ class RegistrationMixin:
         )
 
         # 2. Resolve Module Tree recursively and register services
-        resolved_modules: Set[Type] = set()
-        self._resolve_modules(self.root_module, resolved_modules)
+        resolved_modules: List[Type] = []
+        resolved_seen: Set[Type] = set()
+        self._resolve_modules(self.root_module, resolved_modules, resolved_seen)
 
         container = DIContainer.get_instance()
         self._assert_declared_dependencies(resolved_modules, container)
@@ -140,7 +141,7 @@ class RegistrationMixin:
                 self._spillover.register(interceptor)
 
     def _assert_declared_dependencies(
-        self, resolved_modules: Set[Type], container: DIContainer
+        self, resolved_modules: Sequence[Type], container: DIContainer
     ) -> None:
         """Fail at bootstrap when a string ``deps=[...]`` token was never registered."""
         missing: List[str] = []
@@ -170,15 +171,21 @@ class RegistrationMixin:
                 "but never registered): " + "; ".join(missing)
             )
 
-    def _resolve_modules(self, module_class: Type, resolved_modules: Set[Type]) -> None:
-        if module_class in resolved_modules:
+    def _resolve_modules(
+        self,
+        module_class: Type,
+        resolved_modules: List[Type],
+        resolved_seen: Set[Type],
+    ) -> None:
+        if module_class in resolved_seen:
             return
-        resolved_modules.add(module_class)
+        resolved_seen.add(module_class)
+        resolved_modules.append(module_class)
 
         mod_config = getattr(module_class, "_mcp_module_config", None)
         if mod_config:
             for imp in mod_config.imports:
-                self._resolve_modules(imp, resolved_modules)
+                self._resolve_modules(imp, resolved_modules, resolved_seen)
 
     def _register_tool(self, instance: Any, method: Callable, tool_config: ToolConfig) -> None:
         gate_registered_schema(tool_config.input_schema, name=f"tool {tool_config.name!r} input")
