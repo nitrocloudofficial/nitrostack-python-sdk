@@ -45,7 +45,7 @@ Repository = "https://github.com/nitrocloudofficial/nitrostack-python-sdk"
 Issues = "https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues"
 
 [project.scripts]
-nitrostack-py = "nitrostack.cli.main:main"
+nitrostack-py = "nitrostack.cli.entry:main"
 
 [tool.setuptools.packages.find]
 include = ["nitrostack*"]

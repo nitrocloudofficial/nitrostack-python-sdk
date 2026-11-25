@@ -125,7 +125,7 @@ def _write_minimal_pyproject(
         f"{deps}"
         "]\n\n"
         "[project.scripts]\n"
-        'nitrostack-py = "nitrostack.cli.main:main"\n\n'
+        'nitrostack-py = "nitrostack.cli.entry:main"\n\n'
         "[tool.setuptools.packages.find]\n"
         'include = ["nitrostack*"]\n\n'
         "[tool.setuptools]\n"
