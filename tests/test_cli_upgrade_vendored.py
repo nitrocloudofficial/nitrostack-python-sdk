@@ -123,7 +123,9 @@ def test_upgrade_replaces_the_vendored_sdk_from_the_wheel(project: Path, no_skil
     assert deps == ["mcp<3,>=2", "pydantic>=2.0.0", 'tomli>=2.0.0; python_version < "3.11"']
     # The project keeps the plain name; the vendored copy decides the version.
     assert (project / "pyproject.toml").read_text(encoding="utf-8") == pyproject_before
-    assert (project / "requirements.txt").read_text(encoding="utf-8") == "nitrostack\n"
+    from nitrostack.cli.vendor import runtime_nitrostack_requirement
+
+    assert (project / "requirements.txt").read_text(encoding="utf-8") == f"{runtime_nitrostack_requirement()}\n"
     assert not [p for p in (project / "vendor").iterdir() if p.name.startswith(".nitrostack-")]
 
 

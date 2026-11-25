@@ -19,10 +19,14 @@ import zipfile
 from pathlib import Path
 from typing import List, Optional
 
-from nitrostack.cli._shared import loads_toml, write_text_atomic
+from nitrostack.cli._shared import loads_toml, requirement_name, write_text_atomic
 
 VENDOR_REL = os.path.join("vendor", "nitrostack")
-_PLAIN_REQUIREMENT = "nitrostack"
+
+
+def runtime_nitrostack_requirement() -> str:
+    """PEP 508 requirement pinning at least the SDK version running this CLI."""
+    return f"nitrostack>={_distribution_version()}"
 _PATH_PINS = frozenset({"./vendor/nitrostack", "-e ./vendor/nitrostack"})
 _NAMED_REQUIREMENT = re.compile(
     r"^(?:-e\s+|--editable\s+)?nitrostack"
@@ -257,8 +261,9 @@ def replace_vendored_nitrostack(project: str, wheel: Optional[bytes] = None) -> 
 
 
 def _pin_text(text: str) -> str:
-    """Keep `[project].dependencies` as a plain name (valid wheel Requires-Dist)."""
-    return _QUOTED_NITROSTACK.sub(lambda match: f"{match.group(1)}nitrostack{match.group(1)}", text)
+    """Keep `[project].dependencies` on `nitrostack` with a minimum SDK version."""
+    spec = runtime_nitrostack_requirement()
+    return _QUOTED_NITROSTACK.sub(lambda match: f"{match.group(1)}{spec}{match.group(1)}", text)
 
 
 def _pin_requirements(path: Path) -> None:
@@ -270,7 +275,7 @@ def _pin_requirements(path: Path) -> None:
     for line in lines:
         stripped = line.strip()
         if stripped in _PATH_PINS or _NAMED_REQUIREMENT.match(stripped):
-            out.append(f"{_PLAIN_REQUIREMENT}\n")
+            out.append(f"{runtime_nitrostack_requirement()}\n")
         else:
             out.append(line)
     path.write_text("".join(out), encoding="utf-8")
@@ -294,6 +299,12 @@ def _ensure_uv_source(text: str) -> str:
     if not text.endswith("\n"):
         text += "\n"
     return text + '\n[tool.uv.sources]\nnitrostack = { path = "vendor/nitrostack" }\n'
+
+
+def apply_runtime_nitrostack_pins(deps: List[str]) -> List[str]:
+    """Ensure each ``nitrostack`` entry carries at least the running SDK version."""
+    spec = runtime_nitrostack_requirement()
+    return [spec if requirement_name(dep) == "nitrostack" else dep for dep in deps]
 
 
 def pin_project_to_vendor(project: Path) -> None:

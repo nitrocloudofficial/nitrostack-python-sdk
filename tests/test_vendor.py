@@ -6,11 +6,14 @@ from pathlib import Path
 import pytest
 
 from nitrostack.cli.vendor import (
+    apply_runtime_nitrostack_pins,
     copy_running_nitrostack,
     ensure_vendored_nitrostack,
     pin_project_to_vendor,
     running_nitrostack_root,
+    runtime_nitrostack_requirement,
 )
+import nitrostack
 
 
 def test_running_nitrostack_root_is_the_sdk_checkout():
@@ -34,11 +37,12 @@ def test_ensure_vendored_pins_pyproject_and_requirements(tmp_path: Path):
     (tmp_path / "requirements.txt").write_text("nitrostack>=0.3.2\n", encoding="utf-8")
     dest = ensure_vendored_nitrostack(str(tmp_path), quiet=True)
     assert dest and os.path.isdir(dest)
+    expected = runtime_nitrostack_requirement()
     pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'dependencies = ["nitrostack"]' in pyproject
+    assert f'dependencies = ["{expected}"]' in pyproject
     assert "file:./vendor" not in pyproject
     assert 'nitrostack = { path = "vendor/nitrostack" }' in pyproject
-    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "nitrostack"
+    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == expected
     pin_project_to_vendor(tmp_path)
     again = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     assert again.count('nitrostack = { path = "vendor/nitrostack" }') == 1
@@ -53,11 +57,12 @@ def test_pin_strips_file_url_that_breaks_cloud_uv_wheels(tmp_path: Path):
     (tmp_path / "requirements.txt").write_text("nitrostack @ file:./vendor/nitrostack\n", encoding="utf-8")
     (tmp_path / "vendor" / "nitrostack").mkdir(parents=True)
     pin_project_to_vendor(tmp_path)
+    expected = runtime_nitrostack_requirement()
     text = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'dependencies = ["nitrostack"]' in text
+    assert f'dependencies = ["{expected}"]' in text
     assert "file:./vendor" not in text
     assert 'nitrostack = { path = "vendor/nitrostack" }' in text
-    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == "nitrostack"
+    assert (tmp_path / "requirements.txt").read_text(encoding="utf-8").strip() == expected
 
 
 def test_minimal_pyproject_uses_distribution_version(tmp_path: Path, monkeypatch):
@@ -84,6 +89,25 @@ def test_distribution_version_has_no_hardcoded_fallback(monkeypatch):
     monkeypatch.setattr("importlib.metadata.version", _missing)
     with pytest.raises(RuntimeError, match="package version"):
         _distribution_version()
+
+
+def test_requirements_from_project_pins_nitrostack_minimum(tmp_path: Path) -> None:
+    from nitrostack.cli._pack_metadata import requirements_from_project
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\n'
+        'dependencies = ["uvicorn[standard]>=0.20", "nitrostack>=0.3.0"]\n',
+        encoding="utf-8",
+    )
+    deps = requirements_from_project(str(tmp_path))
+    assert "uvicorn[standard]>=0.20" in deps
+    assert runtime_nitrostack_requirement() in deps
+
+
+def test_apply_runtime_nitrostack_pins_replaces_plain_name():
+    spec = runtime_nitrostack_requirement()
+    deps = apply_runtime_nitrostack_pins(["mcp>=2", "nitrostack", "nitrostack==0.4.2"])
+    assert deps == ["mcp>=2", spec, spec]
 
 
 def test_ensure_vendored_skips_the_sdk_checkout():
