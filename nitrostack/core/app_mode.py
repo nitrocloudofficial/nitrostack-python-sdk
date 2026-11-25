@@ -25,7 +25,7 @@ def get_app_mode() -> AppMode:
         return "openai"
     if raw in ("openai", "chatgpt"):
         return "openai"
-    if raw in ("mcp-app", "mcpapp", "mcp_app", "mcp app"):
+    if raw in ("mcp-app", "mcpapp", "mcp_app", "mcp app", "mcp", "mcpapps"):
         return "mcp-app"
     if raw in ("universal", "all", "both"):
         return "universal"

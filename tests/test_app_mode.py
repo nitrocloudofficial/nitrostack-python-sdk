@@ -51,7 +51,7 @@ def test_openai_aliases(monkeypatch):
 
 @pytest.mark.parametrize(
     "alias",
-    ["mcp-app", "mcpapp", "mcp_app", "mcp app", "MCP-APP"],
+    ["mcp-app", "mcpapp", "mcp_app", "mcp app", "mcp", "mcpapps", "MCP-APP"],
 )
 def test_mcp_app_aliases(monkeypatch, alias):
     monkeypatch.setenv("NITROSTACK_APP_MODE", alias)
