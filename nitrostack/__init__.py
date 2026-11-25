@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 import importlib
+import pkgutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nitrostack._export_map import EXPORT_LOCATIONS
+
+_PKG_ROOT = Path(__file__).resolve().parent
+
+
+def _subpackage_names() -> frozenset[str]:
+    names = {m.name for m in pkgutil.iter_modules([str(_PKG_ROOT)]) if not m.name.startswith("_")}
+    for path in _PKG_ROOT.iterdir():
+        if path.is_dir() and not path.name.startswith("_") and path.name != "__pycache__":
+            names.add(path.name)
+    return frozenset(names)
 
 # NitroStack Python SDK Public API Exports
 
@@ -181,20 +193,28 @@ __all__ = ['AuthorizationFlow',
  'StatelessInvariants',
  'assert_stateless_headers']
 
-_LAZY_CACHE: dict[str, object] = {}
-
 def __getattr__(name: str) -> object:
     location = EXPORT_LOCATIONS.get(name)
-    if location is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    if name not in _LAZY_CACHE:
+    if location is not None:
         module_name, attr = location
         module = importlib.import_module(module_name)
-        _LAZY_CACHE[name] = getattr(module, attr)
-    return _LAZY_CACHE[name]
+        value = getattr(module, attr)
+        globals()[name] = value
+        return value
+    if name.startswith("_") or name not in _subpackage_names():
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        module = importlib.import_module(f"{__name__}.{name}")
+    except ModuleNotFoundError as exc:
+        if exc.name == f"{__name__}.{name}":
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+        raise
+    globals()[name] = module
+    return module
+
 
 def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *__all__})
+    return sorted({*globals().keys(), *__all__, *_subpackage_names()})
 
 if TYPE_CHECKING:
     from nitrostack.widgets.registry import WidgetExample, WidgetManifest, WidgetMetadata, WidgetRegistry, get_widget_registry  # noqa: F401
