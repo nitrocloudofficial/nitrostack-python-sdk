@@ -5,7 +5,7 @@ import os
 import re
 from typing import List, Union
 
-DEFAULT_JSON_BODY_LIMIT = "100kb"
+DEFAULT_JSON_BODY_LIMIT = "1mb"
 
 
 def _env_list(name: str) -> List[str]:
@@ -36,7 +36,7 @@ def parse_json_body_limit(value: Union[str, int]) -> int:
 
 
 def resolve_json_body_limit(config_value: Union[str, int, None] = None) -> int:
-    """Config wins, then ``NITROSTACK_JSON_BODY_LIMIT`` / ``MCP_JSON_BODY_LIMIT``, else 100kb."""
+    """Config wins, then ``NITROSTACK_JSON_BODY_LIMIT`` / ``MCP_JSON_BODY_LIMIT``, else 1mb."""
     env = os.environ.get("NITROSTACK_JSON_BODY_LIMIT") or os.environ.get("MCP_JSON_BODY_LIMIT")
     raw = config_value if config_value is not None else (env or DEFAULT_JSON_BODY_LIMIT)
     return parse_json_body_limit(raw)
