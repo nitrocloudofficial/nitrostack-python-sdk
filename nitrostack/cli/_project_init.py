@@ -224,7 +224,10 @@ def init_project(
     print(" 3. Start development server: \033[34mnitrostack-py dev\033[0m (or `python -m nitrostack.cli.main dev`)")
     print(" 4. Preview widgets: \033[34mhttp://localhost:3000/widgets/preview\033[0m (server running)")
     print("    Static file (manual JSON): \033[34mopen widgets/preview.html\033[0m")
-    print(" 5. Inspector (HTTP): \033[34mMCP_TRANSPORT_TYPE=http MCP_STATELESS=true python main.py\033[0m")
+    print(
+        " 5. Inspector (HTTP): \033[34mMCP_TRANSPORT_TYPE=http MCP_STATELESS=true "
+        "NITROSTACK_APP_MODE=universal python main.py\033[0m"
+    )
     print("    Connect Streamable HTTP to \033[34mhttp://localhost:3000/mcp\033[0m with \033[34mAuthentication = Off\033[0m")
     print("    Apps tab renders the widget from live \033[34mstructuredContent\033[0m (not widgets/preview.html)")
     print("    For open shops only set \033[34mopenNow=true\033[0m (list) or \033[34mfilter=open_now\033[0m (map)")
