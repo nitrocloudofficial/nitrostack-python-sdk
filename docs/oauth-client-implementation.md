@@ -20,7 +20,8 @@ seconds to milliseconds, adds the current Unix time, and returns an integer.
 margin, also converting its seconds to milliseconds. Equality counts as expired.
 
 `token_response_to_stored()` is the conversion boundary for provider responses.
-Only an absent or null expiry receives the one-hour fallback. Zero remains zero.
+Numeric strings are normalized at this boundary before validation. Only an absent
+or null expiry receives the one-hour fallback. Zero remains zero.
 During refresh, a missing refresh token or scope inherits the previous value;
 the original resource association remains attached to the replacement record.
 
@@ -34,8 +35,9 @@ because doing so would also discard refresh credentials.
 
 `FileTokenStore` delegates blocking work to `asyncio.to_thread()`. Its lock is
 selected by canonical path, so different instances targeting the same file share
-the same process-local lock. The complete load/modify/save operation holds that
-lock, preventing a stale reader from overwriting another caller's newly saved key.
+a lock from a fixed pool of 256 process-local locks. Unrelated paths can share a
+lock; memory usage does not grow with paths. The complete load/modify/save
+operation holds that lock, preventing a stale reader from overwriting another caller's newly saved key.
 
 The read path rejects symlinks, opens without following the final symlink where
 supported, requires a regular file, and tightens POSIX permissions. Missing files
@@ -56,16 +58,21 @@ serialization, synchronization and replacement to verify this property.
 
 Encryption is imported only when selected. AES-GCM, key derivation and the hex
 `iv:tag:ciphertext` representation preserve the older implementation's format.
+The static salt is named separately and PBKDF2 runs once during encrypted store
+construction. Only derived bytes are retained; IVs remain random per write.
 `token-encryption` advertises the optional dependency, and the development extra
 includes it so encryption tests always execute. Neither store coordinates
 multiple writer processes; Windows directory privacy depends on ACLs.
 
 ## Client configuration and transport
 
-`auth/client.py` defines typed, redacted config, authorization-flow and
-registration results. Constructor mappings use the same snake_case names as the
-config model. The client creates a memory store unless the caller supplies one.
-Request timeout and response limits are validated once at construction.
+`auth/_client_types.py` defines typed, redacted config, authorization-flow and
+registration results. `auth/client.py` owns the client lifecycle and transport,
+and re-exports these types to preserve existing imports. Constructor mappings
+use the same snake_case names as the config model. The client creates a memory store unless the caller supplies one.
+Request timeout and response limits are validated once at construction. Client
+secrets can remain wrapped in `SecretValue` until authentication calls
+`unwrap_secret()`; empty or unusable wrappers produce sanitized errors.
 
 The transport has two layers. `_request()` owns validation, DNS safety, status
 handling and sanitized errors. `_send()` is an asynchronous seam that delegates
@@ -120,6 +127,12 @@ The first caller creates the task; simultaneous callers await that same task.
 A completion callback removes the task and retrieves its exception, including
 when all waiters cancelled. A failed operation can therefore be retried later.
 
+`get_access_token()` shares the refresh task machinery and checks expiry under
+the per-key lock. It returns a valid credential without HTTP, or refreshes and
+persists before returning its access-token string. Explicit refresh requests
+promote a pending automatic check to a forced refresh. Completed tasks are not
+reused, and both coordination maps are cleared on completion.
+
 Different keys have different locks and refresh tasks. Same-key acquisition,
 refresh and revocation hold a shared lock within the client instance. In
 particular, revocation waits for an already-running refresh and then revokes the
@@ -134,8 +147,11 @@ save failure, which an application must handle by reauthorization if necessary.
 
 Revocation defaults to the stored refresh token when available and otherwise the
 access token. An explicit hint selects either credential. It removes the local
-record only after upstream success. Client registration sends JSON and returns a
-redacted typed result; it does not implicitly change client configuration.
+record only after upstream success by default. Opt-in `local_fallback=True` also
+deletes after missing endpoints or remote failures, without claiming remote
+invalidation. Storage errors, invalid hints and cancellation still propagate.
+Refresh rotation across independent clients or processes remains unsupported.
+Client registration sends JSON and returns a redacted typed result; it does not implicitly change client configuration.
 
 ## Error boundaries and verification
 
@@ -148,6 +164,5 @@ tracebacks, logs, stdout and stderr. Explicit serialization remains secret-beari
 The three new test modules cover storage/expiry, OAuth lifecycle/concurrency, and
 urllib/pinned transport behavior respectively. They use fake upstream responses
 and controlled coordination events instead of live providers. Existing OAuth,
-PKCE, CIMD, auth and full-suite tests exercise integration with the SDK. See the
-separate verification report for exact platform results and the Windows socket
-limitation; local Linux runs are not a claim of hosted CI success.
+PKCE, CIMD, auth and full-suite tests exercise integration with the SDK. Current
+validation results belong in the PR description rather than a permanent report.

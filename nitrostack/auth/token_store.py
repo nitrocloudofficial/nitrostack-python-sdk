@@ -86,6 +86,8 @@ def token_response_to_stored(
     """Use a one-hour fallback only for absent expiry, preserving refresh rotation."""
     try:
         expires_in = response.get("expires_in")
+        if isinstance(expires_in, str):
+            expires_in = float(expires_in.strip())
         return StoredToken(
             access_token=response["access_token"],
             token_type=response.get("token_type", "Bearer"),
@@ -142,8 +144,8 @@ class MemoryTokenStore:
             self._tokens.clear()
 
 
-_path_locks: dict[str, Any] = {}
-_path_locks_guard = threading.Lock()
+_ENCRYPTION_SALT = b"nitrostack-token-store"
+_path_locks = tuple(threading.RLock() for _ in range(256))
 
 
 class FileTokenStore:
@@ -157,20 +159,23 @@ class FileTokenStore:
         self._path = Path(store_path).expanduser().absolute()
         if encryption_key is not None and (not isinstance(encryption_key, str) or not encryption_key):
             raise TokenStoreError("Encryption key must be a nonempty string")
-        self._encryption_key = encryption_key
+        self._encryption_key = None
+        if encryption_key is not None:
+            try:
+                self._encryption_key = hashlib.pbkdf2_hmac(
+                    "sha256", encryption_key.encode("utf-8"), _ENCRYPTION_SALT, 100000, 32,
+                )
+            except Exception:
+                raise TokenStoreError("Token store key derivation failed") from None
         canonical = os.path.normcase(str(self._path.parent.resolve() / self._path.name))
-        with _path_locks_guard:
-            self._lock = _path_locks.setdefault(canonical, threading.RLock())
+        self._lock = _path_locks[hash(canonical) % len(_path_locks)]
 
     def _cipher_parts(self):
         try:
             from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         except ImportError:
             raise TokenStoreError("Install nitrostack[token-encryption] for encrypted storage") from None
-        key = hashlib.pbkdf2_hmac(
-            "sha256", self._encryption_key.encode("utf-8"), b"nitrostack-token-store", 100000, 32,
-        )
-        return Cipher, algorithms, modes, key
+        return Cipher, algorithms, modes, self._encryption_key
 
     def _encrypt(self, text: str) -> str:
         if self._encryption_key is None:

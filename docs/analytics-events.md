@@ -39,5 +39,6 @@ Sent on every captured event:
 ## Code locations
 
 - Module: `nitrostack/cli/telemetry.py`
-- CLI wiring: `nitrostack/cli/main.py` (`track_command_invoked`, `init`, `login`, `shutdown_telemetry`)
+- CLI wiring: `nitrostack/cli/main.py` (`track_command_invoked`, `login`, `shutdown_telemetry`)
+- Init: `nitrostack/cli/_project_init.py` (`cli_init_completed`)
 - Deploy: `nitrostack/cli/pack.py` (`cli_deploy_*`)

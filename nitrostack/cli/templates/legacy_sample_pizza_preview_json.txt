@@ -1,0 +1,14 @@
+{
+  "shops": [
+    {
+      "id": "tonys-pizza",
+      "name": "Tony's New York Pizza",
+      "address": "123 Main St, San Francisco, CA 94102",
+      "rating": 4.5,
+      "priceLevel": 2,
+      "openNow": true,
+      "image": "https://images.unsplash.com/photo-1513104890138-7c749659a591"
+    }
+  ],
+  "totalShops": 1
+}

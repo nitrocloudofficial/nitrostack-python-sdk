@@ -40,18 +40,18 @@ Actions workflow runs the test suite and coverage only; it does not run Ruff.
 At the measured commit there was no `docs/` tree or CONTRIBUTING guide; this
 investigation adds the first `docs/` file, and a CONTRIBUTING guide still does
 not exist. The open PR list and changed files were checked on 2026-11-04 using
-GitHub's public API. Two open PRs touch candidates for the proposed splits:
+GitHub's public API. Two PRs that were open at the time of this snapshot touched
+candidates for the proposed splits:
 
-| Open PR | Changed over-limit files | Diff size in those files | Scheduling impact |
+| PR (status now) | Changed over-limit files | Diff size in those files | Follow-up |
 | --- | --- | ---: | --- |
-| [#37, wire alignment](https://github.com/nitrocloudofficial/nitrostack-python-sdk/pull/37) | `nitrostack/core/app.py`, `nitrostack/transports/http.py` | `app.py`: +12/-32; `http.py`: +22/-6 | Let this PR land before splitting either file, then remeasure. |
-| [#16, skip init prompts for non-TTY](https://github.com/nitrocloudofficial/nitrostack-python-sdk/pull/16) | `nitrostack/cli/main.py` | +10/-3 | Let this PR land before splitting the CLI module, then remeasure. |
+| [#37, wire alignment (merged)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/pull/37) | `nitrostack/core/app.py`, `nitrostack/transports/http.py` | `app.py`: +12/-32; `http.py`: +22/-6 | Recheck line counts against current `develop` before implementation. |
+| [#16, skip init prompts for non-TTY (merged)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/pull/16) | `nitrostack/cli/main.py` | +10/-3 | Recheck line counts against current `develop` before implementation. |
 
 The other open PRs at the time of the check (#110, #104, #98, and #58) did not
-change any of the 14 files over 500 lines. The overlaps found are small by line
-count, but they are direct edits to planned split targets, so sequence those
-splits after the PRs merge. This check is a snapshot; repeat it when filing and
-scheduling implementation work.
+change any of the 14 files over 500 lines. The overlaps found were small by line
+count but directly touched planned split targets. This check is a snapshot;
+remeasure before scheduling implementation work.
 
 ## Decision
 
@@ -148,17 +148,18 @@ Implementation issue scopes:
    new Python files; block baseline growth; reduce baselines as files shrink;
    add the CI step; document the scope and update/create `CONTRIBUTING.md`.
    Out of scope: splitting files or changing line counting to logical SLOC.
-2. [**Split core application and CLI modules behind compatibility facades**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/112) (**filed**). Use the boundaries above, preserve
-   `nitrostack.core.app` imports and the `nitrostack.cli.main:main` entry point,
-   and add/update focused tests for the public imports and generated CLI output.
-   Out of scope: unrelated behavior changes or broad code cleanup.
-3. [**Split remaining over-limit Python files by responsibility**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/113) (**filed**). Batch related
-   implementation files with their tests (HTTP/widgets/auth/packing), then split
-   the large test modules and flight-booking example by topic. Start `app.py`
-   and `http.py` after PR #37 merges, and `cli/main.py` after PR #16 merges; then
-   remeasure from the latest `develop`. Recheck all open PRs before assigning
-   work. Out of scope: unrelated changes and line-count-only reshuffling.
+2. [**Split core application and CLI modules behind compatibility facades**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/112) (**closed**). Its implementation scopes are tracked as standalone issues:
+   [CLI `main.py` and flight-booking example (#119)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/119)
+   and [core `app.py` (#120)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/120).
+   Preserve the CLI entry point and `nitrostack.core.app` compatibility imports.
+3. [**Split remaining over-limit Python files by responsibility**](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/113) (**closed**). Its implementation scopes are tracked as standalone issues:
+   [widget route templates and views (#121)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/121),
+   [OAuth (#122)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/122),
+   [CLI packaging (#123)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/123),
+   and [HTTP transport (#125)](https://github.com/nitrocloudofficial/nitrostack-python-sdk/issues/125).
+   The standalone issues exclude tests. The flight-booking example is included
+   in #119; other example-related files remain out of scope.
 
-GitHub issues #111, #112, and #113 are open. PRs #37 and #16 remain open and
-touch planned split targets; wait for them to merge, then remeasure `develop`
-before starting the overlapping splits.
+Before starting a split, remeasure from the latest `develop`. The large test
+modules listed above are not included in issues #119–#125 and need separate
+scoping if they are to be split.

@@ -1,0 +1,31 @@
+from nitrostack import module, ConfigModule, OAuthModule
+from modules.flights.flights_module import FlightsModule
+from health.system_health import SystemHealthCheck
+import os
+
+@module(
+    name="app",
+    imports=[
+        ConfigModule.for_root(
+            env_file_path=".env",
+            defaults={"RESOURCE_URI": "https://mcplocal", "PORT": "3000"}
+        ),
+        # Configure OAuth resource protection
+        OAuthModule.for_root(
+            resource_uri=os.environ.get("RESOURCE_URI", "https://mcplocal"),
+            authorization_servers=[os.environ.get("AUTH_SERVER_URL", "https://dev-5dt0utuk315713tjm.us.auth0.com")],
+            scopes_supported=["read", "write", "admin"],
+            token_introspection_endpoint=os.environ.get("INTROSPECTION_ENDPOINT"),
+            token_introspection_client_id=os.environ.get("INTROSPECTION_CLIENT_ID"),
+            token_introspection_client_secret=os.environ.get("INTROSPECTION_CLIENT_SECRET"),
+            audience=os.environ.get("TOKEN_AUDIENCE"),
+            issuer=os.environ.get("TOKEN_ISSUER")
+        ),
+        FlightsModule
+    ],
+    controllers=[],
+    providers=[SystemHealthCheck],
+    exports=[]
+)
+class AppModule:
+    pass

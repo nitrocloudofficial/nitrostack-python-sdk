@@ -11,7 +11,7 @@ it. It does not launch browsers, receive callbacks, or intercept API requests.
 import asyncio
 import os
 
-from nitrostack import OAuth2Client, OAuth2ClientConfig, is_token_expired
+from nitrostack import OAuth2Client, OAuth2ClientConfig
 
 
 async def main():
@@ -21,13 +21,10 @@ async def main():
         token_endpoint="https://identity.example.com/oauth/token",
     ))
     key = "identity.example.com|reporting-app|service-account|reports-api"
-    token = await client.store.get_token(key)
-    if token is None or is_token_expired(token):
-        token = await client.get_client_credentials_token(
-            key, scope="reports:read", resource="https://reports.example.com",
-        )
-    # Pass token.access_token to your HTTP client's Authorization header.
-    # Do not print the credential or its serialized representation.
+    token = await client.get_client_credentials_token(
+        key, scope="reports:read", resource="https://reports.example.com",
+    )
+    # Use token.access_token without logging it.
 
 
 asyncio.run(main())
@@ -148,7 +145,9 @@ store = FileTokenStore(
 Encryption imports are lazy. The file format remains compatible with PR #4:
 AES-GCM with a random 16-byte IV, hex `iv:tag:ciphertext`, and its existing
 PBKDF2-HMAC-SHA256 key derivation (100,000 iterations, `nitrostack-token-store`
-salt). Keep the encryption key separate from the file. Switching an existing
+salt). Derivation runs once per encrypted store instance at construction; only
+the derived key is retained. Every write uses a fresh IV. Keep the encryption key
+separate from the file. Switching an existing
 plaintext file to encryption requires an explicit migration by the application.
 
 ## Expiry and refresh
@@ -156,18 +155,19 @@ plaintext file to encryption requires an explicit migration by the application.
 `StoredToken` is immutable. `expires_at` is an integer Unix timestamp in
 **milliseconds**. `calculate_expiration(expires_in)` and `is_token_expired(token,
 skew=30)` take **seconds**. Missing/`None` `expires_in` uses one hour; zero expires
-immediately. Negative, nonnumeric, boolean and nonfinite durations are rejected.
+immediately. Provider responses also accept numeric strings such as `"3600"`
+and `"1.5"`. Negative, nonnumeric, boolean and nonfinite durations are rejected.
+The numeric-only expiry helpers do not accept strings.
+
+`get_access_token(key)` returns a string, reuses valid stored tokens, and refreshes
+within the 30-second safety margin. Missing records or refresh credentials raise
+`OAuthClientError`; the application must then acquire a token explicitly.
 
 Stores retain expired records so the refresh credential remains available:
 
 ```python
-token = await client.store.get_token(key)
-if token is not None and is_token_expired(token):
-    if token.refresh_token:
-        token = await client.refresh_token(key)
-    else:
-        # Start the appropriate acquisition flow again.
-        ...
+access_token = await client.get_access_token(key)
+# Use the returned credential without logging it.
 ```
 
 Share one client instance to coalesce concurrent refresh calls for a key into one
@@ -185,6 +185,18 @@ and deletes the local record only after upstream success. Pass
 successful revocation response is accepted. Coordination is not shared between
 client instances or processes.
 
+Pass `local_fallback=True` to delete the local record when the revocation endpoint
+is missing or the remote attempt fails. This does **not** guarantee the provider
+invalidated the credential. Invalid hints and storage errors still raise, and
+cancellation propagates. For unconditional local deletion without a request, use
+`await client.store.delete_token(key)`.
+
+File operations share a fixed pool of 256 process-local locks selected by canonical
+path. Unrelated paths may serialize when they select the same lock. This bounds
+lock memory but does not coordinate refresh rotation across client instances or
+processes. Use one shared client per credential owner; do not run concurrent
+refresh-token rotation against the same file from separate processes.
+
 ## Errors and secret handling
 
 Catch `OAuthClientError` and `TokenStoreError` for sanitized failures. OAuth errors
@@ -196,3 +208,19 @@ Config, token, pending-flow and registration representations hide credentials.
 Explicit `token.to_dict()` and `registration.to_dict()` contain credentials for
 interoperability/persistence: **never log these mappings**. Redacted repr does not
 make arbitrary attribute access, application logs or memory dumps safe.
+
+### Wrapped client secrets
+
+```python
+from nitrostack import OAuth2Client, OAuth2ClientConfig, SecretValue
+
+client = OAuth2Client(OAuth2ClientConfig(
+    client_id="my-client",
+    client_secret=SecretValue.from_env("OAUTH_CLIENT_SECRET"),
+    token_endpoint="https://issuer.example/token",
+))
+```
+
+Mappings also accept `SecretValue`. The wrapper stays in configuration and is
+unwrapped only while constructing authentication. Empty or serialized/redacted
+wrappers fail safely before a request. Plain-string secrets remain supported.
