@@ -1,4 +1,6 @@
+
 """Phase 6 — cache, rate_limit, and health_check decorators."""
+
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +48,11 @@ def test_cache_returns_same_result_within_ttl():
 
     class Svc:
         @cache(ttl=60)
-        async def add(self, value: int, context: ExecutionContext | None = None) -> int:
+        async def add(
+            self,
+            value: int,
+            context: ExecutionContext | None = None,
+        ) -> int:
             calls["n"] += 1
             return value + 1
 
@@ -83,8 +89,9 @@ def test_health_check_registry_reports_status():
             return True
 
     HealthCheckRegistry.bind_instance("db", Probe.db_ok, Probe())
-    results = HealthCheckRegistry.run_all()
+    results = asyncio.run(HealthCheckRegistry.run_all())
     assert results["db"] == "healthy"
+
     HealthCheckRegistry._checks.clear()
     HealthCheckRegistry._bound_checks.clear()
 
@@ -97,8 +104,9 @@ def test_health_check_registry_records_errors():
         raise RuntimeError("down")
 
     HealthCheckRegistry._bound_checks["svc"] = boom
-    results = HealthCheckRegistry.run_all()
+    results = asyncio.run(HealthCheckRegistry.run_all())
     assert results["svc"].startswith("error:")
+
     HealthCheckRegistry._checks.clear()
     HealthCheckRegistry._bound_checks.clear()
 
@@ -115,12 +123,12 @@ def test_health_check_async_and_unhealthy():
 
     HealthCheckRegistry._bound_checks["async"] = async_ok
     HealthCheckRegistry._bound_checks["down"] = down
-    results = HealthCheckRegistry.run_all()
+    results = asyncio.run(HealthCheckRegistry.run_all())
     assert results["async"] == "healthy"
     assert results["down"] == "unhealthy"
+
     HealthCheckRegistry._checks.clear()
     HealthCheckRegistry._bound_checks.clear()
-
 
 
 def test_copy_mcp_attributes_copies_mcp_prefixed_fields():

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nitrostack-enterprise-search"
+version = "0.1.0"
+description = "NitroStack enterprise-search demonstration server"
+requires-python = ">=3.10"
+dependencies = ["nitrostack"]
+
+[tool.setuptools]
+py-modules = ["main", "app_module"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modules*", "scripts*"]

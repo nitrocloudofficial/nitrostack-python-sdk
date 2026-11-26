@@ -98,7 +98,7 @@ def test_http_tool_call_runs_pipe_then_handler():
 
 
 def test_http_guard_pipe_task_progress_and_completion():
-    @mcp_app(module=LifecycleModule, server=ServerConfig(name="lifecycle-task", stateless=True))
+    @mcp_app(module=LifecycleModule, server=ServerConfig(name="lifecycle-task", stateless=True, protocol_era="legacy"))
     class App:
         pass
 

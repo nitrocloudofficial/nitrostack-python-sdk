@@ -11,6 +11,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence, Set, Tuple
 
+from nitrostack.cli.widget_routes import collect_widget_routes
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
@@ -377,6 +378,60 @@ def validate_module_references(root: str) -> List[ValidationIssue]:
     return issues
 
 
+_WIDGET_ROUTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def _collect_widget_routes(root: str) -> List[Tuple[str, str]]:
+    root_abs = os.path.abspath(root)
+    sources: List[Tuple[str, str]] = []
+
+    for path in sorted(_iter_python_files(root)):
+        rel_path = os.path.relpath(path, root_abs)
+        parts = os.path.normpath(rel_path).split(os.sep)
+
+        # Ignore a vendored copy of the NitroStack SDK.
+        if "vendor" in parts and "nitrostack" in parts:
+            continue
+
+        try:
+            sources.append((rel_path, _read(path)))
+        except OSError:
+            continue
+
+    return collect_widget_routes(sources)
+
+
+
+def validate_widgets(root: str) -> List[ValidationIssue]:
+    issues: List[ValidationIssue] = []
+    for route, source in _collect_widget_routes(root):
+        if not _WIDGET_ROUTE_RE.fullmatch(route):
+            issues.append(ValidationIssue(
+                "warning",
+                f"@widget route {route!r} is not a single alphanumeric path segment",
+                "Use letters, digits, '-' or '_' only; the route maps to widgets/out/<route>.html.",
+                source,
+            ))
+            continue
+        rel = os.path.join("widgets", "out", f"{route}.html")
+        uri = f"ui://widget/{route}.html"
+        html_path = os.path.join(root, rel)
+        if not os.path.isfile(html_path):
+            issues.append(ValidationIssue(
+                "warning",
+                f"widget route {route!r} -> {rel} -> {uri}: file is missing",
+                f"Create {rel} with the widget HTML.",
+                source,
+            ))
+        elif not _read(html_path).strip():
+            issues.append(ValidationIssue(
+                "warning",
+                f"widget route {route!r} -> {rel} -> {uri}: file is empty",
+                f"Add widget HTML to {rel}.",
+                rel,
+            ))
+    return issues
+
 def validate_project(root: Optional[str] = None) -> List[ValidationIssue]:
     root = os.path.abspath(root or os.getcwd())
     if root not in sys.path:
@@ -385,6 +440,7 @@ def validate_project(root: Optional[str] = None) -> List[ValidationIssue]:
     issues.extend(validate_dependencies(root))
     issues.extend(validate_mcp_app_imports(root))
     issues.extend(validate_module_references(root))
+    issues.extend(validate_widgets(root))
     return issues
 
 

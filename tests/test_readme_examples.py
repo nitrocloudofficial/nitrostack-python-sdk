@@ -146,3 +146,24 @@ def test_config_service_example(tmp_path, monkeypatch):
         assert (service.units, service.api_key) == ("metric", "k")
 
     asyncio.run(run())
+
+
+_README_TEST_BLOCKS = re.findall(
+    r"<!-- readme-test -->\n```python\n(.*?)```",
+    README,
+    re.S,
+)
+
+
+def test_readme_has_marked_examples():
+    assert _README_TEST_BLOCKS
+
+
+@pytest.mark.parametrize("source", _README_TEST_BLOCKS)
+def test_readme_marked_example_runs(source):
+    namespace: dict = {"__name__": "readme_example"}
+    exec(compile(source, "README.md", "exec"), namespace)
+    tests = [fn for name, fn in namespace.items() if name.startswith("test_") and callable(fn)]
+    assert tests
+    for fn in tests:
+        asyncio.run(fn())

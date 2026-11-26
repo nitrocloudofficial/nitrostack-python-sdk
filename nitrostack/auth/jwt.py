@@ -4,9 +4,10 @@ import hmac
 import hashlib
 import base64
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from nitrostack.core.module import module
 from nitrostack.core.di import DIContainer
+from nitrostack.auth.secret import SecretValue, unwrap_secret
 
 class JWTService:
     def __init__(
@@ -15,13 +16,18 @@ class JWTService:
         expires_in: str = "24h",
         audience: Optional[str] = None,
         issuer: Optional[str] = None,
+        secret: Union[SecretValue, str, None] = None,
     ):
         self.secret_env_var = secret_env_var
+        # An explicit secret wins over the environment variable. Prefer a SecretValue.
+        self._secret = secret
         self.expires_in = expires_in
         self.audience = audience
         self.issuer = issuer
 
     def get_secret(self) -> str:
+        if self._secret is not None:
+            return unwrap_secret(self._secret)
         secret = os.environ.get(self.secret_env_var)
         if not secret:
             # Fallback for dev mode/testing so it doesn't fail hard if not set
@@ -116,12 +122,14 @@ class JWTModule:
         expires_in: str = "24h",
         audience: Optional[str] = None,
         issuer: Optional[str] = None,
+        secret: Union[SecretValue, str, None] = None,
     ):
         service = JWTService(
             secret_env_var=secret_env_var,
             expires_in=expires_in,
             audience=audience,
-            issuer=issuer
+            issuer=issuer,
+            secret=secret,
         )
         DIContainer.get_instance().register_value(JWTService, service)
         return cls

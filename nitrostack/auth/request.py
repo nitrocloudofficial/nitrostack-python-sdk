@@ -108,12 +108,13 @@ def authorization_token_from_request(rc: Any) -> Optional[str]:
 
 
 def verify_bearer_payload(token: str) -> Optional[dict[str, Any]]:
-    try:
-        from nitrostack.auth.jwt import JWTService
-        from nitrostack.core.di import DIContainer
+    from nitrostack.auth.jwt import JWTService
+    from nitrostack.core.di import DIContainer
 
-        payload = DIContainer.get_instance().resolve(JWTService).verify_token(token)
-    except Exception:
+    service = DIContainer.get_instance().resolve(JWTService)
+    try:
+        payload = service.verify_token(token)
+    except ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest_plugins = ["nitrostack.testing.pytest_plugin"]
+
 from nitrostack.cli.skills import SkillsCloneError
 
 

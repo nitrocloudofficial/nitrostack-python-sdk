@@ -24,6 +24,9 @@ from nitrostack.cli.install import (
 def _uv_absent(monkeypatch):
     """Keep the existing pip-path tests off a real uv binary on PATH."""
     monkeypatch.setattr("nitrostack.cli.install._uv_bin", lambda: None)
+        # pip/uv version gates are covered in test_cli_install_security.py
+    monkeypatch.setattr("nitrostack.cli.install._ensure_secure_pip", lambda *a, **k: None)
+    monkeypatch.setattr("nitrostack.cli.install._check_uv_version", lambda *a, **k: None)
 
 
 def test_optional_extra_names_parses_pyproject():

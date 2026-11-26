@@ -8,9 +8,20 @@ declares only the capabilities it implements. ``/mcp`` is the v2
 from typing import Any, Callable, Dict, Optional
 
 import mcp.types as types
+from mcp import MCPError
 from mcp.server.lowlevel import Server as LowLevelServer
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
+from nitrostack.protocol.errors import JsonRpcErrorCode
+from nitrostack.protocol.deprecated import deprecated_method_message, rejects_deprecated_method
+from nitrostack.protocol.version import (
+    MODERN_PROTOCOL_VERSION,
+    ProtocolEra,
+    supports_resource_subscriptions,
+    supported_protocol_versions_for_era,
+)
+from nitrostack.protocol.meta import flatten_request_meta_object
+from nitrostack.protocol.jsonrpc import HeaderBodyMismatchError, validate_protocol_version_header_meta
 
 
 class NitroStackMcpServer(LowLevelServer):
@@ -29,27 +40,63 @@ class NitroStackMcpServer(LowLevelServer):
             name=name,
             version=version or "",
             on_subscriptions_listen=self.listen_handler,
+            on_ping=self._handle_ping,
         )
         self.has_task_support: bool = False
         self.http_engine: Optional[str] = None
         self.sessionful: bool = False
-        self.discover_handler: Optional[Callable[[], dict[str, Any]]] = None
-        self.initialize_handler: Optional[Callable[[Optional[str]], dict[str, Any]]] = None
+        self.protocol_era: Optional[ProtocolEra] = None
+        self.middleware.append(self._enforce_protocol_era)
         # In-process tests still look up handlers by request type.
         self.request_handlers: Dict[Any, Callable[..., Any]] = {}
         self.notification_handlers: Dict[Any, Callable[..., Any]] = {}
 
-    def handle_server_discover(self) -> dict[str, Any]:
-        """Answer ``server/discover`` from this server instance."""
-        if self.discover_handler is None:
-            raise RuntimeError("server/discover is not configured on this server")
-        return self.discover_handler()
+    async def _enforce_protocol_era(self, context, call_next):
+        """Apply era policy inside the official runner, after its JSON-RPC parsing."""
+        if (
+            context.protocol_version == MODERN_PROTOCOL_VERSION
+            and rejects_deprecated_method(context.method, "modern")
+        ):
+            raise MCPError(types.METHOD_NOT_FOUND, deprecated_method_message(context.method))
+        if self.protocol_era == "modern" and context.method in (
+            "initialize", "notifications/initialized",
+        ):
+            raise MCPError(types.METHOD_NOT_FOUND, f"Method not found: {context.method}")
+        request_headers = getattr(getattr(context, "request", None), "headers", {})
+        meta = flatten_request_meta_object(context.meta)
+        header_version = request_headers.get("mcp-protocol-version")
+        meta_version = meta.get("io.modelcontextprotocol/protocolVersion")
+        if (
+            meta_version == MODERN_PROTOCOL_VERSION
+            and context.request is not None
+            and not header_version
+        ):
+            raise MCPError(
+                int(JsonRpcErrorCode.HEADER_BODY_MISMATCH),
+                "MCP-Protocol-Version header is required",
+            )
+        try:
+            validate_protocol_version_header_meta(header_version, meta_version)
+        except HeaderBodyMismatchError as exc:
+            raise MCPError(int(exc.code), exc.message) from None
+        claimed_version = header_version or meta_version
+        # The official SDK uses a 2025-03-26 default when a legacy-compatible
+        # HTTP request omits the header. Do not reject that implicit fallback.
+        unsupported_claim = self.protocol_era is not None and claimed_version and (
+            claimed_version not in supported_protocol_versions_for_era(self.protocol_era)
+        )
+        modern_legacy_request = (
+            self.protocol_era == "modern" and context.protocol_version != MODERN_PROTOCOL_VERSION
+        )
+        if unsupported_claim or modern_legacy_request:
+            raise MCPError(int(JsonRpcErrorCode.UNSUPPORTED_PROTOCOL_VERSION), "Unsupported protocol version")
+        return await call_next(context)
 
-    def handle_sessionless_initialize(self, requested_version: Optional[str] = None) -> dict[str, Any]:
-        """Answer sessionless ``initialize`` from this server instance."""
-        if self.initialize_handler is None:
-            raise RuntimeError("sessionless initialize is not configured on this server")
-        return self.initialize_handler(requested_version)
+    async def _handle_ping(self, _context, _params):
+        """Keep the official ping hook only for the legacy protocol era."""
+        if self.protocol_era != "legacy":
+            raise MCPError(types.METHOD_NOT_FOUND, "Method not found: ping")
+        return types.EmptyResult()
 
     def get_capabilities(
         self,
@@ -67,7 +114,7 @@ class NitroStackMcpServer(LowLevelServer):
         )
 
         if caps.resources is not None:
-            caps.resources.subscribe = True
+            caps.resources.subscribe = supports_resource_subscriptions(self.protocol_era)
 
         if self.has_task_support:
             caps.tasks = types.ServerTasksCapability(

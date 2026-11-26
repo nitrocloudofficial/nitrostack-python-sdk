@@ -10,6 +10,7 @@ from nitrostack.auth.request import (
     verify_bearer_payload,
 )
 from nitrostack.core.errors import TaskNotFoundError
+from nitrostack.runtime.caller import caller_identity, session_id_from_request_context
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData
 
 
@@ -91,16 +92,10 @@ def _authorization_from_request_context(rc: Any) -> Optional[str]:
 
 
 def _session_id_from_request_context(rc: Any) -> Optional[str]:
-    session = getattr(rc, "session", None)
-    if session is None:
-        return None
-    session_id = getattr(session, "id", None) or getattr(session, "session_id", None)
-    if session_id is None:
-        return None
-    return str(session_id)
+    return session_id_from_request_context(rc)
 
 
-def extract_task_access_context(rc: Any) -> Optional[TaskAccessContext]:
+def extract_task_access_context(rc: Any, era: Optional[str] = None) -> Optional[TaskAccessContext]:
     """
     Build ``TaskAccessContext`` from an MCP request context.
 
@@ -117,7 +112,9 @@ def extract_task_access_context(rc: Any) -> Optional[TaskAccessContext]:
 
     user_id: Optional[str] = None
     tenant_id: Optional[str] = None
-    session_id = _session_id_from_request_context(rc)
+    session_id = (
+        caller_identity(rc, era)[0] if era is not None else _session_id_from_request_context(rc)
+    )
     token = _authorization_from_request_context(rc)
 
     if token:

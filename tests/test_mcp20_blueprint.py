@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from unittest.mock import patch
 
 import mcp.types as types
 import pytest
-from nitrostack.runtime.request_ctx import Experimental, RequestContext, RequestParamsMeta, request_ctx
+from nitrostack.runtime.request_ctx import Experimental, RequestContext, request_ctx
 from mcp import MCPError as McpError
 from pydantic import BaseModel, Field
-from starlette.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -23,29 +21,31 @@ from nitrostack.core.app import McpApplicationFactory, ServerConfig, mcp_app
 from nitrostack.core.di import DIContainer
 from nitrostack.core.errors import ResourceNotFoundError, TaskNotFoundError
 from nitrostack.core.task import TaskManager
-from nitrostack.protocol.constants import LEGACY_SESSION_HEADER, MAX_CIMD_BYTES
+from nitrostack.protocol.constants import MAX_CIMD_BYTES
 from nitrostack.protocol.deprecated import deprecated_method_message
 from nitrostack.protocol.discovery import build_discover_result
 from nitrostack.protocol.errors import JsonRpcErrorCode
 from nitrostack.protocol.extensions import MCPExtensionId
 from nitrostack.protocol.jsonrpc import map_exception_to_jsonrpc
 from nitrostack.protocol.version import MODERN_PROTOCOL_VERSION
-from nitrostack.runtime.conformance import (
-    BLUEPRINT_CONFORMANCE_AREAS,
-    ConformanceArea,
-    DEPRECATED_MODERN_METHODS,
-    MODERN_JSONRPC_ERROR_CODES,
-    REQUIRED_BLUEPRINT_MODULES,
-    assert_blueprint_layout,
-    protocol_version_matches_blueprint,
-    verify_package_layout,
-)
-from nitrostack.runtime.stateless import assert_stateless_headers
+from nitrostack.protocol.method_contract import DEPRECATED_MODERN_METHODS
 from nitrostack.tasks.eviction import should_evict_terminal_task
 from nitrostack.tasks.types import TaskAccessContext, TaskEntry, TaskWireData, datetime_to_ms, utc_now
 from nitrostack.tasks.authorization import check_task_access
 from nitrostack.transports.cors import cors_preflight_response_headers
-from nitrostack.transports.dispatch import IngressContext, StatelessIngressPipeline
+from tests.http_probe import decode, http_client, post
+
+
+def test_blueprint_discover_uses_official_http_without_session():
+    with http_client("auto") as (app, _, client):
+        response = post(client, "server/discover")
+        assert response.status_code == 200, response.text
+        result = decode(response)["result"]
+        assert MODERN_PROTOCOL_VERSION in result["supportedVersions"]
+        assert result["capabilities"]["resources"]["subscribe"] is False
+        assert result["capabilities"]["tools"]["listChanged"] is True
+        assert "mcp-session-id" not in response.headers
+        assert app.mcp_server.get_capabilities().resources.subscribe is False
 
 
 class EchoInput(BaseModel):
@@ -63,23 +63,6 @@ def teardown_function() -> None:
     DIContainer.reset()
 
 
-class TestBlueprintRegistry:
-    def test_conformance_areas_defined(self):
-        assert set(BLUEPRINT_CONFORMANCE_AREAS) == set(ConformanceArea)
-        assert len(BLUEPRINT_CONFORMANCE_AREAS) == 5
-
-    def test_modern_protocol_version(self):
-        assert protocol_version_matches_blueprint()
-        assert MODERN_PROTOCOL_VERSION == "2026-07-28"
-
-    def test_required_modules_import(self):
-        assert verify_package_layout() == []
-        assert_blueprint_layout()
-
-    def test_blueprint_module_count(self):
-        assert len(REQUIRED_BLUEPRINT_MODULES) >= 17
-
-
 class TestStatelessHttpConformance:
     def test_discover_advertises_modern_protocol_and_extensions(self):
         result = build_discover_result(
@@ -94,57 +77,13 @@ class TestStatelessHttpConformance:
         assert isinstance(result["ttlMs"], int) and result["ttlMs"] >= 0
         assert result["cacheScope"] in ("public", "private")
 
-    def test_stateless_pipeline_handles_discover_without_session(self):
-        async def _run():
-            pipeline = StatelessIngressPipeline(
-                IngressContext("srv", "1.0.0", MODERN_PROTOCOL_VERSION),
-                discover_handler=lambda _req: build_discover_result(
-                    server_name="srv",
-                    server_version="1.0.0",
-                    protocol_version=MODERN_PROTOCOL_VERSION,
-                ),
-            )
-            body = json.dumps(
-                {"jsonrpc": "2.0", "id": "d1", "method": "server/discover", "params": {}}
-            ).encode()
-            status, resp = await pipeline.handle_post(body, {})
-            assert status == 200
-            assert resp["result"]["protocolVersion"] == MODERN_PROTOCOL_VERSION
-            assert_stateless_headers({"Content-Type": "application/json"})
-
-        asyncio.run(_run())
 
     def test_post_mcp_stateless_no_session_header(self):
-        @injectable()
-        class PingController:
-            @tool(name="echo", description="echo", input_schema=EchoInput)
-            async def echo(self, input: EchoInput, context: ExecutionContext) -> str:
-                return input.value
-
-        @module(name="BlueprintHttp", controllers=[PingController])
-        class HttpModule:
-            pass
-
-        @mcp_app(module=HttpModule, server=ServerConfig(name="blueprint-http", stateless=True))
-        class HttpApp:
-            pass
-
-        app = asyncio.run(McpApplicationFactory.create(HttpApp))
-        http_app = app.get_combined_app(stateless=True, json_response=True)
-        with TestClient(http_app) as client:
-            resp = client.post(
-                "/mcp",
-                headers={**JSON_HEADERS, "Mcp-Method": "tools/call", "Mcp-Name": "echo"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {"name": "echo", "arguments": {"value": "ok"}},
-                },
-            )
-        assert resp.status_code == 200
-        assert LEGACY_SESSION_HEADER not in {k.title() for k in resp.headers.keys()}
-        assert resp.json()["result"]["content"][0]["text"] == "ok"
+        with http_client("auto") as (_, _, client):
+            response = post(client, "tools/call", {"name": "echo", "arguments": {"value": "ok"}})
+            assert response.status_code == 200, response.text
+            assert "mcp-session-id" not in response.headers
+            assert decode(response)["result"]["structuredContent"]["value"] == "ok"
 
     def test_cors_preflight_includes_mcp_headers(self):
         headers = cors_preflight_response_headers({"Origin": "https://app.example.com"})
@@ -156,13 +95,6 @@ class TestStatelessHttpConformance:
 
 
 class TestJsonRpcConformance:
-    @pytest.mark.parametrize(
-        "code",
-        sorted(MODERN_JSONRPC_ERROR_CODES),
-    )
-    def test_standard_error_codes_registered(self, code: JsonRpcErrorCode):
-        assert int(code) in MODERN_JSONRPC_ERROR_CODES
-
     def test_missing_resource_maps_to_invalid_params(self):
         resp = map_exception_to_jsonrpc(ResourceNotFoundError("mcp://missing"), "99")
         assert resp["error"]["code"] == JsonRpcErrorCode.INVALID_PARAMS
@@ -192,15 +124,10 @@ class TestJsonRpcConformance:
 
         async def _run():
             app = await McpApplicationFactory.create(JsonRpcApp)
-            handler = app.mcp_server.request_handlers[types.GetTaskPayloadRequest]
-            with pytest.raises(McpError) as exc:
-                await handler(
-                    types.GetTaskPayloadRequest(
-                        method="tasks/result",
-                        params=types.GetTaskPayloadRequestParams(taskId="missing"),
-                    )
-                )
-            assert exc.value.error.code == types.METHOD_NOT_FOUND
+            # The 2026 wire has no Tasks surface, so tasks/result has no handler at all
+            # and the official server answers it as method-not-found.
+            assert types.GetTaskPayloadRequest not in app.mcp_server.request_handlers
+            assert app.mcp_server.has_task_support is False
 
         asyncio.run(_run())
 
@@ -217,7 +144,7 @@ class TestTaskSubsystemConformance:
         class TasksModule:
             pass
 
-        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks"))
+        @mcp_app(module=TasksModule, server=ServerConfig(name="tasks", protocol_era="legacy"))
         class TasksApp:
             pass
 
@@ -266,7 +193,7 @@ class TestTaskSubsystemConformance:
             class GetModule:
                 pass
 
-            @mcp_app(module=GetModule, server=ServerConfig(name="get"))
+            @mcp_app(module=GetModule, server=ServerConfig(name="get", protocol_era="legacy"))
             class GetApp:
                 pass
 
@@ -344,7 +271,7 @@ class TestMultiTenantIsolationConformance:
             class IsoModule:
                 pass
 
-            @mcp_app(module=IsoModule, server=ServerConfig(name="iso"))
+            @mcp_app(module=IsoModule, server=ServerConfig(name="iso", protocol_era="legacy"))
             class IsoApp:
                 pass
 

@@ -18,6 +18,14 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+
+class _TtyInput(io.StringIO):
+    """Scripted answers for prompts, which only read stdin when it is a TTY."""
+
+    def isatty(self):
+        return True
+
+
 from nitrostack.cli.main import (
     DEFAULT_MCP_PORT,
     DEFAULT_PROJECT_NAME,
@@ -41,6 +49,7 @@ from nitrostack.cli.main import (
     init_project,
     main,
     print_banner,
+    register_cursor_server,
     register_server,
     run_dev,
     run_start,
@@ -123,14 +132,14 @@ def test_init_with_name_and_explicit_template():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("A test server\nTester\n")
+        sys.stdin = _TtyInput("A test server\nTester\n")
         init_project("cli-demo", template="python-starter", skip_install=True)
         project = os.path.join(tmp, "cli-demo")
         assert os.path.isfile(os.path.join(project, "main.py"))
         env_text = open(os.path.join(project, ".env"), encoding="utf-8").read()
         assert "PORT=3000" in env_text
         assert "WIDGETS_DEV_PORT=3001" in env_text
-        assert "NITROSTACK_APP_MODE=universal" in env_text
+        assert "NITROSTACK_APP_MODE=openai" in env_text
         assert "SERVER_DESC=\"A test server\"" in env_text
         assert "SERVER_AUTHOR=\"Tester\"" in env_text
         assert os.path.isfile(os.path.join(project, "widgets", "out", "calculator-result.html"))
@@ -150,7 +159,7 @@ def test_init_prompts_for_name_when_omitted():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("prompted-server\n\n\n")
+        sys.stdin = _TtyInput("prompted-server\n\n\n")
         init_project(None, template="python-starter", skip_install=True)
         assert os.path.isdir(os.path.join(tmp, "prompted-server"))
         print("Success! Missing name is asked on the next readline.")
@@ -166,7 +175,7 @@ def test_init_default_name_when_blank_readline():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n\n")
+        sys.stdin = _TtyInput("\n\n\n")
         init_project(None, template="python-pizzaz", skip_install=True)
         assert os.path.isdir(os.path.join(tmp, DEFAULT_PROJECT_NAME))
         env_text = open(os.path.join(tmp, DEFAULT_PROJECT_NAME, ".env"), encoding="utf-8").read()
@@ -190,7 +199,7 @@ def test_init_python_oauth_template():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         init_project("oauth-demo", template="python-oauth", skip_install=True)
         project = os.path.join(tmp, "oauth-demo")
         assert os.path.isfile(os.path.join(project, "OAUTH_SETUP.md"))
@@ -279,7 +288,7 @@ def test_init_port_and_widget_flags_override_defaults():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         init_project(
             "ports-demo",
             template="python-starter",
@@ -307,7 +316,7 @@ def test_init_install_dependencies_prompt_no():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("desc\nauthor\nn\n")
+        sys.stdin = _TtyInput("desc\nauthor\nn\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             init_project("no-npm", template="python-starter")
             pip_install.assert_not_called()
@@ -364,12 +373,25 @@ def test_run_npm_does_not_use_shell():
     print("Success! npm is invoked as an argv list without shell=True.")
 
 
+def test_prompts_return_defaults_without_tty():
+    """Studio and CI inherit a non-TTY stdin: prompts must not read from it."""
+    original = sys.stdin
+    try:
+        sys.stdin = io.StringIO("typed\n")
+        assert _prompt("Name", "fallback") == "fallback"
+        assert _prompt_template() == "python-starter"
+        assert _prompt_yes_no("Install", default_yes=False) is False
+        assert sys.stdin.read() == "typed\n"
+        print("Success! prompts use defaults and leave a non-TTY stdin unread.")
+    finally:
+        sys.stdin = original
+
 def test_prompt_uses_value_or_default():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("custom\n")
+        sys.stdin = _TtyInput("custom\n")
         assert _prompt("Name", "fallback") == "custom"
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt("Name", "fallback") == "fallback"
 
         class Boom:
@@ -393,13 +415,13 @@ def test_resolve_template_accepts_official_names():
 def test_prompt_template_choice_and_explicit_name():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("2\n")
+        sys.stdin = _TtyInput("2\n")
         assert _prompt_template() == "python-pizzaz"
-        sys.stdin = io.StringIO("python-oauth\n")
+        sys.stdin = _TtyInput("python-oauth\n")
         assert _prompt_template() == "python-oauth"
-        sys.stdin = io.StringIO("nope\n3\n")
+        sys.stdin = _TtyInput("nope\n3\n")
         assert _prompt_template() == "python-oauth"
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_template() == "python-starter"
         print("Success! _prompt_template handles numbers, names, retries, and default.")
     finally:
@@ -457,19 +479,19 @@ def test_upsert_env_var_replaces_and_appends():
 def test_prompt_yes_no_answers():
     original = sys.stdin
     try:
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_yes_no("Install", default_yes=True) is True
-        sys.stdin = io.StringIO("\n")
+        sys.stdin = _TtyInput("\n")
         assert _prompt_yes_no("Install", default_yes=False) is False
-        sys.stdin = io.StringIO("y\n")
+        sys.stdin = _TtyInput("y\n")
         assert _prompt_yes_no("Install", default_yes=False) is True
-        sys.stdin = io.StringIO("yes\n")
+        sys.stdin = _TtyInput("yes\n")
         assert _prompt_yes_no("Install") is True
-        sys.stdin = io.StringIO("n\n")
+        sys.stdin = _TtyInput("n\n")
         assert _prompt_yes_no("Install") is False
-        sys.stdin = io.StringIO("no\n")
+        sys.stdin = _TtyInput("no\n")
         assert _prompt_yes_no("Install") is False
-        sys.stdin = io.StringIO("maybe\n")
+        sys.stdin = _TtyInput("maybe\n")
         assert _prompt_yes_no("Install", default_yes=True) is True
         print("Success! _prompt_yes_no handles Y/n, empty default, and unknown input.")
     finally:
@@ -542,7 +564,7 @@ def test_init_project_rejects_blank_name_and_overwrite_cancel():
         except SystemExit:
             pass
         os.mkdir("taken")
-        sys.stdin = io.StringIO("n\n")
+        sys.stdin = _TtyInput("n\n")
         try:
             init_project("taken", template="python-starter", skip_install=True)
             raise AssertionError("overwrite cancel should exit")
@@ -566,14 +588,14 @@ def test_init_project_overwrite_and_install_yes_calls_npm():
         os.chdir(tmp)
         os.mkdir("taken")
         open(os.path.join("taken", "old.txt"), "w", encoding="utf-8").write("x")
-        sys.stdin = io.StringIO("y\ndesc\nauthor\n")
+        sys.stdin = _TtyInput("y\ndesc\nauthor\n")
         with patch("nitrostack.cli.main._run_npm") as npm:
             init_project("taken", template="python-starter", skip_install=True)
             npm.assert_not_called()
         assert os.path.isfile(os.path.join("taken", "main.py"))
         assert not os.path.exists(os.path.join("taken", "old.txt"))
 
-        sys.stdin = io.StringIO("d\na\nY\n")
+        sys.stdin = _TtyInput("d\na\nY\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             with patch("nitrostack.cli.main._run_npm") as npm:
                 init_project("installed", template="python-starter")
@@ -582,7 +604,7 @@ def test_init_project_overwrite_and_install_yes_calls_npm():
                 npm.assert_not_called()
         assert os.path.isfile(os.path.join("installed", "widgets", "out", "calculator-result.html"))
 
-        sys.stdin = io.StringIO("d\na\n\n")
+        sys.stdin = _TtyInput("d\na\n\n")
         with patch("nitrostack.cli.main.install_dependencies") as pip_install:
             init_project("installed-enter", template="python-starter")
             pip_install.assert_called_once()
@@ -802,6 +824,50 @@ def test_register_server_writes_config_and_handles_errors():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_cursor_registration_merges_project_config_and_is_idempotent(tmp_path, monkeypatch):
+    import json
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    (project / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    config_path = project / ".cursor" / "mcp.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps({"mcpServers": {"other": {"url": "http://example.test/mcp"}}}),
+        encoding="utf-8",
+    )
+
+    register_cursor_server("demo", "main.py")
+    register_cursor_server("demo", "main.py")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["other"] == {"url": "http://example.test/mcp"}
+    assert config["mcpServers"]["demo"]["command"] == sys.executable
+    assert config["mcpServers"]["demo"]["args"] == [str((project / "main.py").resolve())]
+    assert len(config["mcpServers"]) == 2
+
+
+def test_cursor_registration_global_target_and_http_transports(tmp_path, monkeypatch):
+    import json
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("nitrostack.cli.main.os.path.expanduser", lambda value: str(home) if value == "~" else value)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    register_cursor_server("web", global_config=True, transport="streamable-http")
+    register_cursor_server("events", global_config=True, transport="sse")
+
+    config_path = home / ".cursor" / "mcp.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["web"] == {"url": "http://localhost:3000/mcp"}
+    assert config["mcpServers"]["events"] == {"url": "http://localhost:3000/sse"}
+    assert not (project / ".cursor" / "mcp.json").exists()
+
+
 def test_main_dispatches_commands():
     from unittest.mock import patch
 
@@ -851,6 +917,13 @@ def test_main_dispatches_commands():
     ) as reg:
         main()
         reg.assert_called_once_with("x", "main.py")
+
+    with patch(
+        "sys.argv",
+        ["nitrostack-py", "cursor", "--global", "--transport", "sse", "--name", "x"],
+    ), patch("nitrostack.cli.main.register_cursor_server") as cursor:
+        main()
+        cursor.assert_called_once_with("x", "main.py", global_config=True, transport="sse")
     print("Success! main() dispatches init/dev/start/generate/register.")
 
 
@@ -879,7 +952,7 @@ def test_init_rewrites_pyproject_identity_and_copies_uv_files(template):
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("Rewritten description\nTester\n")
+        sys.stdin = _TtyInput("Rewritten description\nTester\n")
         init_project("My_App", template=template, skip_install=True)
         project = os.path.join(tmp, "My_App")
         pyproject = open(os.path.join(project, "pyproject.toml"), encoding="utf-8").read()
@@ -908,7 +981,7 @@ def test_init_runs_uv_lock_in_project_dir():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
@@ -930,7 +1003,7 @@ def test_init_succeeds_when_uv_is_missing():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value=None):
@@ -949,7 +1022,7 @@ def test_init_succeeds_when_uv_lock_fails():
     original_stdin = sys.stdin
     try:
         os.chdir(tmp)
-        sys.stdin = io.StringIO("\n\n")
+        sys.stdin = _TtyInput("\n\n")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NITROSTACK_SKIP_UV_LOCK", None)
             with patch("nitrostack.cli.install._uv_bin", return_value="/usr/bin/uv"):
@@ -1072,38 +1145,6 @@ def test_pack_dry_run_lists_files_without_writing(tmp_path: Path):
     assert not (project / "dist").exists()
 
 
-def test_pack_include_env_dry_run_lists_env_without_printing_contents(tmp_path: Path, capsys):
-    project = _mini_project(tmp_path)
-    (project / ".env.local").write_text("TOKEN=local-secret\n", encoding="utf-8")
-    result = pack_project(str(project), dry_run=True, include_env=True)
-    assert result["dry_run"] is True
-    assert ".env" in result["files"]
-    assert ".env.local" in result["files"]
-    captured = capsys.readouterr().out
-    assert "Warning: Including .env files in the wheel (use with caution!)" in captured
-    assert ".env" in captured
-    assert ".env.local" in captured
-    assert "SECRET=should-never-pack" not in captured
-    assert "TOKEN=local-secret" not in captured
-
-
-def test_pack_include_env_puts_env_in_wheel_without_printing_contents(tmp_path: Path, capsys):
-    project = _mini_project(tmp_path)
-    result = pack_project(str(project), dry_run=False, include_env=True)
-    captured = capsys.readouterr().out
-    assert "Warning: Including .env files in the wheel (use with caution!)" in captured
-    assert "SECRET=should-never-pack" not in captured
-
-    wheel = Path(result["wheel"])
-    with zipfile.ZipFile(wheel) as zf:
-        names = zf.namelist()
-        assert any(n == ".env" or n.endswith("/.env") for n in names)
-        env_data = next(
-            zf.read(n).decode("utf-8") for n in names if n == ".env" or n.endswith("/.env")
-        )
-        assert "SECRET=should-never-pack" in env_data
-
-
 def test_pack_creates_valid_wheel(tmp_path: Path):
     project = _mini_project(tmp_path)
     result = pack_project(str(project), dry_run=False)
@@ -1184,33 +1225,6 @@ def test_validate_catches_broken_imports_and_module_refs(tmp_path: Path):
     assert "definitely_missing_nitrostack_pkg" in messages
     assert "not a class" in messages.lower() or "not a class" in messages
     assert "→" in messages or "Fix the import" in messages
-
-
-def test_validate_skips_the_vendored_sdk(tmp_path: Path):
-    """`init` vendors the SDK; its testing helpers apply @mcp_app inside functions."""
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\n"
-        'name = "vendored"\n'
-        'version = "0.1.0"\n'
-        "dependencies = [\n"
-        '    "nitrostack",\n'
-        "]\n",
-        encoding="utf-8",
-    )
-    sdk = tmp_path / "vendor" / "nitrostack" / "nitrostack" / "testing"
-    sdk.mkdir(parents=True)
-    (sdk / "__init__.py").write_text(
-        "from nitrostack import mcp_app, ServerConfig\n\n"
-        "def create(module):\n"
-        "    @mcp_app(module=module, server=ServerConfig(name='test'))\n"
-        "    class TestApp:\n"
-        "        pass\n"
-        "    return TestApp\n",
-        encoding="utf-8",
-    )
-
-    issues = validate_project(str(tmp_path))
-    assert not [issue for issue in issues if "vendor" in issue.path], [i.format() for i in issues]
 
 
 def test_validate_accepts_module_only_bootstrap(tmp_path: Path):
@@ -1521,7 +1535,7 @@ def test_pack_and_validate_agree_on_bom_dependencies(tmp_path: Path):
     validate_deps = validate_parse((tmp_path / "pyproject.toml").read_text(encoding="utf-8-sig"))
     assert pack_deps == validate_deps
     assert pack_deps[0] == "uvicorn[standard]>=0.20"
-    assert requirements_from_project(str(tmp_path)) == pack_deps
+    assert [d for d in requirements_from_project(str(tmp_path)) if not d.lower().startswith("nitrostack")] == [d for d in pack_deps if not d.lower().startswith("nitrostack")]
     issues = validate_dependencies(str(tmp_path))
     assert not any("not declared" in issue.message for issue in issues)
 

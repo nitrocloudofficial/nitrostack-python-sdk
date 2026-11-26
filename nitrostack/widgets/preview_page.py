@@ -27,7 +27,7 @@ PREVIEW_PAGE_HTML = """<!DOCTYPE html>
   <p class="note">
     MCP Inspector Tools tab shows JSON. Open the <strong>Apps</strong> tab (or this
     page) to render the widget from the <em>live</em> <code>tools/call</code> result —
-    not sample data. Use <code>NITROSTACK_APP_MODE=universal</code> (the SDK default).
+    not sample data. Use <code>NITROSTACK_APP_MODE=universal</code> for MCP Apps + OpenAI together (default is <code>openai</code>).
     For open shops only, keep <code>openNow: true</code> (or map <code>filter: open_now</code>).
     This page is <code>/widgets/preview</code> — not the static <code>widgets/preview.html</code> file.
   </p>

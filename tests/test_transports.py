@@ -89,7 +89,7 @@ def _free_port() -> int:
 
 
 async def _build_app() -> McpApplication:
-    @mcp_app(module=TransportsTestModule, server=ServerConfig(name="transports-test-server"))
+    @mcp_app(module=TransportsTestModule, server=ServerConfig(name="transports-test-server", protocol_era="legacy"))
     class _TestApp:
         pass
 
@@ -165,7 +165,9 @@ def test_http_health_and_cors():
 
         preflight = client.options(
             "/mcp",
-            headers={"Origin": "http://example.com", "Access-Control-Request-Method": "POST"},
+            headers={"Origin": "http://example.com", "Access-Control-Request-Method": "POST",
+                     "Access-Control-Request-Headers":
+                         "Mcp-Session-Id, Mcp-Name, Mcp-Method, MCP-Protocol-Version"},
         )
         assert preflight.status_code == 200
         assert preflight.headers.get("access-control-allow-origin") == "*"

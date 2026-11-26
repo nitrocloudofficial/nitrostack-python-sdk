@@ -96,7 +96,10 @@ class TestTaskSupportNegotiation:
         class ForbiddenModule:
             pass
 
-        @mcp_app(module=ForbiddenModule, server=ServerConfig(name="tasks-forbidden"))
+        @mcp_app(
+            module=ForbiddenModule,
+            server=ServerConfig(name="tasks-forbidden", protocol_era="legacy"),
+        )
         class ForbiddenApp:
             pass
 
@@ -164,7 +167,10 @@ class TestTaskWireHandlers:
             class GetModule:
                 pass
 
-            @mcp_app(module=GetModule, server=ServerConfig(name="tasks-get"))
+            @mcp_app(
+                module=GetModule,
+                server=ServerConfig(name="tasks-get", protocol_era="legacy"),
+            )
             class GetApp:
                 pass
 
@@ -203,10 +209,7 @@ class TestTaskWireHandlers:
 
         async def _run():
             app = await McpApplicationFactory.create(ListApp)
-            handler = app.mcp_server.request_handlers[types.ListTasksRequest]
-            with pytest.raises(McpError) as exc:
-                await handler(types.ListTasksRequest(method="tasks/list", params={}))
-            assert exc.value.error.code == types.METHOD_NOT_FOUND
+            assert types.ListTasksRequest not in app.mcp_server.request_handlers
 
         asyncio.run(_run())
 
@@ -226,7 +229,10 @@ class TestTaskWireHandlers:
             class CancelModule:
                 pass
 
-            @mcp_app(module=CancelModule, server=ServerConfig(name="tasks-cancel"))
+            @mcp_app(
+                module=CancelModule,
+                server=ServerConfig(name="tasks-cancel", protocol_era="legacy"),
+            )
             class CancelApp:
                 pass
 
@@ -256,7 +262,10 @@ class TestTaskWireHandlers:
         class CreateModule:
             pass
 
-        @mcp_app(module=CreateModule, server=ServerConfig(name="tasks-create"))
+        @mcp_app(
+            module=CreateModule,
+            server=ServerConfig(name="tasks-create", protocol_era="legacy"),
+        )
         class CreateApp:
             pass
 

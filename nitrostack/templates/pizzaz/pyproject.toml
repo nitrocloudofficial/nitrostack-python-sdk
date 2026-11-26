@@ -11,6 +11,9 @@ dependencies = [
     "nitrostack",
 ]
 
+[tool.setuptools]
+py-modules = ["main", "app_module"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 namespaces = true

@@ -135,8 +135,9 @@ def test_modern_stdio_rejects_initialize(monkeypatch):
             },
         )
     )
+    # Reject the handshake before it can select the legacy connection style.
     assert "error" in payload
-    assert "initialize" in payload["error"]["message"]
+    assert payload["error"]["code"] == -32601
 
 
 def test_legacy_stdio_still_answers_initialize(monkeypatch):
@@ -172,6 +173,7 @@ def test_dual_http_and_stdio_share_the_same_tools(monkeypatch):
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "Mcp-Method": "tools/list",
+                "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
             },
             json={
                 "jsonrpc": "2.0",

@@ -1,0 +1,16 @@
+from nitrostack import tool, widget, ExecutionContext
+from pydantic import BaseModel
+
+class {camel_name}Input(BaseModel):
+    # Add input parameters here
+    pass
+
+@tool(
+    name="{name}",
+    description="Implement your tool description here",
+    input_schema={camel_name}Input
+)
+@widget("{name}")
+async def {name}_handler(input: {camel_name}Input, context: ExecutionContext):
+    context.logger.info("Executing tool {name}")
+    return {{"status": "success"}}

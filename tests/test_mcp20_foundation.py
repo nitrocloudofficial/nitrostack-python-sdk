@@ -9,7 +9,6 @@ from nitrostack.protocol.constants import (
     MAX_SCHEMA_DEPTH,
 )
 from nitrostack.protocol.extensions import MCPExtensionId
-from nitrostack.protocol.layers import RuntimeLayer
 from nitrostack.protocol.version import (
     LEGACY_PROTOCOL_VERSION,
     MODERN_PROTOCOL_VERSION,
@@ -82,17 +81,6 @@ class TestDefenseInDepthConstants:
 
     def test_legacy_session_header_name(self):
         assert LEGACY_SESSION_HEADER == "Mcp-Session-Id"
-
-
-class TestRuntimeLayers:
-    def test_all_architecture_layers_defined(self):
-        layers = {layer.value for layer in RuntimeLayer}
-        assert layers == {
-            "transport_security",
-            "protocol_dispatcher",
-            "registries",
-            "task_management",
-        }
 
 
 class TestExtensions:
