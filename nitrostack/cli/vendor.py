@@ -27,6 +27,8 @@ VENDOR_REL = os.path.join("vendor", "nitrostack")
 def runtime_nitrostack_requirement() -> str:
     """PEP 508 requirement pinning at least the SDK version running this CLI."""
     return f"nitrostack>={_distribution_version()}"
+
+
 _PATH_PINS = frozenset({"./vendor/nitrostack", "-e ./vendor/nitrostack"})
 _NAMED_REQUIREMENT = re.compile(
     r"^(?:-e\s+|--editable\s+)?nitrostack"

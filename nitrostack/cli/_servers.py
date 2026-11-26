@@ -117,12 +117,8 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         if has_widgets:
             env["WIDGETS_DEV_PORT"] = str(widgets_port)
-        popen_kwargs = {
-            "env": env,
-            "cwd": os.getcwd(),
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
+        # Inherit stdout/stderr so server logs and tracebacks stay visible.
+        popen_kwargs = {"env": env, "cwd": os.getcwd()}
         if sys.platform == "win32":
             process = subprocess.Popen([sys.executable, target], **popen_kwargs)
         else:
