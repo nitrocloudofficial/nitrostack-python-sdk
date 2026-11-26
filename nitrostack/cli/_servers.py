@@ -48,14 +48,41 @@ def _skip_polling_root(root: str) -> bool:
     return any(part.startswith(".") or part in _DEV_SKIP_DIR_PARTS for part in parts)
 
 
+def _own_group(process: subprocess.Popen) -> int | None:
+    """The child's process group, only when it leads one we created.
+
+    Never return our own group (or init's): signalling it would kill this CLI,
+    and on CI the runner itself.
+    """
+    if sys.platform == "win32":
+        return None
+    pid = getattr(process, "pid", None)
+    if type(pid) is not int or pid <= 1:
+        return None
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return None
+    if pgid != pid or pgid == os.getpgrp():
+        return None
+    return pgid
+
+
+def _signal_child(process: subprocess.Popen, *, force: bool) -> None:
+    pgid = _own_group(process)
+    if pgid is not None:
+        os.killpg(pgid, signal.SIGKILL if force else signal.SIGTERM)
+    elif force:
+        process.kill()
+    else:
+        process.terminate()
+
+
 def _stop_child(process: subprocess.Popen | None) -> None:
     if process is None or process.poll() is not None:
         return
     try:
-        if sys.platform == "win32":
-            process.terminate()
-        else:
-            os.killpg(process.pid, signal.SIGTERM)
+        _signal_child(process, force=False)
     except (ProcessLookupError, OSError, AttributeError):
         try:
             process.terminate()
@@ -67,10 +94,7 @@ def _stop_child(process: subprocess.Popen | None) -> None:
     except subprocess.TimeoutExpired:
         pass
     try:
-        if sys.platform == "win32":
-            process.kill()
-        else:
-            os.killpg(process.pid, signal.SIGKILL)
+        _signal_child(process, force=True)
     except (ProcessLookupError, OSError, AttributeError):
         try:
             process.kill()

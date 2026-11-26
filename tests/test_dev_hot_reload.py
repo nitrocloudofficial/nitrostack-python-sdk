@@ -118,3 +118,19 @@ def test_dev_hot_reload_updates_tool_description(tmp_path: Path) -> None:
         if dev.poll() is None:
             dev.kill()
             dev.wait(timeout=3)
+
+def test_stop_child_never_signals_a_group_it_did_not_create(monkeypatch):
+    """A fake or non-leader process must not reach os.killpg (pid 1 is init's group)."""
+    from unittest.mock import MagicMock
+
+    from nitrostack.cli import _servers
+
+    sent = []
+    monkeypatch.setattr(_servers.os, "killpg", lambda *a: sent.append(a))
+    fake = MagicMock()
+    fake.poll.return_value = None
+    for pid in (MagicMock(), 0, 1, os.getpid()):
+        fake.pid = pid
+        _servers._stop_child(fake)
+    assert sent == []
+    assert fake.terminate.called
