@@ -139,7 +139,7 @@ nitrostack-py pack --include-env  # also pack .env files (use with caution!)
 
 ```bash
 nitrostack-py upgrade                 # move the project to the latest nitrostack on PyPI
-nitrostack-py upgrade --version 0.4.2 # move it to exactly this version
+nitrostack-py upgrade --version 0.5.0 # move it to exactly this version
 nitrostack-py upgrade --dry-run       # print the change; do not edit files
 nitrostack-py upgrade --allow-downgrade --version 0.1.0  # required to pin an older version
 

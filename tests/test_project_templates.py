@@ -83,7 +83,7 @@ def test_generated_project_lifecycle(name, kind, tmp_path):
     run([kind], project)
     if kind == "code-mode":
         run(["cleanup"], project)
-    run(["cli", "upgrade", "--version", "0.4.2"], project)
+    run(["cli", "upgrade", "--version", "0.4.2", "--allow-downgrade"], project)
     assert "No issues found" in run(["cli", "validate"], project)
     from nitrostack.cli.vendor import vendored_version
     assert vendored_version(str(project)) == "0.4.2"
