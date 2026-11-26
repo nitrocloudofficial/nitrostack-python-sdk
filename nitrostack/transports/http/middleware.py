@@ -10,6 +10,76 @@ from nitrostack.transports.headers import strip_legacy_session_headers_asgi
 from nitrostack.transports.http.constants import MCP_ACCEPT, logger
 
 
+class JsonBodyLimitMiddleware:
+    """Reject oversized JSON HTTP bodies with 413 before the MCP stack parses them."""
+
+    def __init__(self, app: ASGIApp, *, limit_bytes: int) -> None:
+        self.app = app
+        self.limit_bytes = limit_bytes
+
+    @staticmethod
+    def _json_media_type(value: bytes) -> bool:
+        media = value.decode("latin-1").split(";", 1)[0].strip().lower()
+        if media == "application/json":
+            return True
+        return media.startswith("application/") and media.endswith("+json")
+
+    @staticmethod
+    def _is_json_post(scope: Scope) -> bool:
+        if scope.get("type") != "http" or scope.get("method") != "POST":
+            return False
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"content-type" and JsonBodyLimitMiddleware._json_media_type(value):
+                return True
+        return False
+
+    async def _reject_too_large(self, scope: Scope, receive: Receive, send: Send) -> None:
+        response = JSONResponse({"error": "Payload too large"}, status_code=413)
+        await response(scope, receive, send)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not self._is_json_post(scope):
+            await self.app(scope, receive, send)
+            return
+
+        for key, value in scope.get("headers") or []:
+            if key.lower() == b"content-length":
+                try:
+                    if int(value) > self.limit_bytes:
+                        await self._reject_too_large(scope, receive, send)
+                        return
+                except ValueError:
+                    break
+
+        buffered: List[Any] = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                buffered.append(message)
+                break
+            chunk = message.get("body", b"") or b""
+            total += len(chunk)
+            if total > self.limit_bytes:
+                await self._reject_too_large(scope, receive, send)
+                return
+            buffered.append(message)
+            if not message.get("more_body", False):
+                break
+
+        replay_index = 0
+
+        async def replay_receive():
+            nonlocal replay_index
+            if replay_index < len(buffered):
+                message = buffered[replay_index]
+                replay_index += 1
+                return message
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
 class ExactEndpointSlashMiddleware:
     """Internally rewrite `/mcp` -> `/mcp/` so Starlette does not 307."""
 

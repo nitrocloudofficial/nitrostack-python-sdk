@@ -216,6 +216,17 @@ async def run_pipeline(
     container = DIContainer.get_instance()
 
     async def execute_handler_flow():
+        if args:
+            value = args[0]
+            if hasattr(value, "model_dump"):
+                context.input = value.model_dump(mode="json", by_alias=True)
+            elif isinstance(value, dict):
+                context.input = dict(value)
+            else:
+                context.input = {"value": value}
+        else:
+            context.input = {}
+
         # 1. Run Guards
         for guard_cls in guards:
             guard = container.resolve(guard_cls)

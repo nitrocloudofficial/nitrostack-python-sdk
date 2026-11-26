@@ -209,6 +209,7 @@ class ExecutionContext:
     _visibility_supported: bool = field(default=False, repr=False, compare=False)
     spillover_session_key: Optional[str] = field(default=None, repr=False)
     spillover_invalid_auth: bool = field(default=False, repr=False)
+    input: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if not self.correlation_id:

@@ -1,8 +1,6 @@
 {
   "examples/flight_booking_server.py": 582,
   "nitrostack/auth/oauth.py": 516,
-  "nitrostack/cli/main.py": 2019,
-  "nitrostack/cli/pack.py": 507,
   "nitrostack/core/app.py": 2273,
   "nitrostack/transports/http.py": 797,
   "nitrostack/widgets/route_templates.py": 870,

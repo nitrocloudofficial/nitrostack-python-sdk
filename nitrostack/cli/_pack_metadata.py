@@ -96,8 +96,12 @@ def requirements_from_project(root: str) -> List[str]:
     deps = [item.lstrip("\ufeff").strip() for item in deps if item.lstrip("\ufeff").strip()]
     has_nitrostack = any(_requirement_name(item) == "nitrostack" for item in deps)
     if not has_nitrostack and name.lower() != "nitrostack":
-        deps = ["nitrostack", *deps]
-    return deps
+        from nitrostack.cli.vendor import runtime_nitrostack_requirement
+
+        deps = [runtime_nitrostack_requirement(), *deps]
+    from nitrostack.cli.vendor import apply_runtime_nitrostack_pins
+
+    return apply_runtime_nitrostack_pins(deps)
 
 
 def write_requirements_txt(root: str, deps: Sequence[str]) -> str:

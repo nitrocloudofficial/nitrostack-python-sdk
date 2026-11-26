@@ -72,10 +72,17 @@ def _matches_gitignore(rel_posix: str, patterns: Sequence[Tuple[str, bool]]) -> 
     return ignored
 
 
-def _should_exclude(rel_posix: str, name: str, is_dir: bool, gitignore: Sequence[Tuple[str, bool]]) -> bool:
+def _should_exclude(
+    rel_posix: str,
+    name: str,
+    is_dir: bool,
+    gitignore: Sequence[Tuple[str, bool]],
+    *,
+    include_env: bool = False,
+) -> bool:
     if name == ".env.example":
         return False
-    if _is_secret_env(name):
+    if _is_secret_env(name) and not include_env:
         return True
     if name in _EXCLUDE_DIR_NAMES and is_dir:
         return True
@@ -90,7 +97,7 @@ def _should_exclude(rel_posix: str, name: str, is_dir: bool, gitignore: Sequence
     return False
 
 
-def collect_pack_files(root: str) -> List[str]:
+def collect_pack_files(root: str, *, include_env: bool = False) -> List[str]:
     """Return posix-relative paths that would be included in a pack."""
     gitignore = _load_gitignore_patterns(root)
     included: List[str] = []
@@ -103,14 +110,14 @@ def collect_pack_files(root: str) -> List[str]:
         kept_dirs = []
         for dirname in dirnames:
             child_rel = f"{rel_dir_posix}/{dirname}" if rel_dir_posix else dirname
-            if _should_exclude(child_rel, dirname, True, gitignore):
+            if _should_exclude(child_rel, dirname, True, gitignore, include_env=include_env):
                 continue
             kept_dirs.append(dirname)
         dirnames[:] = kept_dirs
 
         for filename in filenames:
             child_rel = f"{rel_dir_posix}/{filename}" if rel_dir_posix else filename
-            if _should_exclude(child_rel, filename, False, gitignore):
+            if _should_exclude(child_rel, filename, False, gitignore, include_env=include_env):
                 continue
             included.append(child_rel)
 
@@ -143,14 +150,14 @@ def _copy_selected(src_root: str, dest_root: str, files: Sequence[str]) -> None:
         shutil.copy2(src, dest)
 
 
-def _collect_staging_bytes(src_root: str) -> dict:
+def _collect_staging_bytes(src_root: str, *, include_env: bool = False) -> dict:
     contents = {}
     for dirpath, dirnames, filenames in os.walk(src_root):
         dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES and not d.endswith(".egg-info")]
         for filename in filenames:
             if any(filename.endswith(suffix) for suffix in _EXCLUDE_SUFFIXES):
                 continue
-            if _is_secret_env(filename):
+            if _is_secret_env(filename) and not include_env:
                 continue
             full = os.path.join(dirpath, filename)
             rel = os.path.relpath(full, src_root).replace("\\", "/")

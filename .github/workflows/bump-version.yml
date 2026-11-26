@@ -1,0 +1,85 @@
+name: Bump version
+
+# After a non-release PR merges to main, open (or refresh) a release PR that
+# bumps pyproject.toml + uv.lock ahead of PyPI. Merging that PR runs publish.yml.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver component to increment
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       !contains(github.event.pull_request.labels.*.name, 'release'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.pull_request.merge_commit_sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Plan and write bump
+        id: bump
+        run: |
+          set -euo pipefail
+          KIND="${{ github.event_name == 'workflow_dispatch' && inputs.bump || 'patch' }}"
+          VERSION=$(python scripts/bump_version.py --bump "$KIND" --write | tail -n 1)
+          if [ -z "$VERSION" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update release PR
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BRANCH="release/${VERSION}"
+          git checkout -B "$BRANCH"
+          git add pyproject.toml uv.lock
+          git diff --staged --quiet && { echo "No version files changed"; exit 1; }
+          git commit -m "chore(release): ${VERSION}"
+          git push --force-with-lease origin "HEAD:refs/heads/${BRANCH}"
+          gh label create release --description "Version bump / PyPI release" --color 0E8A16 --force || true
+          EXISTING=$(gh pr list --base main --head "$BRANCH" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "Updated PR #${EXISTING}"
+            exit 0
+          fi
+          gh pr create --base main --head "$BRANCH" --title "chore(release): ${VERSION}" --label release --body "$(cat <<EOF
+          ## Summary
+          - Bump SDK version to **${VERSION}** in \`pyproject.toml\` and \`uv.lock\`.
+          - Merge this PR to publish \`${VERSION}\` to PyPI (see \`publish.yml\`).
+
+          ## Test plan
+          - [ ] Version in \`pyproject.toml\` is ${VERSION} and is not already on PyPI
+          - [ ] \`uv.lock\` editable \`nitrostack\` package version matches
+          EOF
+          )"

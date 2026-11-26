@@ -1,9 +1,109 @@
 """Development and production process lifecycles."""
 
 import os
+import signal
 import sys
 import subprocess
 import time
+
+_DEV_SKIP_DIR_PARTS = frozenset(
+    {
+        "venv",
+        "env",
+        "__pycache__",
+        ".git",
+        ".pytest_cache",
+        "nitrostack.egg-info",
+        "vendor",
+        "node_modules",
+    }
+)
+_CHILD_GRACE_SECONDS = 12
+
+
+def _path_parts(path) -> list[str]:
+    return [part for part in os.path.normpath(os.fspath(path)).split(os.sep) if part]
+
+
+def _watched_project_path(path, watched_extensions: set[str]) -> bool:
+    fspath = os.fspath(path)
+    ext = os.path.splitext(fspath)[1]
+    if ext not in watched_extensions:
+        return False
+    parts = _path_parts(path)
+    basename = parts[-1] if parts else ""
+    if basename == ".env":
+        return True
+    return not any(
+        part in _DEV_SKIP_DIR_PARTS or (part.startswith(".") and part not in {".", ".env"})
+        for part in parts
+    )
+
+
+def _skip_polling_root(root: str) -> bool:
+    rel = os.path.normpath(root)
+    if rel in (".", ""):
+        return False
+    parts = [part for part in rel.split(os.sep) if part and part != "."]
+    return any(part.startswith(".") or part in _DEV_SKIP_DIR_PARTS for part in parts)
+
+
+def _own_group(process: subprocess.Popen) -> int | None:
+    """The child's process group, only when it leads one we created.
+
+    Never return our own group (or init's): signalling it would kill this CLI,
+    and on CI the runner itself.
+    """
+    if sys.platform == "win32":
+        return None
+    pid = getattr(process, "pid", None)
+    if type(pid) is not int or pid <= 1:
+        return None
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return None
+    if pgid != pid or pgid == os.getpgrp():
+        return None
+    return pgid
+
+
+def _signal_child(process: subprocess.Popen, *, force: bool) -> None:
+    pgid = _own_group(process)
+    if pgid is not None:
+        os.killpg(pgid, signal.SIGKILL if force else signal.SIGTERM)
+    elif force:
+        process.kill()
+    else:
+        process.terminate()
+
+
+def _stop_child(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    try:
+        _signal_child(process, force=False)
+    except (ProcessLookupError, OSError, AttributeError):
+        try:
+            process.terminate()
+        except Exception:
+            pass
+    try:
+        process.wait(timeout=_CHILD_GRACE_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        _signal_child(process, force=True)
+    except (ProcessLookupError, OSError, AttributeError):
+        try:
+            process.kill()
+        except Exception:
+            pass
+    try:
+        process.wait(timeout=3)
+    except Exception:
+        pass
 
 
 def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
@@ -34,34 +134,37 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
 
     def start_process():
         nonlocal process
-        if process:
-            try:
-                process.terminate()
-                process.wait(timeout=2)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
+        _stop_child(process)
         env = os.environ.copy()
         env["PYTHONPATH"] = os.path.abspath(".")
         env["PORT"] = mcp_port
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         if has_widgets:
             env["WIDGETS_DEV_PORT"] = str(widgets_port)
-        process = subprocess.Popen([sys.executable, target], env=env)
+        # Inherit stdout/stderr so server logs and tracebacks stay visible.
+        popen_kwargs = {"env": env, "cwd": os.getcwd()}
+        if sys.platform == "win32":
+            process = subprocess.Popen([sys.executable, target], **popen_kwargs)
+        else:
+            process = subprocess.Popen(
+                [sys.executable, target],
+                start_new_session=True,
+                **popen_kwargs,
+            )
 
     def cleanup():
         nonlocal process, widgets_process
-        if process:
-            try:
-                process.terminate()
-            except Exception:
-                pass
+        _stop_child(process)
+        process = None
         if widgets_process:
             try:
                 widgets_process.terminate()
+                widgets_process.wait(timeout=5)
             except Exception:
-                pass
+                try:
+                    widgets_process.kill()
+                except Exception:
+                    pass
 
     try:
         start_process()
@@ -70,17 +173,18 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
 
         def get_mtimes():
             mtimes = {}
-            for root, dirs, files in os.walk("."):
-                if any(part.startswith(".") or part in ("venv", "env", "__pycache__") for part in root.split(os.sep)):
+            for root, _, files in os.walk("."):
+                if _skip_polling_root(root):
                     continue
                 for file in files:
                     ext = os.path.splitext(file)[1]
                     if ext in watched_extensions:
                         path = os.path.join(root, file)
-                        try:
-                            mtimes[path] = os.path.getmtime(path)
-                        except Exception:
-                            pass
+                        if _watched_project_path(path, watched_extensions):
+                            try:
+                                mtimes[path] = os.path.getmtime(path)
+                            except Exception:
+                                pass
             return mtimes
 
         # Try using watchfiles for high-performance, low-CPU file monitoring
@@ -91,18 +195,13 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
             while True:
                 for changes in watch("."):
                     should_restart = False
-                    for change_type, path in changes:
-                        ext = os.path.splitext(path)[1]
-                        if ext in watched_extensions:
-                            parts = os.path.normpath(path).split(os.sep)
-                            if not any(p in parts for p in ("venv", "env", "__pycache__", ".git", ".pytest_cache", "nitrostack.egg-info")):
-                                should_restart = True
-                                break
+                    for _change_type, path in changes:
+                        if _watched_project_path(path, watched_extensions):
+                            should_restart = True
+                            break
                     if should_restart:
                         print("File changes detected! Restarting server...")
                         start_process()
-
-                time.sleep(0.5)
                 if process and process.poll() is not None:
                     print("Server process exited. Waiting for file changes to restart...")
 
@@ -132,6 +231,7 @@ def run_dev(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
     except KeyboardInterrupt:
         print("\nStopping development server...")
         cleanup()
+
 
 def run_start(port=None, widget=None, *, _popen_npm, _resolve_runtime_ports):
     target = "main.py"

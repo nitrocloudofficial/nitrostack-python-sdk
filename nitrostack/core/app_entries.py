@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Pattern, Type
+from typing import Any, Callable, Dict, List, Optional, Pattern, Type
 
 from pydantic import BaseModel
 
@@ -19,6 +19,8 @@ class _ToolEntry:
     instance: Any
     method: Callable
     component: Optional[Component] = None
+    input_json_schema: Optional[Dict[str, Any]] = None
+    has_spillover: Optional[bool] = None
 
 
 @dataclass

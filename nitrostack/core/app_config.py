@@ -118,6 +118,7 @@ class ServerConfig:
     max_sessions: Optional[int] = None
     session_timeout_ms: Optional[int] = None
     json_response: bool = False
+    json_body_limit: Optional[str | int] = None
     extensions: Optional[Dict[str, str]] = None
     # Subtitle on the `GET /` documentation page.
     description: Optional[str] = None

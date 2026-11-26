@@ -21,6 +21,12 @@ from nitrostack.cli.main import OFFICIAL_TEMPLATES, _prompt_template, _resolve_t
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "tests" / "support" / "project_templates_probe.py"
 TEMPLATES = [("python-enterprise-search", "enterprise-search"), ("python-code-mode", "code-mode")]
+PACK_TEMPLATES = [
+    ("python-starter", "starter"),
+    ("python-pizzaz", "pizzaz"),
+    ("python-oauth", "flight-booking"),
+    *TEMPLATES,
+]
 
 
 def run(args, cwd, *, python=None, installed=False):
@@ -54,6 +60,17 @@ def test_new_templates_in_cli_help(tmp_path):
     assert all(name in output for name, _ in TEMPLATES)
 
 
+@pytest.mark.parametrize("name,kind", PACK_TEMPLATES)
+def test_packed_wheel_includes_main_and_app_module(name, kind, tmp_path):
+    run(["cli", "init", "pack-demo", "--template", name, "--skip-install"], tmp_path)
+    project = tmp_path / "pack-demo"
+    run(["cli", "pack"], project)
+    [wheel] = (project / "dist").glob("*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        assert "main.py" in names and "app_module.py" in names
+
+
 @pytest.mark.parametrize("name,kind", TEMPLATES)
 def test_generated_project_lifecycle(name, kind, tmp_path):
     output = run(["cli", "init", "demo", "--template", name, "--skip-install"], tmp_path)
@@ -66,10 +83,11 @@ def test_generated_project_lifecycle(name, kind, tmp_path):
     run([kind], project)
     if kind == "code-mode":
         run(["cleanup"], project)
-    run(["cli", "upgrade", "--version", "0.3.2"], project)
+    run(["cli", "upgrade", "--version", "0.4.2", "--allow-downgrade"], project)
     assert "No issues found" in run(["cli", "validate"], project)
+    from nitrostack.cli.vendor import vendored_version
+    assert vendored_version(str(project)) == "0.4.2"
     requirements = (project / "requirements.txt").read_text()
-    assert "nitrostack==0.3.2" in requirements
     if kind == "code-mode":
         assert "quickjs>=1.19.4" in requirements
         assert "quickjs>=1.19.4" in (project / "pyproject.toml").read_text()
